@@ -8,6 +8,7 @@ import SongSelection from "./SongSelection";
 import PromptModal from "./PromptModal";
 import WaitingScreen from "./WaitingScreen";
 import RatingScreen from "./RatingScreen";
+import SnippetSelector from "../../components/SnippetSelector";
 
 /**
  * Round component manages the game round flow including song selection and rating phases.
@@ -32,6 +33,8 @@ export default function Round() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchError, setSearchError] = useState(null);
   const [showPromptModal, setShowPromptModal] = useState(false);
+  const [selectedTrack, setSelectedTrack] = useState(null);
+  const [showSnippetSelector, setShowSnippetSelector] = useState(false);
   
   // Submission Tracking State
   const [hasSongSubmitted, setHasSongSubmitted] = useState(false);
@@ -332,10 +335,19 @@ export default function Round() {
   // =============
 
   /**
-   * Handles song selection and submission
+   * Handles initial song selection - shows snippet selector
    * @param {Object} track - The selected track object
    */
   const handleSelectSong = (track) => {
+    setSelectedTrack(track);
+    setShowSnippetSelector(true);
+  };
+
+  /**
+   * Handles final song submission with snippet times
+   * @param {Object} trackWithSnippet - Track object with snippet times
+   */
+  const handleConfirmSongWithSnippet = (trackWithSnippet) => {
     if (!socket || !isConnected) {
       if (!isTransitioning) {
         if (!window.location.pathname.includes('/lobby/')) {
@@ -347,17 +359,20 @@ export default function Round() {
 
     socket.emit("song-selected", {
       gameCode,
-      trackId: track.id,
+      trackId: trackWithSnippet.id,
       trackDetails: {
-        name: track.name,
-        artist: track.artists[0].name,
-        albumCover: track.album.images[0].url,
-        previewUrl: track.preview_url,
+        name: trackWithSnippet.name,
+        artist: trackWithSnippet.artists[0].name,
+        albumCover: trackWithSnippet.album.images[0].url,
+        previewUrl: trackWithSnippet.preview_url,
+        snippet: trackWithSnippet.snippet
       },
     });
 
     setHasSongSubmitted(true);
     setIsSongSelectionView(false);
+    setShowSnippetSelector(false);
+    setSelectedTrack(null);
   };
 
   /**
@@ -463,6 +478,17 @@ export default function Round() {
         <PromptModal
           currentPrompt={state.currentPrompt}
           onClose={() => setShowPromptModal(false)}
+        />
+      )}
+
+      {showSnippetSelector && selectedTrack && (
+        <SnippetSelector
+          track={selectedTrack}
+          onConfirm={handleConfirmSongWithSnippet}
+          onCancel={() => {
+            setShowSnippetSelector(false);
+            setSelectedTrack(null);
+          }}
         />
       )}
     </div>

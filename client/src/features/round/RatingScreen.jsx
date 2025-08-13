@@ -33,14 +33,9 @@ const RatingScreen = ({
   
   const videoId = getYouTubeVideoId(songToRate?.previewUrl);
   
-  // Debug: Log when RatingScreen renders
-  console.log('RatingScreen rendered', {
-    currentPrompt,
-    songToRate,
-    videoId,
-    currentIndex,
-    totalSongs
-  });
+  // Extract snippet times if available
+  const startTime = songToRate?.snippet?.startTime || 0;
+  const endTime = songToRate?.snippet?.endTime || 0;
 
   /**
    * Handles clicking a rating record
@@ -76,24 +71,17 @@ const RatingScreen = ({
         <div className="mb-2 sm:mb-4 text-white text-center">
           <p>Rating Song {currentIndex + 1} of {totalSongs}</p>
         </div>
-        {/* Album cover image */}
-        {songToRate.albumCover && (
-          <img
-            src={songToRate.albumCover}
-            alt={songToRate.name}
-            className="w-[140px] h-[140px] sm:w-[200px] sm:h-[200px] rounded-lg shadow-md object-cover mb-2 sm:mb-4"
-            style={{ maxWidth: '80vw', maxHeight: '22vh' }}
-          />
-        )}
+        {/* Removed redundant album cover - YouTube player shows thumbnail */}
 
         {/* YouTube Player */}
         {videoId && (
-          <div className="mb-2 sm:mb-4 w-full max-w-xs flex justify-center" style={{ height: '200px' }}>
+          <div className="mb-4 sm:mb-6 w-full max-w-md flex justify-center" style={{ height: '260px' }}>
             <YouTubePlayer
               videoId={videoId}
               autoplay={false}
-              onReady={(event) => console.log('YouTube player ready:', event)}
-              onStateChange={(event) => console.log('YouTube player state:', event)}
+              startTime={startTime}
+              endTime={endTime}
+              loop={true}
             />
           </div>
         )}
