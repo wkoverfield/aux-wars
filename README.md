@@ -6,61 +6,56 @@ A multiplayer music game where you and your friends compete to find the perfect 
 
 1. **Join or Host**: Create a new game or join with a friend's code  
 2. **Get the Prompt**: Each round starts with a fun prompt like "This song makes me feel like the main character"  
-3. **Pick Your Song**: Search Spotify and select the perfect track  
+3. **Pick Your Song**: Search YouTube for the perfect track  
 4. **Rate & Compete**: Rate other players' songs on a scale of 1-5 records  
 5. **Win**: Collect the most records to become the ultimate music master!  
 
 ## ✨ Features
 
 - 🎯 Real-time multiplayer gameplay  
-- 🎵 Spotify integration for seamless song selection  
+- 🎵 YouTube integration for song selection  
 - 🎨 Beautiful, responsive UI  
-- 🎮 Guest mode for non-Spotify users  
+- 🎮 No user authentication required  
 - ⚡ Quick and easy setup  
 - 🎲 Customizable game settings  
 
 ## 🚀 Current Status
 
-Because of Spotify API limits (you must whitelist users, with a 25-user max), **Aux Wars is no longer hosted online**.  
-However, you can still play it locally with your friends by following the guide below!  
+**Aux Wars now uses YouTube API** for music search and playback, removing the need for user authentication!  
+No more whitelisting or user limits - anyone can play!  
 
-## 🎧 How to Play with Your Own Spotify API Token
+## 🎧 How to Set Up and Play
 
-Since you need your own Spotify API token (Client ID) to play:
+1. **Get a YouTube API Key**  
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)  
+   - Create a new project or select existing one  
+   - Enable the YouTube Data API v3  
+   - Create credentials (API Key)  
+   - Copy your API key  
 
-1. **Create a Spotify Developer Account**  
-   Go to [developer.spotify.com](https://developer.spotify.com/) and log in with your Spotify account.
-
-2. **Create a New Application**  
-   - Go to your [Spotify Dashboard](https://developer.spotify.com/dashboard/applications)  
-   - Click **Create an App**  
-   - Add `http://localhost:5173/callback` as a Redirect URI (you can add more later if hosting elsewhere).  
-   - Copy your **Client ID**  
-
-3. **Clone & Set Up the Repo**  
+2. **Clone & Set Up the Repo**  
 ```bash
 git clone https://github.com/yourusername/aux-wars.git
 cd aux-wars
 npm run install-all
-````
-
-4. **Configure Your Environment**
-   Create a `.env` file in the `/client` directory with this:
-
-```
-VITE_SPOTIFY_CLIENT_ID=your_client_id_here
-VITE_SPOTIFY_REDIRECT_URI=http://localhost:5173/callback
 ```
 
-5. **Run Locally**
+3. **Configure Your Environment**
+   Create a `.env` file in the `/client` directory:
+
+```
+VITE_YOUTUBE_API_KEY=your_youtube_api_key_here
+```
+
+4. **Run Locally**
 
 ```bash
 npm run start
 ```
 
-Then open `http://localhost:5173` in your browser and start playing with your friends!
+Then open `http://localhost:5173` in your browser and start playing!
 
-**Tip:** You can share this repo with your friends and have them do the same with their own Spotify account, so they can also host games.
+**Note:** YouTube API has a generous free quota (10,000 units per day), which is plenty for personal use.
 
 ## 🛠️ Development
 
@@ -85,7 +80,7 @@ npm test        # Run tests
 
 * Node.js v18+
 * npm v9+
-* Spotify Premium account (required for playback)
+* YouTube API Key (free)
 * Modern web browser
 
 ## 🤝 Contributing
@@ -105,7 +100,7 @@ We love contributions! Whether it's:
 
 ## 🙏 Acknowledgments
 
-* Spotify Web Playback SDK
+* YouTube API for music search
 * Socket.IO for real-time communication
 * React & Vite for the frontend
 * All our amazing contributors!

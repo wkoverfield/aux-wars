@@ -7,7 +7,7 @@ import SettingsModal from "../../components/SettingsModal";
 import { useGame } from "../../services/GameContext";
 import logo from "../../assets/aux-wars-logo.svg";
 import settingsIcon from "../../assets/settings-btn.svg";
-import { isTokenValid } from "../../services/spotifyApi";
+// No authentication needed for YouTube
 
 /**
  * Lobby component manages the game lobby where players can join, set their names,
@@ -30,16 +30,10 @@ export default function Lobby() {
   const allPlayersReady = players.every((player) => player.isReady);
   const isConnected = useSocketConnection();
 
-  // Check token validity on mount and redirect if invalid
+  // Check socket connection
   useEffect(() => {
-    if (!isTokenValid()) {
-      console.log("No valid Spotify token found in lobby, redirecting to login...");
-      navigate("/login");
-      return;
-    }
-
     if (!socket) {
-      navigate("/lobby");
+      navigate("/");
       return;
     }
 

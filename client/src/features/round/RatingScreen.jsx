@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import record from '../../assets/record.svg';
 import SearchBar from '../../components/SearchBar';
-import SpotifyPlayer from 'react-spotify-web-playback';
+import YouTubePlayer from '../../components/YouTubePlayer';
 
 /**
  * RatingScreen component provides an interface for rating songs during the game.
@@ -23,21 +23,24 @@ const RatingScreen = ({
   totalSongs 
 }) => {
   const [selectedRating, setSelectedRating] = useState(-1);
-  // Get the Spotify token from localStorage
-  const spotifyToken = localStorage.getItem('spotify_access_token');
-
-  // Debug: Log when RatingScreen renders and with what props
+  
+  // Extract YouTube video ID from preview URL
+  const getYouTubeVideoId = (url) => {
+    if (!url) return null;
+    const match = url.match(/embed\/([a-zA-Z0-9_-]{11})/);
+    return match ? match[1] : null;
+  };
+  
+  const videoId = getYouTubeVideoId(songToRate?.previewUrl);
+  
+  // Debug: Log when RatingScreen renders
   console.log('RatingScreen rendered', {
     currentPrompt,
     songToRate,
-    spotifyToken,
+    videoId,
     currentIndex,
     totalSongs
   });
-
-  // Construct a valid Spotify URI from trackId if uri is missing
-  const trackUri = songToRate?.uri || (songToRate?.trackId ? `spotify:track:${songToRate.trackId}` : null);
-  console.log('Using trackUri for SpotifyPlayer:', trackUri);
 
   /**
    * Handles clicking a rating record
@@ -83,30 +86,14 @@ const RatingScreen = ({
           />
         )}
 
-        {/* Spotify Web Playback Player */}
-        {spotifyToken && trackUri && (
-          <div className="mb-2 sm:mb-4 w-full max-w-xs flex justify-center">
-            <SpotifyPlayer
-              token={spotifyToken}
-              uris={[trackUri]}
-              callback={state => console.log('SpotifyPlayer callback:', state)}
-              showSaveIcon={false}
-              hideAttribution={true}
-              hideCoverArt={true}
-              styles={{
-                bgColor: 'transparent',
-                color: '#fff',
-                trackArtistColor: '#ccc',
-                trackNameColor: '#fff',
-                loaderColor: '#fff',
-                sliderColor: '#1db954',
-                activeColor: '#fff',
-                height: 56,
-                sliderHeight: 2,
-                sliderTrackBorderRadius: 2,
-              }}
-              layout="compact"
-              initialVolume={0.7}
+        {/* YouTube Player */}
+        {videoId && (
+          <div className="mb-2 sm:mb-4 w-full max-w-xs flex justify-center" style={{ height: '200px' }}>
+            <YouTubePlayer
+              videoId={videoId}
+              autoplay={false}
+              onReady={(event) => console.log('YouTube player ready:', event)}
+              onStateChange={(event) => console.log('YouTube player state:', event)}
             />
           </div>
         )}

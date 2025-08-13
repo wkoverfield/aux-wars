@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useGame } from "../../services/GameContext";
 import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
-import { searchSpotifyTracks, isTokenValid, getTokenDebugInfo } from "../../services/spotifyApi";
+import { searchYouTubeMusic } from "../../services/youtubeApi";
 import RoundStart from "./RoundStart";
 import SongSelection from "./SongSelection";
 import PromptModal from "./PromptModal";
@@ -53,20 +53,12 @@ export default function Round() {
   // =======
 
   /**
-   * Checks token validity and redirects if invalid
+   * No authentication needed for YouTube
    */
   useEffect(() => {
-    if (!isTokenValid()) {
-      console.log("No valid Spotify token found in round, redirecting to login...");
-      console.log("Token debug info:", getTokenDebugInfo());
-      navigate("/login");
-      return;
-    }
-    // Make debug info available globally for easier debugging
-    if (typeof window !== 'undefined') {
-      window.spotifyTokenDebug = getTokenDebugInfo;
-    }
-  }, [navigate]);
+    // YouTube doesn't require authentication
+    console.log("Using YouTube API - no authentication required");
+  }, []);
 
   /**
    * Redirects to lobby if not connected to socket
@@ -153,7 +145,7 @@ export default function Round() {
       }
     });
 
-    socket.on("rating-update", ({ submitted, total, songId }) => {
+    socket.on("rating-update", ({ submitted, total }) => {
       setRatingSubmittedCount(submitted);
       setTotalPlayers(total);
     });
@@ -246,29 +238,28 @@ export default function Round() {
     const delayDebounce = setTimeout(async () => {
       try {
         setSearchError(null); // Clear any previous errors
-        const result = await searchSpotifyTracks(searchTerm);
+        const result = await searchYouTubeMusic(searchTerm);
         
         // Check if the result is an error object
         if (result?.error) {
           console.error(`Search error: ${result.error}`, result.message || '');
           
           switch (result.error) {
-            case "refresh_revoked":
-            case "auth_failed":
-            case "token_refresh_failed":
-              console.log("Authentication issue, redirecting to login...");
-              navigate("/login", { replace: true });
-              return;
-              
-            case "forbidden":
-              console.error("Spotify permissions issue - user may need to re-authorize");
-              setSearchError("Permission denied. Please re-login to Spotify.");
+            case "missing_api_key":
+              console.error("YouTube API key not configured");
+              setSearchError("YouTube API key not configured. Please check setup.");
               setSearchResults([]);
               return;
               
-            case "rate_limited":
-              console.warn("Rate limited by Spotify - please wait before searching again");
-              setSearchError("Too many requests. Please wait a moment and try again.");
+            case "quota_exceeded":
+              console.error("YouTube API quota exceeded");
+              setSearchError("API quota exceeded. Please try again later.");
+              setSearchResults([]);
+              return;
+              
+            case "invalid_request":
+              console.error("Invalid YouTube search request");
+              setSearchError("Invalid search request. Please try again.");
               setSearchResults([]);
               return;
               
@@ -405,9 +396,7 @@ export default function Round() {
   // Render Logic
   // ===========
 
-  if (!isTokenValid()) {
-    return null;
-  }
+  // No authentication check needed for YouTube
 
   if (!isConnected && !isTransitioning) {
     return null;

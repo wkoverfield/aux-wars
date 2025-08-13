@@ -5,12 +5,12 @@ import HowToPlayModal from "../../components/HowToPlayModal";
 import DevBtn from "../../components/DevBtn";
 import { useNavigate } from "react-router-dom";
 import { useSocket } from "../../services/SocketProvider";
-import { isTokenValid } from "../../services/spotifyApi";
+// No authentication needed for YouTube
 
 /**
  * Home component serves as the landing page for the game.
  * Provides options to host a new game or join an existing one.
- * Requires Spotify login for both options.
+ * No authentication required with YouTube API.
  * 
  * @returns {JSX.Element} Rendered component
  */
@@ -21,28 +21,18 @@ export default function Home() {
   const [isHosting, setIsHosting] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
 
-  // Check token validity on mount and redirect if invalid
-  useEffect(() => {
-    if (!isTokenValid()) {
-      console.log("No valid Spotify token found, redirecting to login...");
-      navigate("/login");
-    }
-  }, [navigate]);
+  // No authentication check needed for YouTube
 
   /**
    * Handles hosting a new game.
-   * Requires valid Spotify token.
+   * Creates a new game room.
    * Emits host-game event and navigates to lobby on success.
    * Disables hosting button while request is in progress.
    */
   const handleHostGame = () => {
     if (!socket || isHosting) return;
     
-    if (!isTokenValid()) {
-      console.log("Token invalid during host game, redirecting to login...");
-      navigate("/login");
-      return;
-    }
+    // No authentication check needed
     
     setIsHosting(true);
     socket.emit("host-game", (response) => {
@@ -56,7 +46,7 @@ export default function Home() {
 
   /**
    * Handles joining an existing game.
-   * Requires valid Spotify token.
+   * Creates a new game room.
    * Validates game code and emits join-game event.
    * Shows error message if join fails.
    */
@@ -66,11 +56,7 @@ export default function Home() {
       return;
     }
 
-    if (!isTokenValid()) {
-      console.log("Token invalid during join game, redirecting to login...");
-      navigate("/login");
-      return;
-    }
+    // No authentication check needed
     
     socket.emit("join-game", { gameCode: joinCode.trim() }, (response) => {
       if (response.success) {
@@ -81,10 +67,7 @@ export default function Home() {
     });
   };
 
-  // If no valid token, don't render the main content
-  if (!isTokenValid()) {
-    return null;
-  }
+  // No authentication check needed for YouTube
 
   return (
     <div className="home h-svh flex flex-col items-center relative z-20">

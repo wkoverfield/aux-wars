@@ -10,7 +10,7 @@ import Song from "../../components/Song";
 import SearchBar from "../../components/SearchBar";
 import recordLogo from "../../components/record-logo.svg";
 import nextIcon from "../../assets/next-icon.svg";
-import { isTokenValid } from "../../services/spotifyApi";
+// No authentication needed for YouTube
 
 /**
  * RoundWinner component displays the results of a completed round.
@@ -33,20 +33,14 @@ export default function RoundWinner() {
   // Check if this is the final round
   const isFinalRound = currentRound >= numberOfRounds;
 
-  // Check token validity on mount and redirect if invalid
+  // Set up game transition
   useEffect(() => {
-    if (!isTokenValid()) {
-      console.log("No valid Spotify token found in round winner, redirecting to login...");
-      navigate("/login");
-      return;
-    }
-
     setGameTransition(true);
     const timer = setTimeout(() => {
       setGameTransition(false);
     }, 2000);
     return () => clearTimeout(timer);
-  }, [setGameTransition, navigate]);
+  }, [setGameTransition]);
 
   // Handle component mount transition
   useEffect(() => {
