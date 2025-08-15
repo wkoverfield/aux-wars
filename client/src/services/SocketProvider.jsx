@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from '../contexts/ToastContext';
 
 /**
  * SocketContext provides socket.io connection management for the application.
@@ -10,9 +11,6 @@ const SocketContext = createContext(null);
 
 // Get the server URL from environment variables or use a default
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
-
-// Create a singleton socket instance
-let socketInstance = null;
 
 // Track if we're currently transitioning between game phases
 let isInGameTransition = false;
@@ -27,6 +25,7 @@ export function SocketProvider({ children }) {
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const ignoreDisconnectsUntil = useRef(0);
 
   /**
@@ -42,89 +41,70 @@ export function SocketProvider({ children }) {
   };
 
   useEffect(() => {
-    // Use existing socket instance if available
-    if (!socketInstance) {
-      console.log('Creating new socket instance');
-      socketInstance = io(SERVER_URL, {
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        timeout: 10000,
-        transports: ['websocket'],
-        forceNew: false,
-        autoConnect: true
-      });
+    
+    // Create new socket instance
+    const newSocket = io(SERVER_URL, {
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 10000,
+      transports: ['polling', 'websocket'],
+      path: '/socket.io/',
+      reconnection: true,
+      reconnectionDelayMax: 5000
+    });
+    
 
-      // Set up socket event listeners
-      socketInstance.on('connect', () => {
-        console.log('Socket connected successfully');
-        setIsConnected(true);
-      });
+    // Set up socket event listeners
+    newSocket.on('connect', () => {
+      setIsConnected(true);
+    });
+    
+    newSocket.on('connecting', () => {
+      // Connection in progress
+    });
 
-      socketInstance.on('connect_error', (error) => {
-        console.error('Socket connection error:', error);
+    newSocket.on('connect_error', (error) => {
+      setIsConnected(false);
+      console.error('Connection failed:', error.message);
+    });
+    
+    newSocket.on('connect_timeout', () => {
+      setIsConnected(false);
+    });
+
+    newSocket.on('disconnect', (reason) => {
         setIsConnected(false);
         
         // Don't redirect during game phase transitions
         if (isInGameTransition || Date.now() < ignoreDisconnectsUntil.current) {
-          console.log('Ignoring connect error during game transition');
-          return;
-        }
-        
-        // Only redirect to lobby if we're not in a game
-        if (!window.location.pathname.includes('/lobby/')) {
-          console.log('Redirecting to lobby due to connection error');
-          navigate('/lobby', { replace: true });
-        }
-      });
-
-      socketInstance.on('disconnect', (reason) => {
-        console.log('Socket disconnected:', reason);
-        setIsConnected(false);
-        
-        // Don't redirect during game phase transitions
-        if (isInGameTransition || Date.now() < ignoreDisconnectsUntil.current) {
-          console.log('Ignoring disconnect during game transition');
           return;
         }
         
         // Only redirect on unexpected disconnects and if we're not in a game
         if ((reason === 'io server disconnect' || reason === 'transport close') 
             && !window.location.pathname.includes('/lobby/')) {
-          console.log('Redirecting to lobby due to disconnect');
           navigate('/lobby', { replace: true });
         }
       });
 
-      socketInstance.on('reconnect', (attemptNumber) => {
-        console.log('Socket reconnected after', attemptNumber, 'attempts');
-        setIsConnected(true);
-      });
+    newSocket.on('reconnect', () => {
+      setIsConnected(true);
+    });
+    
+    newSocket.on('reconnect_attempt', () => {
+      // Attempting to reconnect
+    });
 
-      socketInstance.on('reconnect_error', (error) => {
-        console.error('Socket reconnection error:', error);
-        setIsConnected(false);
-      });
+    newSocket.on('reconnect_error', () => {
+      setIsConnected(false);
+    });
 
-      socketInstance.on('reconnect_failed', () => {
-        console.error('Socket reconnection failed');
-        setIsConnected(false);
-        
-        // Don't redirect during game phase transitions
-        if (isInGameTransition || Date.now() < ignoreDisconnectsUntil.current) {
-          console.log('Ignoring reconnect failure during game transition');
-          return;
-        }
-        
-        // Only redirect if we're not in a game
-        if (!window.location.pathname.includes('/lobby/')) {
-          console.log('Redirecting to lobby due to reconnection failure');
-          navigate('/lobby', { replace: true });
-        }
-      });
-      
-      // Listen for game phase transitions
-      socketInstance.on('game-phase-updated', ({ phase }) => {
-        console.log('Game phase updated:', phase);
+    newSocket.on('reconnect_failed', () => {
+      setIsConnected(false);
+    });
+    
+    // Listen for game phase transitions
+    newSocket.on('game-phase-updated', () => {
         setGameTransition(true);
         // Reset transition flag after a delay
         setTimeout(() => {
@@ -132,45 +112,19 @@ export function SocketProvider({ children }) {
         }, 3000);
       });
       
-      // Listen for game errors
-      socketInstance.on('game-error', ({ message }) => {
-        console.error('Game error:', message);
-        
-        // Show alert with the error message
-        alert(message);
-        
-        // No need to navigate - the phase update will handle that if needed
-      });
-    } else {
-      // If we have an existing socket instance, check its connection state
-      console.log('Using existing socket instance');
-      setIsConnected(socketInstance.connected);
-    }
+    // Listen for game errors
+    newSocket.on('game-error', ({ message }) => {
+      showToast(message, 'error');
+    });
 
-    setSocket(socketInstance);
+    setSocket(newSocket);
 
-    // Cleanup on unmount - don't close the socket, just remove specific listeners
+    // Cleanup on unmount
     return () => {
-      if (socketInstance) {
-        socketInstance.off('connect');
-        socketInstance.off('connect_error');
-        socketInstance.off('disconnect');
-        socketInstance.off('reconnect');
-        socketInstance.off('reconnect_error');
-        socketInstance.off('reconnect_failed');
-        socketInstance.off('game-phase-updated');
-        socketInstance.off('game-error');
-      }
+      newSocket.removeAllListeners();
+      newSocket.disconnect();
     };
-  }, [navigate]);
-
-  // Add a connection check effect
-  useEffect(() => {
-    if (socket && !isConnected) {
-      console.log('Socket exists but not connected, attempting to connect...');
-      socket.connect();
-    }
-  }, [socket, isConnected]);
+  }, []); // Remove navigate dependency to avoid reconnects on navigation
 
   const value = {
     socket,

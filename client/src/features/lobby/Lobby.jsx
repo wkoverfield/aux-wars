@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useSocket, useSocketConnection } from "../../services/SocketProvider";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import PlayerList from "../../components/PlayerList";
 import SettingsModal from "../../components/SettingsModal";
 import { useGame } from "../../services/GameContext";
+import { useSession } from "../../hooks/useSession";
+import { useToast } from "../../contexts/ToastContext";
 import logo from "../../assets/aux-wars-logo.svg";
 import settingsIcon from "../../assets/settings-btn.svg";
-// No authentication needed for YouTube
 
 /**
  * Lobby component manages the game lobby where players can join, set their names,
@@ -20,73 +21,109 @@ export default function Lobby() {
   const navigate = useNavigate();
   const { gameCode: routeGameCode } = useParams();
   const { dispatch } = useGame();
+  const { session, createSession, updateSession, clearSession } = useSession();
+  const { showToast } = useToast();
   const [players, setPlayers] = useState([]);
   const [gameCode, setGameCode] = useState(routeGameCode || "");
-  const [name, setName] = useState("");
+  const [name, setName] = useState(session?.playerName || "");
   const [isReady, setIsReady] = useState(false);
   const [isHost, setIsHost] = useState(false);
   const [animateInput, setAnimateInput] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const allPlayersReady = players.every((player) => player.isReady);
   const isConnected = useSocketConnection();
+  const hasJoinedGame = useRef(false);
 
-  // Check socket connection
+  // Join game only once when component mounts
+  useEffect(() => {
+    if (!socket || hasJoinedGame.current) {
+      return;
+    }
+
+    // Check if we have a valid session and are already joined
+    if (session && session.gameCode === routeGameCode) {
+      hasJoinedGame.current = true;
+      setGameCode(routeGameCode);
+      setName(session.playerName || "");
+      // We've already joined from Home, no need to rejoin
+      return;
+    }
+
+    const joinGame = (code, initialName = "") => {
+      const playerId = session?.playerId || crypto.randomUUID();
+      
+      socket.emit("join-game", { gameCode: code, name: initialName, playerId }, (response) => {
+        if (!response.success) {
+          navigate("/");
+        } else {
+          // Create or update session
+          createSession({
+            playerId: response.playerId || playerId,
+            gameCode: code,
+            playerName: initialName,
+            lastPhase: 'lobby'
+          });
+          
+          if (response.settings) {
+            // Apply the game settings from the host
+            dispatch({ type: "SET_ROUNDS", payload: response.settings.numberOfRounds });
+            dispatch({ type: "SET_ROUND_LENGTH", payload: response.settings.roundLength });
+            dispatch({ type: "SET_SELECTED_PROMPTS", payload: response.settings.selectedPrompts });
+          }
+          
+          hasJoinedGame.current = true;
+        }
+      });
+    };
+
+    if (!routeGameCode) {
+      // This shouldn't happen since we join from Home now
+      navigate("/");
+    } else {
+      // Join existing game - but this should already be done from Home
+      setGameCode(routeGameCode);
+      joinGame(routeGameCode, name);
+    }
+  }, [socket, routeGameCode, navigate, session, createSession, dispatch, name]);
+
+  // Set up socket event listeners
   useEffect(() => {
     if (!socket) {
       navigate("/");
       return;
     }
 
-    /**
-     * Handles joining a game with the given code
-     * @param {string} code - Game code to join
-     */
-    const joinGame = (code) => {
-      socket.emit("join-game", { gameCode: code, name }, (response) => {
-        if (!response.success) {
-          console.error("Join failed:", response.message);
-          navigate("/lobby");
-        }
-      });
-    };
-
-    if (!routeGameCode) {
-      // Host new game
-      socket.emit("host-game", (response) => {
-        if (response.success) {
-          setGameCode(response.gameCode);
-          joinGame(response.gameCode);
-        } else {
-          console.error("Failed to host game");
-          navigate("/lobby");
-        }
-      });
-    } else {
-      // Join existing game
-      setGameCode(routeGameCode);
-      joinGame(routeGameCode);
-    }
-
     // Set up event listener for player updates
-    socket.on("update-players", (updatedPlayers) => setPlayers(updatedPlayers));
+    const handleUpdatePlayers = (updatedPlayers) => setPlayers(updatedPlayers);
+    socket.on("update-players", handleUpdatePlayers);
 
     // Cleanup function to remove event listeners
     return () => {
-      socket.off("update-players");
+      socket.off("update-players", handleUpdatePlayers);
     };
-  }, [socket, routeGameCode, navigate, name]);
+  }, [socket, navigate]);
 
   // Update host status when players change
   useEffect(() => {
     const currentPlayer = players.find((player) => player.id === socket?.id);
-    if (currentPlayer) setIsHost(currentPlayer.isHost);
+    if (currentPlayer) {
+      setIsHost(currentPlayer.isHost);
+      // Don't sync ready state from server to avoid infinite loops
+      // Local state should be the source of truth for user-controlled actions
+    }
   }, [players, socket]);
 
   // Update player's name and ready status
   useEffect(() => {
-    if (gameCode)
+    // Always emit player updates when name or ready status changes
+    if (gameCode && socket) {
       socket.emit("update-player-name", { gameCode, name, isReady });
-  }, [name, isReady, gameCode, socket]);
+      // Update session with new name
+      if (session && name !== session.playerName) {
+        updateSession({ playerName: name });
+      }
+    }
+  }, [name, isReady]);
 
   // Listen for game settings updates from the server
   useEffect(() => {
@@ -105,21 +142,17 @@ export default function Lobby() {
     return () => socket.off("game-settings-updated");
   }, [socket, dispatch]);
 
-  // Listen for phase updates to enforce correct routing
+  // Listen for phase updates
   useEffect(() => {
     if (!socket) return;
     socket.on("game-phase-updated", ({ phase }) => {
-      if (phase !== "lobby") {
-        // When phase is "roundStart", navigate to the round screen.
-        if (phase === "roundStart") {
-          navigate(`/lobby/${gameCode}/round`, { replace: true });
-        }
-      }
+      // GameRouteGuard will handle navigation based on phase
+      dispatch({ type: "SET_PHASE", payload: phase });
     });
     return () => socket.off("game-phase-updated");
-  }, [socket, gameCode, navigate]);
+  }, [socket, dispatch]);
 
-  // Listen for "game-started" event, update current prompt, and navigate.
+  // Listen for "game-started" event and update current prompt
   useEffect(() => {
     if (!socket) return;
     socket.on("game-started", (data = {}) => {
@@ -127,10 +160,10 @@ export default function Lobby() {
       if (prompt) {
         dispatch({ type: "SET_CURRENT_PROMPT", payload: prompt });
       }
-      navigate(`/lobby/${gameCode}/round`, { replace: true });
+      // Navigation will be handled by phase update
     });
     return () => socket.off("game-started");
-  }, [socket, gameCode, navigate, dispatch]);
+  }, [socket, dispatch]);
 
   /**
    * Handles leaving the game and returning to home
@@ -138,6 +171,7 @@ export default function Lobby() {
   const handleLeaveGame = () => {
     if (gameCode) {
       socket.emit("leave-game", { gameCode });
+      clearSession(); // Clear the session when leaving
       navigate("/lobby", { replace: true });
     }
   };
@@ -152,24 +186,23 @@ export default function Lobby() {
    */
   const handleReady = () => {
     if (!name.trim()) {
-      alert("Please set your nickname before readying up.");
+      showToast("Please set your nickname before readying up.", "warning");
       return;
     }
     setIsReady((prev) => !prev);
-    socket.emit("update-player-name", { gameCode, name, isReady: !isReady });
+    // The useEffect will handle emitting the update
   };
 
   /**
    * Handles starting the game with validation checks
    */
   const handleStartGame = () => {
+    
     if (!socket) {
-      console.error("No socket instance available");
       return;
     }
 
     if (!isConnected) {
-      console.error("Socket not connected, attempting to reconnect...");
       // Try to reconnect the socket
       socket.connect();
       // Wait a moment for the connection to establish
@@ -177,24 +210,20 @@ export default function Lobby() {
         if (socket.connected) {
           socket.emit("start-game", { gameCode });
         } else {
-          console.error("Failed to reconnect socket");
         }
       }, 1000);
       return;
     }
 
     if (!isHost) {
-      console.error("Only host can start the game");
       return;
     }
 
     if (!allPlayersReady) {
-      console.error("Not all players are ready");
       return;
     }
 
     if (players.length < 3) {
-      console.error("Need at least 3 players to start");
       return;
     }
 
@@ -294,6 +323,7 @@ export default function Lobby() {
         showModal={showModal}
         onClose={() => setShowModal(false)}
         gameCode={gameCode}
+        isHost={isHost}
       />
     </>
   );
