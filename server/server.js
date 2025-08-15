@@ -3,13 +3,25 @@
  * Sets up Express server with Socket.IO for real-time game communication
  */
 import express from "express";
+import cors from "cors";
 import http from "http";
 import { Server } from "socket.io";
 import youtubesearchapi from "youtube-search-api";
 
 export const app = express();
 
-// Important: Only use express.json(), let Socket.IO handle CORS
+// Configure CORS for Express routes (not Socket.IO)
+app.use(cors({
+  origin: [
+    "https://aux-wars.com",
+    "https://www.aux-wars.com", 
+    "http://localhost:5173"
+  ],
+  methods: ["GET", "POST"],
+  credentials: true,
+  allowedHeaders: ["Content-Type"]
+}));
+
 app.use(express.json());
 
 /**
