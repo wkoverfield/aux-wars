@@ -113,7 +113,3 @@ Built by me during late night coding sessions fueled by love for music.
 
 Shoutout to:
 - My friends for beta testing and submitting terrible songs
-
----
-
-*P.S. - "Wonderwall" is banned in my lobbies*
