@@ -3,16 +3,32 @@
  * Sets up Express server with Socket.IO for real-time game communication
  */
 import express from "express";
-import cors from "cors";
 import http from "http";
 import { Server } from "socket.io";
 import youtubesearchapi from "youtube-search-api";
 
 export const app = express();
-app.use(cors());
+
+// Important: Only use express.json(), let Socket.IO handle CORS
 app.use(express.json());
 
+/**
+ * Health check endpoint - MUST be before Socket.IO initialization
+ * Returns server status and Socket.io information
+ */
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'Aux Wars server is running',
+    socketPath: '/socket.io/',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Create HTTP server
 export const server = http.createServer(app);
+
+// Initialize Socket.IO with proper CORS configuration
 export const io = new Server(server, {
   cors: {
     origin: [
@@ -21,10 +37,12 @@ export const io = new Server(server, {
       "http://localhost:5173"
     ],
     methods: ["GET", "POST"],
-    credentials: true
+    credentials: true,
+    allowedHeaders: ["content-type"]
   },
   path: "/socket.io/",
   transports: ["polling", "websocket"],
+  allowEIO3: true // Allow different Socket.IO versions
 });
 
 
@@ -59,19 +77,6 @@ const defaultSettings = {
 /**
  * API Routes
  */
-
-/**
- * Health check endpoint
- * Returns server status and Socket.io information
- */
-app.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'Aux Wars server is running',
-    socketPath: '/socket.io/',
-    timestamp: new Date().toISOString()
-  });
-});
 
 /**
  * YouTube Search Endpoint

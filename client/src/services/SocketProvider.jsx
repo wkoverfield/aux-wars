@@ -48,6 +48,7 @@ export function SocketProvider({ children }) {
       reconnectionDelay: 1000,
       timeout: 10000,
       transports: ['polling', 'websocket'],
+      withCredentials: true, // Important for CORS
       path: '/socket.io/',
       reconnection: true,
       reconnectionDelayMax: 5000
