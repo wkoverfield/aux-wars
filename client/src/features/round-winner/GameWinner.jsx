@@ -2,7 +2,8 @@ import React, { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useGame } from '../../services/GameContext';
 import { useSocket, useSocketConnection, useGameTransition } from '../../services/SocketProvider';
-import PlayerResult from '../../components/PlayerResult';
+import { useSession } from '../../hooks/useSession';
+import PlayerResultWithHover from '../../components/PlayerResultWithHover';
 import AnimatedLogo from '../../components/AnimatedLogo';
 import backIcon from '../../assets/back-icon.svg';
 
@@ -18,6 +19,7 @@ export default function GameWinner() {
   const socket = useSocket();
   const isConnected = useSocketConnection();
   const setGameTransition = useGameTransition();
+  const { updateSession } = useSession();
   const { state, dispatch } = useGame();
   const { allRoundResults } = state;
 
@@ -90,6 +92,7 @@ export default function GameWinner() {
   // Separate winner from other players
   const winner = sortedPlayers[0];
   const rest = sortedPlayers.slice(1);
+  
 
   /**
    * Handles returning to the lobby and resetting game state.
@@ -99,32 +102,33 @@ export default function GameWinner() {
     setGameTransition(true);
     dispatch({ type: "RESET_GAME" });
     socket.emit("return-to-lobby", { gameCode });
+    updateSession({ lastPhase: 'lobby' }); // Update session phase
     navigate(`/lobby/${gameCode}`, { replace: true });
   };
 
   return (
-    <div className="relative flex flex-col w-full max-w-7xl mx-auto pt-2 pb-2 px-2 md:p-6 bg-transparent items-center">
+    <div className="relative flex flex-col h-screen w-full max-w-7xl mx-auto pt-2 pb-6 px-2 md:p-6 bg-transparent items-center overflow-hidden">
       {/* Navigation controls */}
-      <div className="w-full flex flex-row justify-start mb-2 mt-4">
+      <div className="w-full flex flex-row justify-start mb-1 mt-2 md:mb-2 md:mt-4">
         <button
-          className="flex items-center gap-2 py-2 px-4 rounded-md text-white font-semibold cursor-pointer transition-all bg-[#242424] hover:bg-[#191414]"
+          className="flex items-center gap-2 py-1 px-3 md:py-2 md:px-4 rounded-md text-white font-semibold cursor-pointer transition-all bg-[#242424] hover:bg-[#191414] text-sm md:text-base"
           onClick={handleReturnToLobby}
         >
-          <img src={backIcon} alt="Back" className="w-5 h-5 pt-0.5" />
+          <img src={backIcon} alt="Back" className="w-4 h-4 md:w-5 md:h-5 pt-0.5" />
           <span>Exit</span>
         </button>
       </div>
 
-      {/* Logo section */}
-      <div className="flex justify-center w-full mb-4">
+      {/* Logo section - smaller on mobile */}
+      <div className="flex justify-center w-full mb-2 md:mb-4">
         <AnimatedLogo />
       </div>
 
       {/* Winner display */}
       {winner && (
-        <PlayerResult
+        <PlayerResultWithHover
           playerName={winner.playerName}
-          albums={winner.songs.map(song => song.albumCover)}
+          songs={winner.songs}
           wins={winner.wins}
           totalRecords={winner.totalRecords}
           isWinner={true}
@@ -132,12 +136,12 @@ export default function GameWinner() {
       )}
 
       {/* Other players list */}
-      <div className="w-full flex flex-col items-center gap-2 pb-4 overflow-y-auto" style={{ maxHeight: '30vh', minHeight: '10rem' }}>
+      <div className="w-full flex-1 flex flex-col items-center gap-2 pb-4 overflow-y-auto" style={{ minHeight: '0' }}>
         {rest.map((player, idx) => (
-          <PlayerResult
+          <PlayerResultWithHover
             key={player.playerId}
             playerName={player.playerName}
-            albums={player.songs.map(song => song.albumCover)}
+            songs={player.songs}
             wins={player.wins}
             totalRecords={player.totalRecords}
             isWinner={false}
