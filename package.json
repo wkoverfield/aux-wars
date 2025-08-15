@@ -11,7 +11,10 @@
     "test:client": "cd client && npm test",
     "test:server": "cd server && npm test",
     "test:client:watch": "cd client && npm run test:ui",
-    "test:client:coverage": "cd client && npm run test:coverage"
+    "test:client:coverage": "cd client && npm run test:coverage",
+    "build": "cd client && npm run build",
+    "deploy:client": "cd client && vercel --prod",
+    "deploy:server": "cd server && railway up"
   },
   "dependencies": {
     "concurrently": "^9.1.2"

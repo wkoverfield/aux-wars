@@ -1,4 +1,3 @@
-import React from 'react';
 import recordLogo from './record-logo.svg';
 
 /**
@@ -27,7 +26,7 @@ export default function PlayerResult({ playerName, albums, wins, totalRecords, i
                 key={idx}
                 src={album}
                 alt="Album Cover"
-                className="w-20 h-20 sm:w-28 sm:h-28 rounded-lg shadow-lg border-2 border-white absolute"
+                className="w-20 h-20 sm:w-28 sm:h-28 rounded-lg shadow-lg absolute"
                 style={{
                   left: `${idx * 36}px`,
                   zIndex: 10 - idx,
@@ -39,12 +38,12 @@ export default function PlayerResult({ playerName, albums, wins, totalRecords, i
             <img
               src={albums[0]}
               alt="Album Cover"
-              className="w-28 h-28 rounded-lg shadow-lg border-2 border-white"
+              className="w-28 h-28 rounded-lg shadow-lg"
               style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
             />
           )}
           {/* Container width for offset stack */}
-          {isStack && <div style={{ width: `${(albums?.length || 1) * 36 + 80}px`, height: '112px' }}></div>}
+          {isStack && <div style={{ width: `${Math.min(albums?.length || 1, 5) * 36 + 56}px`, height: '112px' }}></div>}
         </div>
         <div className="text-center w-full mt-2">
           <h3 className="text-2xl sm:text-3xl font-bold m-0 text-[#68d570]">{playerName}</h3>
@@ -69,7 +68,7 @@ export default function PlayerResult({ playerName, albums, wins, totalRecords, i
                 key={idx}
                 src={album}
                 alt="Album Cover"
-                className="w-12 h-12 sm:w-16 sm:h-16 rounded-md shadow-md border-2 border-white absolute"
+                className="w-12 h-12 sm:w-16 sm:h-16 rounded-md shadow-md absolute"
                 style={{
                   left: `${idx * 18}px`,
                   zIndex: 10 - idx,
@@ -81,7 +80,7 @@ export default function PlayerResult({ playerName, albums, wins, totalRecords, i
             <img
               src={albums[0]}
               alt="Album Cover"
-              className="w-16 h-16 rounded-md shadow-md border-2 border-white"
+              className="w-16 h-16 rounded-md shadow-md"
               style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
             />
           )}

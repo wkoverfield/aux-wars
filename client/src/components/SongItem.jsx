@@ -1,4 +1,3 @@
-import React from "react";
 import { motion } from "framer-motion";
 import nextIcon from "../assets/next-icon.svg";
 
@@ -27,7 +26,7 @@ export default function SongItem({ track, selected, onSelect, onSelectSong }) {
       whileHover={{ scale: 1.02 }}
       transition={{ type: "spring", stiffness: 300, damping: 15 }}
       className={`song-item flex items-center justify-between p-3 mb-3 rounded-md h-auto ${
-        selected ? "bg-gray-800" : "cursor-pointer"
+        selected ? "bg-[#242424]" : "cursor-pointer"
       }`}
       onClick={() => onSelect(track)}
     >
@@ -43,12 +42,12 @@ export default function SongItem({ track, selected, onSelect, onSelectSong }) {
         )}
         
         {/* Track details */}
-        <div className="flex flex-col justify-center flex-1">
-          <p className="font-semibold">{track.name}</p>
-          <p className="text-sm text-gray-300">
+        <div className="flex flex-col justify-center flex-1 min-w-0">
+          <p className="font-semibold truncate">{track.name}</p>
+          <p className="text-sm text-gray-300 truncate">
             {track.artists.map((a) => a.name).join(", ")}
           </p>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-400 truncate">
             {track.album?.name}
           </p>
         </div>

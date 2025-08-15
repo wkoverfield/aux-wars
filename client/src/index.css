@@ -150,6 +150,17 @@
   color: white;
 }
 
+.snippet-modal {
+  position: fixed;
+  background-color: rgba(18, 18, 18, 0.7);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  width: 100svw;
+  height: 100svh;
+  top: 0;
+  color: white;
+}
+
 .round-settings {
   input {
     background-color: #414141;
@@ -177,13 +188,19 @@
 .search-bar {
   width: 100%;
   max-width: 600px;
-  min-width: 356px;
+  min-width: 280px;
   height: 56px;
   background-color: #242424;
   opacity: .85;
   padding: 1rem;
   font-size: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+@media screen and (max-width: 640px) {
+  .search-bar {
+    min-width: unset;
+  }
 }
 
 .prompt-modal {

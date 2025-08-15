@@ -1,4 +1,3 @@
-import React from "react";
 import logo from "../assets/landing-logo.svg";
 import { motion } from "framer-motion";
 
@@ -22,7 +21,7 @@ export default function AnimatedLogo() {
   return (
     <motion.img
       data-testid="animated-logo"
-      className="landing-logo p-12"
+      className="landing-logo p-6 md:p-12 w-64 h-32 md:w-auto md:h-auto object-contain"
       src={logo}
       alt="Aux Wars Logo"
       animate={pulseAnimation}

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import { getAllPrompts } from '../data/promptCategories';
 
 /**
  * GameContext provides global state management for the game.
@@ -10,35 +11,32 @@ const GameContext = createContext();
  * Initial state for the game context
  * @type {Object}
  */
+// Default prompts matching server defaults
+const defaultPrompts = [
+  "This song makes me feel like the main character.",
+  "The soundtrack to a late-night drive.",
+  "This song makes me wanna text my ex (or block them).",
+  "A song that defines high school memories.",
+  "The perfect song to play while getting ready to go out.",
+  "This song could start a mosh pit.",
+  "A song that instantly boosts your confidence.",
+  "This song would play in the background of my villain arc.",
+  "A song that could make me cry on the right day.",
+  "The ultimate cookout anthem.",
+  "A song that just feels like summertime.",
+  "This song is pure nostalgia.",
+  "A song that makes you feel unstoppable.",
+  "If life had a montage, this song would play in mine.",
+  "A song that instantly hypes up the whole room."
+];
+
 const initialState = {
   currentPrompt: '',
   players: [],
   phase: 'lobby', // lobby, songSelection, rating, results, gameOver
   gameCode: '',
-  availablePrompts: [
-    "A song that makes you feel nostalgic",
-    "A song that reminds you of summer",
-    "A song that gets you pumped up",
-    "A song that makes you want to dance",
-    "A song that you love but others might not know",
-    "A song that tells a great story",
-    "A song that you discovered recently",
-    "A song that you associate with a specific memory",
-    "A song that you think is underrated",
-    "A song that you could listen to on repeat"
-  ],
-  selectedPrompts: [
-    "A song that makes you feel nostalgic",
-    "A song that reminds you of summer",
-    "A song that gets you pumped up",
-    "A song that makes you want to dance",
-    "A song that you love but others might not know",
-    "A song that tells a great story",
-    "A song that you discovered recently",
-    "A song that you associate with a specific memory",
-    "A song that you think is underrated",
-    "A song that you could listen to on repeat"
-  ],
+  availablePrompts: getAllPrompts(),
+  selectedPrompts: defaultPrompts, // Use server defaults
   numberOfRounds: 3,
   roundLength: 30,
   submittedSongs: [], // Array of songs submitted for the current round
@@ -51,25 +49,6 @@ const initialState = {
   isGameOver: false, // Whether the game is over
 };
 
-/**
- * Logs state changes for debugging purposes
- * @param {Object} action - The action being dispatched
- * @param {Object} prevState - Previous state
- * @param {Object} nextState - Next state
- */
-const logStateChange = (action, prevState, nextState) => {
-  console.log(`GameContext: ${action.type}`, {
-    prev: {
-      hasRoundResults: !!prevState.roundResults,
-      roundResultsSize: prevState.roundResults?.songs?.length || 0
-    },
-    next: {
-      hasRoundResults: !!nextState.roundResults,
-      roundResultsSize: nextState.roundResults?.songs?.length || 0
-    },
-    payload: action.payload
-  });
-};
 
 /**
  * Reducer function for managing game state
@@ -164,7 +143,13 @@ const gameReducer = (state, action) => {
         roundResults: action.payload,
         allRoundResults: updatedAllResults
       };
-      logStateChange(action, state, nextState);
+      return nextState;
+      
+    case 'CLEAR_ROUND_RESULTS':
+      nextState = { 
+        ...state, 
+        roundResults: { songs: [] }
+      };
       return nextState;
       
     case 'SET_CURRENT_ROUND':
@@ -190,7 +175,6 @@ const gameReducer = (state, action) => {
         isGameOver: isGameOver
         // Keep roundResults - they'll be replaced when new ones come in
       };
-      logStateChange(action, state, nextState);
       return nextState;
       
     case 'RESET_GAME':
@@ -220,12 +204,6 @@ const gameReducer = (state, action) => {
 export const GameProvider = ({ children, initialState: initialGameState = initialState }) => {
   const [state, dispatch] = useReducer(gameReducer, initialGameState);
 
-  // Debug logging for state changes
-  useEffect(() => {
-    if (state.roundResults?.songs) {
-      console.log(`GameContext: Current round results has ${state.roundResults.songs.length} songs`);
-    }
-  }, [state.roundResults]);
 
   return (
     <GameContext.Provider value={{ state, dispatch }}>

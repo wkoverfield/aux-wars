@@ -1,4 +1,3 @@
-import React from "react";
 
 /**
  * PlayerBox component displays a single player's information in the game lobby.
