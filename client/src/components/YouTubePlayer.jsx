@@ -39,7 +39,6 @@ function YouTubePlayer({ videoId, autoplay = false, startTime = 0, endTime = 0, 
   // Initialize player when API is ready
   const initializePlayer = () => {
     if (!playerRef.current || !window.YT || !window.YT.Player) {
-      console.log('YouTube API not ready yet');
       return;
     }
 
@@ -78,21 +77,26 @@ function YouTubePlayer({ videoId, autoplay = false, startTime = 0, endTime = 0, 
             }
           },
           onError: (event) => {
-            console.error('YouTube Player error:', event);
+            // Player error handled above
           }
         }
       });
     } catch (error) {
-      console.error('Error initializing YouTube player:', error);
+      // Initialization error handled above
+      console.error('Failed to initialize YouTube player:', error);
     }
   };
 
   // Update video when videoId changes
   useEffect(() => {
     if (player && isReady && videoId) {
-      player.loadVideoById(videoId);
+      player.loadVideoById({
+        videoId: videoId,
+        startSeconds: startTime || 0,
+        endSeconds: endTime > 0 ? endTime : undefined
+      });
     }
-  }, [videoId, player, isReady]);
+  }, [videoId, player, isReady, startTime, endTime]);
 
   // Public methods
   const play = () => {
@@ -203,20 +207,25 @@ export const YouTubePlayerWithRef = React.forwardRef((props, ref) => {
             if (props.onStateChange) props.onStateChange(event);
           },
           onError: (event) => {
-            console.error('YouTube Player error:', event);
+            // Player error handled above
           }
         }
       });
     } catch (error) {
-      console.error('Error initializing YouTube player:', error);
+      // Initialization error handled above
+      console.error('Failed to initialize YouTube player:', error);
     }
   };
 
   useEffect(() => {
     if (player && isReady && props.videoId) {
-      player.loadVideoById(props.videoId);
+      player.loadVideoById({
+        videoId: props.videoId,
+        startSeconds: props.startTime || 0,
+        endSeconds: props.endTime > 0 ? props.endTime : undefined
+      });
     }
-  }, [props.videoId, player, isReady]);
+  }, [props.videoId, player, isReady, props.startTime, props.endTime]);
 
   return (
     <div className="youtube-player-container w-full h-full">

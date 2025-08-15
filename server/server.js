@@ -6,9 +6,11 @@ import express from "express";
 import cors from "cors";
 import http from "http";
 import { Server } from "socket.io";
+import youtubesearchapi from "youtube-search-api";
 
 export const app = express();
 app.use(cors());
+app.use(express.json());
 
 export const server = http.createServer(app);
 export const io = new Server(server, {
@@ -16,7 +18,10 @@ export const io = new Server(server, {
     origin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
     methods: ["GET", "POST"],
   },
+  path: "/socket.io/",
+  transports: ["polling", "websocket"],
 });
+
 
 /**
  * Game state management
@@ -47,6 +52,116 @@ const defaultSettings = {
 };
 
 /**
+ * API Routes
+ */
+
+/**
+ * Health check endpoint
+ * Returns server status and Socket.io information
+ */
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'Aux Wars server is running',
+    socketPath: '/socket.io/',
+    timestamp: new Date().toISOString()
+  });
+});
+
+/**
+ * YouTube Search Endpoint
+ * Provides server-side YouTube search to bypass CORS restrictions
+ */
+app.post('/api/youtube/search', async (req, res) => {
+  try {
+    const { query } = req.body;
+    
+    if (!query || typeof query !== 'string' || query.trim().length < 2) {
+      return res.status(400).json({ error: 'Valid search query is required' });
+    }
+    
+    
+    const result = await youtubesearchapi.GetListByKeyword(
+      `${query} music`,
+      false, // not playlist
+      20,    // limit
+      [{type: "video"}] // only videos
+    );
+
+    if (!result || !result.items || !Array.isArray(result.items)) {
+      return res.json({ tracks: [] });
+    }
+
+    const tracks = result.items
+      .map(transformToTrack)
+      .filter(track => track !== null); // Remove any failed transformations
+    
+    res.json({ tracks });
+    
+  } catch (error) {
+    console.error('YouTube search failed:', error);
+    res.status(500).json({ error: 'Search service temporarily unavailable' });
+  }
+});
+
+/**
+ * Transforms YouTube search result to app's expected format
+ * @param {Object} item - YouTube search result item
+ * @returns {Object} Transformed track object
+ */
+function transformToTrack(item) {
+  if (!item || !item.id) {
+    return null;
+  }
+
+  // Try different thumbnail property paths
+  const thumbnailUrl = 
+    item.thumbnail?.url ||
+    item.thumbnails?.[0]?.url ||
+    item.thumbnails?.high?.url ||
+    item.thumbnails?.medium?.url ||
+    item.thumbnails?.default?.url ||
+    `https://i.ytimg.com/vi/${item.id}/mqdefault.jpg`; // Standard YouTube thumbnail format
+
+  return {
+    id: item.id,
+    name: decodeHTMLEntities(item.title),
+    artists: [{ name: decodeHTMLEntities(item.channelTitle || 'Unknown Artist') }],
+    album: {
+      name: "YouTube",
+      images: [
+        { 
+          url: thumbnailUrl
+        }
+      ]
+    },
+    preview_url: `https://www.youtube.com/embed/${item.id}`,
+    duration_ms: 0, // Duration not available in search results
+    external_url: `https://www.youtube.com/watch?v=${item.id}`
+  };
+}
+
+/**
+ * Decodes HTML entities in text
+ * @param {string} text - Text with HTML entities
+ * @returns {string} Decoded text
+ */
+function decodeHTMLEntities(text) {
+  if (!text) return text;
+  
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#x2F;/g, '/')
+    .replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec))
+    .replace(/&#x([a-fA-F0-9]+);/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+/**
  * Utility Functions
  */
 
@@ -73,7 +188,6 @@ function checkGameViability(gameCode, room) {
   const MIN_PLAYERS = 3;
   
   if (room.players.length < MIN_PLAYERS && room.phase !== "lobby") {
-    console.log(`Game ${gameCode} has only ${room.players.length} players, returning to lobby`);
     
     room.phase = "lobby";
     room.selectedSongs = new Map();
@@ -103,7 +217,6 @@ function startRatingRound(gameCode, room) {
     const songToRate = room.songsToRate[room.currentRatingIndex];
     room.playerVotes = new Map();
     
-    console.log(`Starting rating round ${room.currentRatingIndex + 1}/${room.songsToRate.length} for song: ${songToRate.name}`);
     
     if (room.phase !== "rating") {
       room.phase = "rating";
@@ -129,7 +242,6 @@ function startRatingRound(gameCode, room) {
  * @param {Object} room - The game room object
  */
 function calculateRoundResults(gameCode, room) {
-  console.log("Calculating round results");
   
   try {
     room.phase = "results";
@@ -180,13 +292,16 @@ function calculateRoundResults(gameCode, room) {
  * Socket.IO Event Handlers
  */
 io.on("connection", (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  
+  socket.on("error", (error) => {
+    console.error(`[Socket.IO] Socket error for ${socket.id}:`, error);
+  });
 
   // Game Creation and Joining
   socket.on("host-game", (callback) => {
     const gameCode = generateGameCode();
     const room = {
-      players: [{ id: socket.id, name: "", isHost: true }],
+      players: [], // Start with empty players array - host will join via join-game
       settings: defaultSettings,
       phase: "lobby",
       currentPrompt: null,
@@ -194,7 +309,6 @@ io.on("connection", (socket) => {
     };
     
     gameRooms.set(gameCode, room);
-    socket.join(gameCode);
     
     callback({ success: true, gameCode });
   });
@@ -239,8 +353,9 @@ io.on("connection", (socket) => {
       room.originalHostId = socket.id;
     }
 
-    // Add new player
-    room.players.push({ id: socket.id, name, isHost });
+    // Add new player with a persistent ID
+    const playerId = data.playerId || socket.id;
+    room.players.push({ id: socket.id, playerId, name, isHost });
     socket.join(gameCode);
     
     io.to(gameCode).emit("update-players", room.players);
@@ -250,7 +365,59 @@ io.on("connection", (socket) => {
       io.to(gameCode).emit("prompt-updated", { prompt: room.currentPrompt });
     }
     
-    callback({ success: true });
+    // Send current game settings to the joining player
+    socket.emit("game-settings-updated", room.settings);
+    
+    callback({ success: true, settings: room.settings, playerId });
+  });
+
+  // Rejoin existing game with player ID
+  socket.on("rejoin-game", (data, callback) => {
+    const { gameCode, playerId, playerName } = data;
+    
+    if (!gameRooms.has(gameCode)) {
+      callback({ success: false, message: "Game not found" });
+      return;
+    }
+    
+    const room = gameRooms.get(gameCode);
+    
+    // Look for existing player by playerId only
+    const existingPlayerIndex = room.players.findIndex(p => 
+      p.playerId === playerId
+    );
+    
+    if (existingPlayerIndex !== -1) {
+      // Update existing player's socket ID
+      room.players[existingPlayerIndex].id = socket.id;
+      room.players[existingPlayerIndex].playerId = playerId;
+      socket.join(gameCode);
+      
+      // Send back current game state
+      callback({
+        success: true,
+        players: room.players,
+        phase: room.phase,
+        currentRound: room.currentRound || 1,
+        settings: room.settings,
+        currentPrompt: room.currentPrompt
+      });
+      
+      // Notify others of player update
+      io.to(gameCode).emit("update-players", room.players);
+      
+      // Send phase-specific data if needed
+      if (room.phase === "rating" && room.selectedSongs) {
+        socket.emit("songs-ready-for-rating", { 
+          songs: Array.from(room.selectedSongs.values()) 
+        });
+      } else if (room.phase === "results" && room.roundResults) {
+        socket.emit("round-results", { results: room.roundResults });
+      }
+    } else {
+      // Player not found, treat as new join
+      callback({ success: false, message: "Player not found in game" });
+    }
   });
 
   // Player Management
@@ -258,9 +425,20 @@ io.on("connection", (socket) => {
     const { gameCode, name, isReady } = data;
     if (!gameRooms.has(gameCode)) return;
     const room = gameRooms.get(gameCode);
-    room.players = room.players.map((p) =>
-      p.id === socket.id ? { ...p, name, isReady } : p
-    );
+    
+    // Find the player index to update
+    const playerIndex = room.players.findIndex(p => p.id === socket.id);
+    if (playerIndex === -1) return;
+    
+    // Update only the specific player's data
+    room.players[playerIndex] = {
+      ...room.players[playerIndex],
+      name: name !== undefined ? name : room.players[playerIndex].name,
+      isReady: isReady !== undefined ? isReady : room.players[playerIndex].isReady
+    };
+    
+    // Log the update for debugging
+    
     io.to(gameCode).emit("update-players", room.players);
   });
 
@@ -476,9 +654,13 @@ io.on("connection", (socket) => {
 
   socket.on("request-round-results", (data) => {
     const { gameCode } = data;
-    if (!gameRooms.has(gameCode)) return;
+    
+    if (!gameRooms.has(gameCode)) {
+      return;
+    }
     
     const room = gameRooms.get(gameCode);
+    const player = room.players.find(p => p.id === socket.id);
     
     if (room.phase === "results" && room.roundResults) {
       socket.emit("round-results", {
@@ -502,6 +684,14 @@ io.on("connection", (socket) => {
       room.roundResults = {};
       room.currentRound = 1;
       
+      // Reset all players' ready status
+      room.players = room.players.map(player => ({
+        ...player,
+        isReady: false
+      }));
+      
+      // Update all clients with the new player list
+      io.to(gameCode).emit("update-players", room.players);
       io.to(gameCode).emit("game-phase-updated", { phase: "lobby", currentRound: room.currentRound });
     } catch (error) {
       console.error("Error returning to lobby:", error);
@@ -510,8 +700,7 @@ io.on("connection", (socket) => {
   });
 
   // Disconnection Handling
-  socket.on("disconnect", () => {
-    console.log(`User disconnected: ${socket.id}`);
+  socket.on("disconnect", (reason) => {
     gameRooms.forEach((room, gameCode) => {
       const playerIndex = room.players.findIndex(player => player.id === socket.id);
       
