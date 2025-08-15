@@ -7,13 +7,18 @@ import { motion } from 'framer-motion';
  * Provides visual timeline controls and preview functionality
  */
 export default function SnippetSelector({ track, onConfirm, onCancel }) {
+  const SNIPPET_DURATION = 30; // Fixed 30-second snippet
   const [startTime, setStartTime] = useState(30); // Default to 30 seconds
-  const [endTime, setEndTime] = useState(60); // Default 30-second snippet
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isHovering, setIsHovering] = useState(false);
+  const [hoverTime, setHoverTime] = useState(0);
   const playerRef = useRef(null);
   const intervalRef = useRef(null);
+  const waveformRef = useRef(null);
+  const updateTimerRef = useRef(null);
 
   // Extract video ID from preview URL
   const getVideoId = (url) => {
@@ -31,18 +36,80 @@ export default function SnippetSelector({ track, onConfirm, onCancel }) {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Quick preset options
-  const presets = [
-    { label: "First 30s", start: 0, end: 30 },
-    { label: "Best Part", start: 45, end: 75 },
-    { label: "Chorus", start: 60, end: 90 },
-  ];
+  // Calculate end time based on start time
+  const endTime = Math.min(startTime + SNIPPET_DURATION, duration);
 
-  // Handle preset selection
-  const selectPreset = (preset) => {
-    setStartTime(preset.start);
-    setEndTime(preset.end);
-  };
+  // Keyboard controls
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if (!duration) return;
+      
+      const maxStart = Math.max(0, duration - SNIPPET_DURATION);
+      
+      switch(e.key) {
+        case 'ArrowLeft':
+          e.preventDefault();
+          const newStartLeft = Math.max(0, startTime - 1);
+          setStartTime(newStartLeft);
+          updateVideoPreview(newStartLeft);
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          const newStartRight = Math.min(maxStart, startTime + 1);
+          setStartTime(newStartRight);
+          updateVideoPreview(newStartRight);
+          break;
+        case ' ':
+          e.preventDefault();
+          if (isPlaying) {
+            stopPreview();
+          } else {
+            previewSnippet();
+          }
+          break;
+        case 'Enter':
+          e.preventDefault();
+          handleConfirm();
+          break;
+        case 'Escape':
+          e.preventDefault();
+          onCancel();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [startTime, duration, isPlaying]);
+
+  // Global mouse event handling for dragging
+  useEffect(() => {
+    if (isDragging) {
+      const handleMouseMove = (e) => {
+        if (waveformRef.current) {
+          const rect = waveformRef.current.getBoundingClientRect();
+          const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+          const percentage = x / rect.width;
+          const maxStart = Math.max(0, duration - SNIPPET_DURATION);
+          const newStart = Math.min(Math.max(0, percentage * duration - SNIPPET_DURATION / 2), maxStart);
+          setStartTime(newStart);
+        }
+      };
+
+      const handleMouseUp = () => {
+        setIsDragging(false);
+        updateVideoPreview(startTime);
+      };
+
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isDragging, duration, startTime]);
 
   // Preview the selected snippet
   const previewSnippet = () => {
@@ -86,20 +153,71 @@ export default function SnippetSelector({ track, onConfirm, onCancel }) {
     };
   }, [isPlaying, endTime, startTime]);
 
-  // Validate and adjust times
-  const handleStartChange = (value) => {
-    const newStart = Math.max(0, Math.min(value, duration - 15));
+  // Handle waveform interaction
+  const handleWaveformClick = (e) => {
+    const rect = waveformRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    const maxStart = Math.max(0, duration - SNIPPET_DURATION);
+    const newStart = Math.min(percentage * duration, maxStart);
     setStartTime(newStart);
-    if (endTime - newStart < 15) {
-      setEndTime(Math.min(newStart + 30, duration));
+    updateVideoPreview(newStart);
+  };
+
+  const handleWaveformMouseMove = (e) => {
+    if (!waveformRef.current) return;
+    const rect = waveformRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    const time = percentage * duration;
+    setHoverTime(time);
+    
+    if (isDragging) {
+      const maxStart = Math.max(0, duration - SNIPPET_DURATION);
+      const newStart = Math.min(Math.max(0, time - SNIPPET_DURATION / 2), maxStart);
+      setStartTime(newStart);
     }
   };
 
-  const handleEndChange = (value) => {
-    const newEnd = Math.min(value, duration);
-    if (newEnd - startTime >= 15) {
-      setEndTime(newEnd);
+  const handleWaveformMouseDown = (e) => {
+    setIsDragging(true);
+    handleWaveformClick(e);
+  };
+
+  const handleWaveformMouseUp = () => {
+    if (isDragging) {
+      setIsDragging(false);
+      updateVideoPreview(startTime);
     }
+  };
+
+  const handleWaveformMouseLeave = () => {
+    setIsHovering(false);
+    if (isDragging) {
+      setIsDragging(false);
+      updateVideoPreview(startTime);
+    }
+  };
+
+  // Update video preview with debounce
+  const updateVideoPreview = (time) => {
+    if (updateTimerRef.current) {
+      clearTimeout(updateTimerRef.current);
+    }
+    
+    updateTimerRef.current = setTimeout(() => {
+      if (playerRef.current && playerRef.current.seekTo) {
+        playerRef.current.seekTo(time);
+        if (!isPlaying) {
+          playerRef.current.play();
+          setTimeout(() => {
+            if (playerRef.current && playerRef.current.pause) {
+              playerRef.current.pause();
+            }
+          }, 1000); // Brief preview
+        }
+      }
+    }, 150);
   };
 
   // Confirm selection
@@ -114,13 +232,12 @@ export default function SnippetSelector({ track, onConfirm, onCancel }) {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4"
-    >
-      <div className="bg-gray-900 rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="snippet-modal z-50 fixed inset-0 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <h2 className="text-2xl font-bold text-white mb-4">Choose Your Snippet</h2>
         
         {/* Song info */}
@@ -146,89 +263,109 @@ export default function SnippetSelector({ track, onConfirm, onCancel }) {
 
         {/* Timeline Controls */}
         <div className="mb-6">
-          <div className="flex justify-between text-sm text-gray-400 mb-2">
-            <span>Start: {formatTime(startTime)}</span>
-            <span>Duration: {formatTime(endTime - startTime)}</span>
-            <span>End: {formatTime(endTime)}</span>
+          <div className="flex justify-between text-sm text-gray-400 mb-4">
+            <span>{formatTime(startTime)}</span>
+            <span className="text-green-400 font-semibold">30 second snippet</span>
+            <span>{formatTime(endTime)}</span>
           </div>
 
-          {/* Start time slider */}
-          <div className="mb-4">
-            <label className="block text-sm text-gray-400 mb-1">Start Time</label>
-            <input
-              type="range"
-              min="0"
-              max={duration}
-              value={startTime}
-              onChange={(e) => handleStartChange(Number(e.target.value))}
-              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
-              style={{
-                background: `linear-gradient(to right, #68d570 0%, #68d570 ${(startTime / duration) * 100}%, #374151 ${(startTime / duration) * 100}%, #374151 100%)`
-              }}
-            />
+          {/* Instructions */}
+          <div className="mb-4 text-center">
+            <p className="text-sm text-gray-400">Click or drag on the waveform to select your 30-second snippet</p>
           </div>
 
-          {/* End time slider */}
-          <div className="mb-4">
-            <label className="block text-sm text-gray-400 mb-1">End Time</label>
-            <input
-              type="range"
-              min={startTime + 15}
-              max={duration}
-              value={endTime}
-              onChange={(e) => handleEndChange(Number(e.target.value))}
-              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
-              style={{
-                background: `linear-gradient(to right, #68d570 0%, #68d570 ${(endTime / duration) * 100}%, #374151 ${(endTime / duration) * 100}%, #374151 100%)`
-              }}
-            />
-          </div>
-
-          {/* Visual timeline */}
-          <div className="relative h-16 bg-gray-800 rounded-lg overflow-hidden">
-            <div 
-              className="absolute top-0 bottom-0 bg-green-500 bg-opacity-30"
+          {/* Interactive waveform timeline */}
+          <div 
+            ref={waveformRef}
+            className="relative h-24 bg-[#242424] rounded-lg overflow-hidden mb-4 cursor-pointer select-none"
+            onMouseDown={handleWaveformMouseDown}
+            onMouseMove={handleWaveformMouseMove}
+            onMouseUp={handleWaveformMouseUp}
+            onMouseEnter={() => setIsHovering(true)}
+            onMouseLeave={handleWaveformMouseLeave}
+          >
+            {/* Time markers */}
+            <div className="absolute inset-0 flex justify-between px-2 pt-1">
+              {Array.from({ length: Math.min(10, Math.floor(duration / 30)) }).map((_, i) => {
+                const time = (i * duration) / Math.min(10, Math.floor(duration / 30));
+                return (
+                  <div key={i} className="text-xs text-gray-600">
+                    {formatTime(time)}
+                  </div>
+                );
+              })}
+            </div>
+            
+            {/* Waveform visualization */}
+            <div className="absolute inset-0 flex items-end justify-around mt-4">
+              {Array.from({ length: 100 }).map((_, i) => {
+                const isInSelection = i >= (startTime / duration) * 100 && 
+                                    i < ((startTime + SNIPPET_DURATION) / duration) * 100;
+                const height = 20 + Math.sin(i * 0.2) * 30 + Math.random() * 20;
+                return (
+                  <div
+                    key={i}
+                    className={`w-0.5 transition-all duration-150 ${
+                      isInSelection ? 'bg-green-400 opacity-80' : 'bg-[#3a3a3a] opacity-40'
+                    }`}
+                    style={{ height: `${height}%` }}
+                  />
+                );
+              })}
+            </div>
+            
+            {/* Removed hover indicator - times are shown below video */}
+            
+            {/* Selected 30s window */}
+            <motion.div
+              className="absolute top-0 bottom-0 bg-green-500 bg-opacity-30 border-x-2 border-green-400 transition-all duration-150 overflow-visible"
               style={{
                 left: `${(startTime / duration) * 100}%`,
-                width: `${((endTime - startTime) / duration) * 100}%`
+                width: `${(SNIPPET_DURATION / duration) * 100}%`
               }}
-            />
+              animate={{ 
+                scale: isDragging ? 1.02 : 1,
+                opacity: isDragging ? 0.5 : 0.3
+              }}
+            >
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center z-10">
+                <motion.span 
+                  className="text-sm text-white font-semibold bg-green-600 px-3 py-1 rounded-full whitespace-nowrap"
+                  animate={{ scale: isDragging ? 0.9 : 1 }}
+                >
+                  {formatTime(startTime)} – {formatTime(endTime)}
+                </motion.span>
+              </div>
+            </motion.div>
+            
+            {/* Playback position */}
             {isPlaying && (
-              <div 
+              <motion.div 
                 className="absolute top-0 bottom-0 w-0.5 bg-white"
                 style={{
                   left: `${(currentTime / duration) * 100}%`
                 }}
+                animate={{ opacity: [1, 0.7, 1] }}
+                transition={{ repeat: Infinity, duration: 1 }}
               />
             )}
           </div>
-        </div>
-
-        {/* Quick Presets */}
-        <div className="mb-6">
-          <p className="text-sm text-gray-400 mb-2">Quick Presets:</p>
-          <div className="flex gap-2">
-            {presets.map((preset) => (
-              <button
-                key={preset.label}
-                onClick={() => selectPreset(preset)}
-                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-md text-sm transition-colors"
-              >
-                {preset.label}
-              </button>
-            ))}
+          
+          {/* Keyboard shortcuts hint */}
+          <div className="text-xs text-gray-500 text-center mb-2">
+            <span className="inline-flex items-center gap-2">
+              <kbd className="px-2 py-1 bg-[#242424] rounded">←</kbd>
+              <kbd className="px-2 py-1 bg-[#242424] rounded">→</kbd>
+              to fine-tune • 
+              <kbd className="px-2 py-1 bg-[#242424] rounded">Space</kbd>
+              to preview
+            </span>
           </div>
         </div>
 
+
         {/* Action buttons */}
         <div className="flex gap-4">
-          <button
-            onClick={isPlaying ? stopPreview : previewSnippet}
-            className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-md font-semibold transition-colors"
-          >
-            {isPlaying ? 'Stop Preview' : 'Preview Snippet'}
-          </button>
-          
           <button
             onClick={handleConfirm}
             className="flex-1 py-3 bg-green-600 hover:bg-green-500 text-black rounded-md font-semibold transition-colors"
@@ -238,12 +375,12 @@ export default function SnippetSelector({ track, onConfirm, onCancel }) {
           
           <button
             onClick={onCancel}
-            className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-md transition-colors"
+            className="flex-1 py-3 bg-[#242424] hover:bg-[#1a1a1a] text-white rounded-md transition-colors"
           >
             Cancel
           </button>
         </div>
-      </div>
-    </motion.div>
+      </motion.div>
+    </div>
   );
 }

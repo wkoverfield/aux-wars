@@ -2,7 +2,8 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useGame } from "../../services/GameContext";
 import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
-import { searchYouTubeMusic } from "../../services/youtubeApi";
+import { searchTracks, getCachedResults } from "../../services/serverYoutubeApi";
+import { useToast } from "../../contexts/ToastContext";
 import RoundStart from "./RoundStart";
 import SongSelection from "./SongSelection";
 import PromptModal from "./PromptModal";
@@ -23,6 +24,7 @@ export default function Round() {
   const isConnected = useSocketConnection();
   const setGameTransition = useGameTransition();
   const { state, dispatch } = useGame();
+  const { showToast } = useToast();
 
   // State Management
   // ===============
@@ -32,6 +34,7 @@ export default function Round() {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchError, setSearchError] = useState(null);
+  const [isSearching, setIsSearching] = useState(false);
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState(null);
   const [showSnippetSelector, setShowSnippetSelector] = useState(false);
@@ -55,13 +58,6 @@ export default function Round() {
   // Effects
   // =======
 
-  /**
-   * No authentication needed for YouTube
-   */
-  useEffect(() => {
-    // YouTube doesn't require authentication
-    console.log("Using YouTube API - no authentication required");
-  }, []);
 
   /**
    * Redirects to lobby if not connected to socket
@@ -81,7 +77,6 @@ export default function Round() {
     if (!socket || !isConnected) return;
 
     const handlePromptUpdate = ({ prompt }) => {
-      console.log("Received prompt update:", prompt);
       dispatch({ type: "SET_PROMPT", payload: prompt });
     };
 
@@ -138,7 +133,6 @@ export default function Round() {
       setRatingSubmittedCount(0);
       
       if (songToRate.player.id === socket.id) {
-        console.log("Skipping rating own song");
         socket.emit("submit-rating", {
           gameCode,
           songId: songToRate.songId,
@@ -157,13 +151,10 @@ export default function Round() {
       setIsTransitioning(true);
       setGameTransition(true);
       
-      console.log("Received round results:", JSON.stringify(results, null, 2));
       
       if (!results || !results.songs) {
-        console.error("Invalid round results received:", results);
       } else {
-        console.log(`Received ${results.songs.length} songs in round results`);
-      }
+        }
       
       dispatch({ type: "SET_ROUND_RESULTS", payload: results });
       navigate(`/lobby/${gameCode}/results`, { replace: true });
@@ -181,7 +172,6 @@ export default function Round() {
    */
   useEffect(() => {
     if (isRatingPhase && songToRate && songToRate.player.id === socket.id) {
-      console.log("Auto-skipping rating for own song");
       socket.emit("submit-rating", {
         gameCode,
         songId: songToRate.songId,
@@ -201,7 +191,6 @@ export default function Round() {
       setIsTransitioning(true);
       setGameTransition(true);
       
-      console.log(`Phase changed to: ${phase}`);
       dispatch({ type: "SET_PHASE", payload: phase });
       if (typeof currentRound !== 'undefined') {
         dispatch({ type: "SET_CURRENT_ROUND", payload: currentRound });
@@ -229,7 +218,7 @@ export default function Round() {
   }, [socket, isConnected, gameCode, navigate, dispatch, setGameTransition]);
 
   /**
-   * Handles Spotify track search with debouncing
+   * Handles YouTube track search with caching and debouncing
    */
   useEffect(() => {
     if (!searchTerm.trim()) {
@@ -238,69 +227,37 @@ export default function Round() {
       return;
     }
 
+    // Show cached results immediately if available
+    const cachedResults = getCachedResults(searchTerm);
+    if (cachedResults) {
+      setSearchResults(cachedResults);
+      setSearchError(null);
+    }
+
     const delayDebounce = setTimeout(async () => {
       try {
         setSearchError(null); // Clear any previous errors
-        const result = await searchYouTubeMusic(searchTerm);
+        const result = await searchTracks(searchTerm);
         
-        // Check if the result is an error object
-        if (result?.error) {
-          console.error(`Search error: ${result.error}`, result.message || '');
-          
-          switch (result.error) {
-            case "missing_api_key":
-              console.error("YouTube API key not configured");
-              setSearchError("YouTube API key not configured. Please check setup.");
-              setSearchResults([]);
-              return;
-              
-            case "quota_exceeded":
-              console.error("YouTube API quota exceeded");
-              setSearchError("API quota exceeded. Please try again later.");
-              setSearchResults([]);
-              return;
-              
-            case "invalid_request":
-              console.error("Invalid YouTube search request");
-              setSearchError("Invalid search request. Please try again.");
-              setSearchResults([]);
-              return;
-              
-            case "network_error":
-              console.error("Network error during search:", result.message);
-              setSearchError("Network error. Please check your connection and try again.");
-              setSearchResults([]);
-              return;
-              
-            default:
-              console.error("Search failed with error:", result);
-              setSearchError("Search failed. Please try again.");
-              setSearchResults([]);
-              return;
-          }
-        }
-        
-        // If we get here, result should be an array of tracks
+        // The new API always returns an array (empty if failed)
         if (Array.isArray(result)) {
           setSearchResults(result);
-          setSearchError(null);
+          setSearchError(result.length === 0 ? "No songs found. Try different keywords." : null);
         } else {
-          console.warn("Unexpected search result format:", result);
-          setSearchError("Unexpected error. Please try again.");
+          setSearchError("Search service temporarily unavailable. Please try again.");
           setSearchResults([]);
         }
         
       } catch (error) {
-        console.error("Unexpected error during track search:", error);
-        setSearchError("An unexpected error occurred. Please try again.");
-        setSearchResults([]);
-        if (!isTransitioning) {
-          if (!window.location.pathname.includes('/lobby/')) {
-            navigate("/lobby", { replace: true });
-          }
+        setSearchError("Connection issue. Please check your internet and try again.");
+        // Keep existing results if we have cached ones
+        if (!cachedResults || cachedResults.length === 0) {
+          setSearchResults([]);
         }
+      } finally {
+        setIsSearching(false);
       }
-    }, 500);
+    }, 800); // Slightly longer debounce for better UX
 
     return () => clearTimeout(delayDebounce);
   }, [searchTerm, navigate, isTransitioning]);
@@ -312,7 +269,6 @@ export default function Round() {
     if (!socket || !isConnected) return;
 
     if (totalPlayers < 3 && totalPlayers > 0) {
-      console.log("Not enough players to continue the game");
     }
   }, [totalPlayers, socket, isConnected, navigate]);
 
@@ -323,7 +279,6 @@ export default function Round() {
     if (!socket || !isConnected) return;
 
     socket.on("game-error", ({ message }) => {
-      console.error("Game error:", message);
     });
 
     return () => {
@@ -357,17 +312,23 @@ export default function Round() {
       return;
     }
 
-    socket.emit("song-selected", {
-      gameCode,
-      trackId: trackWithSnippet.id,
-      trackDetails: {
-        name: trackWithSnippet.name,
-        artist: trackWithSnippet.artists[0].name,
-        albumCover: trackWithSnippet.album.images[0].url,
-        previewUrl: trackWithSnippet.preview_url,
-        snippet: trackWithSnippet.snippet
-      },
-    });
+    try {
+      socket.emit("song-selected", {
+        gameCode,
+        trackId: trackWithSnippet.id,
+        trackDetails: {
+          name: trackWithSnippet.name,
+          artist: trackWithSnippet.artists[0].name,
+          albumCover: trackWithSnippet.album.images[0].url,
+          previewUrl: trackWithSnippet.preview_url,
+          snippet: trackWithSnippet.snippet
+        },
+      });
+    } catch (error) {
+      console.error("Failed to submit song:", error);
+      showToast("Failed to submit song. Please try again.", "error");
+      return;
+    }
 
     setHasSongSubmitted(true);
     setIsSongSelectionView(false);
@@ -411,7 +372,6 @@ export default function Round() {
   // Render Logic
   // ===========
 
-  // No authentication check needed for YouTube
 
   if (!isConnected && !isTransitioning) {
     return null;
@@ -454,6 +414,7 @@ export default function Round() {
             onSearchChange={(e) => setSearchTerm(e.target.value)}
             searchResults={searchResults}
             searchError={searchError}
+            isSearching={isSearching}
             onSelectSong={handleSelectSong}
             onShowPrompt={() => setShowPromptModal(true)}
             showPromptModal={showPromptModal}
@@ -471,15 +432,17 @@ export default function Round() {
   };
 
   return (
-    <div className="round-start flex flex-col items-center justify-center text-white p-4">
-      {renderContent()}
+    <>
+      <div className={`round-start flex flex-col items-center justify-center text-white p-4 min-h-screen ${showSnippetSelector ? 'blur-sm' : ''}`}>
+        {renderContent()}
 
-      {showPromptModal && !hasSongSubmitted && !isRatingPhase && (
-        <PromptModal
-          currentPrompt={state.currentPrompt}
-          onClose={() => setShowPromptModal(false)}
-        />
-      )}
+        {showPromptModal && !hasSongSubmitted && !isRatingPhase && (
+          <PromptModal
+            currentPrompt={state.currentPrompt}
+            onClose={() => setShowPromptModal(false)}
+          />
+        )}
+      </div>
 
       {showSnippetSelector && selectedTrack && (
         <SnippetSelector
@@ -491,6 +454,6 @@ export default function Round() {
           }}
         />
       )}
-    </div>
+    </>
   );
 }
