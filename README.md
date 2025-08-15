@@ -116,6 +116,4 @@ Shoutout to:
 
 ---
 
-Questions? Bugs? Bad song recommendations? Hit me up or open an issue.
-
 *P.S. - "Wonderwall" is banned in my lobbies*
