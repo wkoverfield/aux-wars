@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import record from '../../assets/record.svg';
 import SearchBar from '../../components/SearchBar';
 import YouTubePlayer from '../../components/YouTubePlayer';
+import { useToast } from '../../contexts/ToastContext';
 
 /**
  * RatingScreen component provides an interface for rating songs during the game.
@@ -23,6 +24,7 @@ const RatingScreen = ({
   totalSongs 
 }) => {
   const [selectedRating, setSelectedRating] = useState(-1);
+  const { showToast } = useToast();
   
   // Extract YouTube video ID from preview URL
   const getYouTubeVideoId = (url) => {
@@ -54,7 +56,7 @@ const RatingScreen = ({
       // Add 1 to the index to get rating from 1-5 instead of 0-4
       onSubmitRating(songToRate.songId, selectedRating + 1);
     } else {
-      alert("Please select a rating before submitting");
+      showToast("Please select a rating before submitting", "warning");
     }
   };
 

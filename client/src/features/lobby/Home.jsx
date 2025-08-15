@@ -4,8 +4,9 @@ import HomeBtn from "../../components/HomeBtn";
 import HowToPlayModal from "../../components/HowToPlayModal";
 import DevBtn from "../../components/DevBtn";
 import { useNavigate } from "react-router-dom";
-import { useSocket } from "../../services/SocketProvider";
-// No authentication needed for YouTube
+import { useSocket, useSocketConnection } from "../../services/SocketProvider";
+import { useSession } from "../../hooks/useSession";
+import { useToast } from "../../contexts/ToastContext";
 
 /**
  * Home component serves as the landing page for the game.
@@ -16,12 +17,18 @@ import { useSocket } from "../../services/SocketProvider";
  */
 export default function Home() {
   const socket = useSocket();
+  const isConnected = useSocketConnection();
   const navigate = useNavigate();
+  const { clearSession, createSession } = useSession();
+  const { showToast } = useToast();
   const [joinCode, setJoinCode] = useState("");
   const [isHosting, setIsHosting] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
 
-  // No authentication check needed for YouTube
+  // Clear session when landing on home page
+  useEffect(() => {
+    clearSession();
+  }, [clearSession]);
 
   /**
    * Handles hosting a new game.
@@ -30,14 +37,35 @@ export default function Home() {
    * Disables hosting button while request is in progress.
    */
   const handleHostGame = () => {
-    if (!socket || isHosting) return;
+    if (!socket || !isConnected || isHosting) return;
     
     // No authentication check needed
     
     setIsHosting(true);
     socket.emit("host-game", (response) => {
       if (response.success) {
-        navigate(`/lobby/${response.gameCode}`);
+        // First host the game, then join it
+        const playerId = crypto.randomUUID();
+        const tempName = "Host"; // Give host a temporary name
+        socket.emit("join-game", { 
+          gameCode: response.gameCode, 
+          name: tempName, 
+          playerId: playerId 
+        }, (joinResponse) => {
+          if (joinResponse.success) {
+            // Create session before navigating
+            createSession({
+              gameCode: response.gameCode,
+              playerId: playerId,
+              playerName: tempName,
+              lastPhase: 'lobby'
+            });
+            navigate(`/lobby/${response.gameCode}`);
+          } else {
+            setIsHosting(false);
+            showToast("Failed to join hosted game", "error");
+          }
+        });
       } else {
         setIsHosting(false);
       }
@@ -51,18 +79,37 @@ export default function Home() {
    * Shows error message if join fails.
    */
   const handleJoinGame = () => {
-    if (!socket || !joinCode.trim()) {
-      alert("Please enter a valid game code.");
+    if (!socket || !isConnected) {
+      showToast("Please wait for connection to establish.", "warning");
+      return;
+    }
+    
+    if (!joinCode.trim()) {
+      showToast("Please enter a valid game code.", "warning");
       return;
     }
 
     // No authentication check needed
+    const playerId = crypto.randomUUID();
+    // Generate a temporary player name
+    const tempName = `Player ${Math.floor(Math.random() * 100) + 1}`;
     
-    socket.emit("join-game", { gameCode: joinCode.trim() }, (response) => {
+    socket.emit("join-game", { 
+      gameCode: joinCode.trim(), 
+      name: tempName,
+      playerId: playerId 
+    }, (response) => {
       if (response.success) {
+        // Create session before navigating
+        createSession({
+          gameCode: joinCode.trim(),
+          playerId: playerId,
+          playerName: tempName,
+          lastPhase: 'lobby'
+        });
         navigate(`/lobby/${joinCode.trim()}`);
       } else {
-        alert(response.message || "Failed to join game.");
+        showToast(response.message || "Failed to join game.", "error");
       }
     });
   };
@@ -87,16 +134,25 @@ export default function Home() {
 
       {/* Bottom section with action buttons */}
       <div className="home-btns flex flex-col items-center gap-6 mb-10 w-full h-full max-w-xs justify-between">
+        {!isConnected && (
+          <div className="text-white text-sm mb-2 text-center">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              <span>Connecting to server...</span>
+            </div>
+          </div>
+        )}
         <HomeBtn 
           onClick={handleJoinGame} 
           className="spotify-btn" 
           text="Join game" 
+          disabled={!isConnected}
         />
         <HomeBtn 
           onClick={handleHostGame} 
           className="guest-btn" 
           text={isHosting ? "Hosting..." : "Host game"} 
-          disabled={isHosting}
+          disabled={isHosting || !isConnected}
         />
       </div>
 
