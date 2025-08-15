@@ -2,7 +2,7 @@
 
 Ever argued with your friends about who has the best music taste? Time to settle it once and for all.
 
-**Play it now at [aux-wars.com](https://aux-wars.com)**
+**Play it now at [https://aux-wars.com](https://aux-wars.com)**
 
 ## 🎥 See it in action
 
