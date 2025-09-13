@@ -10,13 +10,27 @@ import youtubesearchapi from "youtube-search-api";
 
 export const app = express();
 
+// CORS origin function to handle multiple domains dynamically
+const corsOriginFunction = (origin, callback) => {
+  const allowedOrigins = [
+    "https://aux-wars.com",
+    "https://www.aux-wars.com",
+    "http://localhost:5173"
+  ];
+  
+  // Allow requests with no origin (like mobile apps or curl requests)
+  if (!origin) return callback(null, true);
+  
+  if (allowedOrigins.includes(origin)) {
+    callback(null, true);
+  } else {
+    callback(new Error('Not allowed by CORS'));
+  }
+};
+
 // Configure CORS for Express routes (not Socket.IO)
 app.use(cors({
-  origin: [
-    "https://aux-wars.com",
-    "https://www.aux-wars.com", 
-    "http://localhost:5173"
-  ],
+  origin: corsOriginFunction,
   methods: ["GET", "POST"],
   credentials: true,
   allowedHeaders: ["Content-Type"]
@@ -43,11 +57,7 @@ export const server = http.createServer(app);
 // Initialize Socket.IO with proper CORS configuration
 export const io = new Server(server, {
   cors: {
-    origin: [
-      "https://aux-wars.com",
-      "https://www.aux-wars.com",
-      "http://localhost:5173"
-    ],
+    origin: corsOriginFunction,
     methods: ["GET", "POST"],
     credentials: true,
     allowedHeaders: ["content-type"]
