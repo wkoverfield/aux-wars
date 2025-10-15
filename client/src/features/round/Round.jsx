@@ -12,6 +12,7 @@ import PromptModal from "./PromptModal";
 import WaitingScreen from "./WaitingScreen";
 import RatingScreen from "./RatingScreen";
 import SnippetSelector from "../../components/SnippetSelector";
+import { useSession } from "../../hooks/useSession";
 
 /**
  * Round component manages the game round flow including song selection and rating phases.
@@ -32,6 +33,7 @@ export default function Round() {
   const submitSong = useMutation(api.game.flow.submitSong);
   const submitRating = useMutation(api.game.flow.submitRating);
   const { showToast } = useToast();
+  const { session } = useSession();
 
   // State Management
   // ===============
@@ -66,10 +68,7 @@ export default function Round() {
   // =======
 
 
-  /**
-   * Redirects to lobby if not connected to socket
-   */
-  useEffect(() => {}, []);
+  // Phase-driven navigation handled by GameRouteGuard
 
   /**
    * Handles prompt updates and requests current prompt on mount
@@ -100,20 +99,21 @@ export default function Round() {
     }
   }, [currentRatingStatus]);
 
-  /**
-   * Handles rating phase events and transitions
-   */
-  useEffect(() => {}, []);
+  // Rating transitions are handled on the backend via scheduler and queries
 
-  /**
-   * Auto-skips rating for player's own song
-   */
-  useEffect(() => {}, []);
+  // Auto-skip rating for player's own song
+  useEffect(() => {
+    if (isRatingPhase && songToRate && session?.playerId) {
+      if (songToRate.player?.id === session.playerId && !hasRatingSubmitted) {
+        submitRating({ code: gameCode, playerId: session.playerId, songId: songToRate.songId, rating: -1 })
+          .then(() => setHasRatingSubmitted(true))
+          .catch(() => {});
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRatingPhase, songToRate, session?.playerId]);
 
-  /**
-   * Handles game phase changes and transitions
-   */
-  useEffect(() => {}, []);
+  // Phase changes handled by GameRouteGuard
 
   /**
    * Handles YouTube track search with caching and debouncing
@@ -134,10 +134,9 @@ export default function Round() {
 
     const delayDebounce = setTimeout(async () => {
       try {
-        setSearchError(null); // Clear any previous errors
+        setSearchError(null);
         const result = await searchTracks(searchTerm);
         
-        // The new API always returns an array (empty if failed)
         if (Array.isArray(result)) {
           setSearchResults(result);
           setSearchError(result.length === 0 ? "No songs found. Try different keywords." : null);
@@ -145,7 +144,6 @@ export default function Round() {
           setSearchError("Search service temporarily unavailable. Please try again.");
           setSearchResults([]);
         }
-        
       } catch (error) {
         setSearchError("Connection issue. Please check your internet and try again.");
         // Keep existing results if we have cached ones
@@ -155,34 +153,14 @@ export default function Round() {
       } finally {
         setIsSearching(false);
       }
-    }, 800); // Slightly longer debounce for better UX
+    }, 800);
 
     return () => clearTimeout(delayDebounce);
-  }, [searchTerm, navigate, isTransitioning]);
+  }, [searchTerm]);
 
-  /**
-   * Monitors player count and game viability
-   */
-  useEffect(() => {
-    if (!socket || !isConnected) return;
+  // Player count viability checks (optional) can be rendered from submissionStatus
 
-    if (totalPlayers < 3 && totalPlayers > 0) {
-    }
-  }, [totalPlayers, socket, isConnected, navigate]);
-
-  /**
-   * Handles game error events
-   */
-  useEffect(() => {
-    if (!socket || !isConnected) return;
-
-    socket.on("game-error", ({ message }) => {
-    });
-
-    return () => {
-      socket.off("game-error");
-    };
-  }, [socket, isConnected]);
+  // Errors are surfaced via toasts in mutation catches
 
   // Event Handlers
   // =============
@@ -242,9 +220,7 @@ export default function Round() {
   // ===========
 
 
-  if (!isConnected && !isTransitioning) {
-    return null;
-  }
+  // Always render; connectivity is managed by Convex client
 
   const renderContent = () => {
     if (isRatingPhase) {

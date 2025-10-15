@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import AppDisplay from "./components/AppDisplay";
 import PageTransition from "./components/PageTransition";
 import Home from "./features/lobby/Home";
@@ -11,6 +11,15 @@ import GameRouteGuard from "./components/GameRouteGuard";
 import NavigationBlocker from "./components/NavigationBlocker";
 import ConnectionStatus from "./components/ConnectionStatus";
 import { ToastProvider } from "./contexts/ToastContext";
+import { RoomProvider } from "./services/RoomProvider";
+
+function RoomProviderOutlet() {
+  return (
+    <RoomProvider>
+      <Outlet />
+    </RoomProvider>
+  );
+}
 
 /**
  * App component serves as the root component of the application.
@@ -30,10 +39,12 @@ export default function App() {
                 <Route index element={<PageTransition><Home /></PageTransition>} />
                 <Route path="/lobby" element={<Navigate to="/" replace />} />
                 <Route path="/lobby/:gameCode" element={<GameRouteGuard />}>
-                  <Route index element={<PageTransition><Lobby /></PageTransition>} />
-                  <Route path="round" element={<PageTransition><Round /></PageTransition>} />
-                  <Route path="results" element={<PageTransition><RoundWinner /></PageTransition>} />
-                  <Route path="gamewinner" element={<PageTransition><GameWinner /></PageTransition>} />
+                  <Route element={<RoomProviderOutlet />}>
+                    <Route index element={<PageTransition><Lobby /></PageTransition>} />
+                    <Route path="round" element={<PageTransition><Round /></PageTransition>} />
+                    <Route path="results" element={<PageTransition><RoundWinner /></PageTransition>} />
+                    <Route path="gamewinner" element={<PageTransition><GameWinner /></PageTransition>} />
+                  </Route>
                 </Route>
               </Route>
           </Routes>

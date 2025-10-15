@@ -166,6 +166,46 @@ export const getPlayers = query({
   },
 });
 
+// Custom prompts (shared across lobby)
+export const getCustomPrompts = query({
+  args: { code: v.string() },
+  handler: async (ctx, { code }) => {
+    const prompts = await ctx.db
+      .query("customPrompts")
+      .withIndex("by_room", (q) => q.eq("roomCode", code))
+      .collect();
+    return prompts.map((p) => p.text);
+  },
+});
+
+export const addCustomPrompt = mutation({
+  args: { code: v.string(), text: v.string(), createdBy: v.string() },
+  handler: async (ctx, { code, text, createdBy }) => {
+    const existing = await ctx.db
+      .query("customPrompts")
+      .withIndex("by_room_text", (q) => q.eq("roomCode", code).eq("text", text))
+      .unique();
+    if (existing) return;
+    await ctx.db.insert("customPrompts", {
+      roomCode: code,
+      text,
+      createdBy,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const removeCustomPrompt = mutation({
+  args: { code: v.string(), text: v.string() },
+  handler: async (ctx, { code, text }) => {
+    const existing = await ctx.db
+      .query("customPrompts")
+      .withIndex("by_room_text", (q) => q.eq("roomCode", code).eq("text", text))
+      .unique();
+    if (existing) await ctx.db.delete(existing._id);
+  },
+});
+
 async function generateUniqueCode(ctx: any): Promise<string> {
   const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   while (true) {

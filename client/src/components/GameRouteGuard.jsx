@@ -22,26 +22,39 @@ export default function GameRouteGuard() {
   const hasInitialized = useRef(false);
   const roomData = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
 
-  // Initial validation on mount
+  // Initial validation: stop loading on first data or redirect if missing
   useEffect(() => {
     if (hasInitialized.current) return;
-    // When room data arrives, sync basics and stop validating
-    if (roomData) {
-      const room = roomData.room || roomData;
-      const players = roomData.players || [];
-      if (room?.settings) {
-        dispatch({ type: 'SET_ROUNDS', payload: room.settings.numberOfRounds });
-        dispatch({ type: 'SET_ROUND_LENGTH', payload: room.settings.roundLength });
-        dispatch({ type: 'SET_SELECTED_PROMPTS', payload: room.settings.selectedPrompts });
-      }
-      dispatch({ type: 'SET_PLAYERS', payload: players });
-      dispatch({ type: 'SET_PHASE', payload: room?.phase });
-      dispatch({ type: 'SET_CURRENT_ROUND', payload: room?.currentRound || 1 });
-      if (room?.phase) updateSession({ lastPhase: room.phase });
+    if (roomData === null) {
+      navigate('/', { replace: true });
+      return;
+    }
+    if (roomData !== undefined) {
       hasInitialized.current = true;
       setIsValidating(false);
     }
-  }, [roomData]);
+  }, [roomData, navigate]);
+
+  // Always sync state from room data so routing can react to changes
+  useEffect(() => {
+    if (roomData === null) {
+      navigate('/', { replace: true });
+      return;
+    }
+    if (!roomData) return;
+    const room = roomData.room || roomData;
+    const players = roomData.players || [];
+    if (room?.settings) {
+      dispatch({ type: 'SET_ROUNDS', payload: room.settings.numberOfRounds });
+      dispatch({ type: 'SET_ROUND_LENGTH', payload: room.settings.roundLength });
+      dispatch({ type: 'SET_SELECTED_PROMPTS', payload: room.settings.selectedPrompts });
+    }
+    dispatch({ type: 'SET_PROMPT', payload: room?.currentPrompt || '' });
+    dispatch({ type: 'SET_PLAYERS', payload: players });
+    dispatch({ type: 'SET_PHASE', payload: room?.phase });
+    dispatch({ type: 'SET_CURRENT_ROUND', payload: room?.currentRound || 1 });
+    if (room?.phase) updateSession({ lastPhase: room.phase });
+  }, [roomData, dispatch, updateSession, navigate]);
 
   // Handle phase-based routing
   useEffect(() => {
@@ -65,7 +78,7 @@ export default function GameRouteGuard() {
         targetPath = `${basePath}/round`;
         break;
       case 'rating':
-        targetPath = `${basePath}/rate`;
+        targetPath = `${basePath}/round`;
         break;
       case 'results':
         targetPath = `${basePath}/results`;

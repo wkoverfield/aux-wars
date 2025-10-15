@@ -15,7 +15,8 @@ const corsOriginFunction = (origin, callback) => {
   const allowedOrigins = [
     "https://aux-wars.com",
     "https://www.aux-wars.com",
-    "http://localhost:5173"
+    "http://localhost:5173",
+    "http://localhost:5174"
   ];
   
   // Allow requests with no origin (like mobile apps or curl requests)

@@ -279,6 +279,25 @@ export const advanceRating = internalMutation({
       await calculateResultsInternal(ctx, { code });
       return;
     }
+    // Ensure submitter auto-skip (-1) exists for the current song
+    const current = subs[idx];
+    if (current) {
+      const existing = await ctx.db
+        .query("ratings")
+        .withIndex("by_song", (q) => q.eq("songId", current._id))
+        .collect();
+      const hasSubmitterSkip = existing.some((r) => r.voterId === current.playerId);
+      if (!hasSubmitterSkip) {
+        await ctx.db.insert("ratings", {
+          roomCode: code,
+          round: room.currentRound,
+          songId: current._id,
+          voterId: current.playerId,
+          rating: -1,
+          submittedAt: now(),
+        });
+      }
+    }
     // schedule next check/advance after 60s
     await ctx.scheduler.runAfter(60_000, internal.game.flow.advanceRating, { code });
   },

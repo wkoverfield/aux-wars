@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run convex\" \"npm run client\"",
     "start": "concurrently \"npm run server\" \"npm run client\"",
     "server": "cd server && node index.js",
+    "convex": "npx convex dev",
     "client": "cd client && npm run dev",
     "install-all": "npm install && cd client && npm install && cd ../server && npm install",
     "test": "concurrently \"npm run test:client\" \"npm run test:server\"",

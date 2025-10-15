@@ -12,6 +12,17 @@ export default defineConfig({
     fs: {
       // allow importing Convex generated API types from project root
       allow: ['..']
+    },
+    proxy: {
+      '/convex': {
+        target: 'http://127.0.0.1:3210',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/convex/, '')
+      },
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
+      }
     }
   },
   test: {

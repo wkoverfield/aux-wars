@@ -15,7 +15,6 @@ const errorCounts = new Map();
 const MAX_RETRIES = 3;
 
 // Server endpoint URL
-const CONVEX_SITE_URL = import.meta.env.VITE_CONVEX_SITE_URL || '';
 
 /**
  * Performs the actual YouTube search with error handling
@@ -25,9 +24,11 @@ const CONVEX_SITE_URL = import.meta.env.VITE_CONVEX_SITE_URL || '';
  */
 async function performSearch(query, cacheKey) {
   try {
+    // Use Express endpoint via Vite proxy in dev, explicit URL in prod
+    const baseUrl = import.meta.env.VITE_SERVER_URL || '';
+    const endpoint = baseUrl ? `${baseUrl}/api/youtube/search` : '/api/youtube/search';
     
-    const base = CONVEX_SITE_URL || '';
-    const response = await fetch(`${base}/youtube/search`, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

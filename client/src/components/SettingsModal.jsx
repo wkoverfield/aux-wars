@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGame } from "../services/GameContext";
 // import { useSocket } from "../services/SocketProvider";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { useToast } from "../contexts/ToastContext";
 import PromptCategory from "./PromptCategory";
@@ -23,19 +23,36 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
   const { state, dispatch } = useGame();
   // const socket = useSocket();
   const updateSettingsMutation = useMutation(api.game.rooms.updateSettings);
+  const addCustomPromptMutation = useMutation(api.game.rooms.addCustomPrompt);
+  const removeCustomPromptMutation = useMutation(api.game.rooms.removeCustomPrompt);
   const { showToast } = useToast();
   
   // For hosts creating new games, use saved settings. For joining players, use game state.
   const savedSettings = isHost ? getSavedSettings() : null;
   const [rounds, setRounds] = useState(state.numberOfRounds);
   const [selectedPrompts, setSelectedPrompts] = useState(state.selectedPrompts);
-  const [customPrompts, setCustomPrompts] = useState(savedSettings?.customPrompts || []);
+  // Shared custom prompts, reactive per room
+  const roomCustomPrompts = useQuery(
+    api.game.rooms.getCustomPrompts,
+    gameCode ? { code: gameCode } : 'skip'
+  );
 
   // Sync local state if game context changes externally
   useEffect(() => {
     setRounds(state.numberOfRounds);
     setSelectedPrompts(state.selectedPrompts);
   }, [state.numberOfRounds, state.selectedPrompts]);
+
+  // Merge shared custom prompts into current selection when they change
+  useEffect(() => {
+    if (Array.isArray(roomCustomPrompts)) {
+      setSelectedPrompts((prev) => {
+        const next = new Set(prev);
+        roomCustomPrompts.forEach((p) => next.add(p));
+        return Array.from(next);
+      });
+    }
+  }, [roomCustomPrompts]);
 
   // Handle escape key to close modal
   useEffect(() => {
@@ -84,21 +101,35 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
    * Adds a custom prompt
    * @param {string} prompt - The custom prompt to add
    */
-  const handleAddCustomPrompt = (prompt) => {
-    const newCustomPrompts = [...customPrompts, prompt];
-    setCustomPrompts(newCustomPrompts);
-    setSelectedPrompts([...selectedPrompts, prompt]);
+  const handleAddCustomPrompt = async (prompt) => {
+    const text = (prompt || '').trim();
+    if (!text) return;
+    if (Array.isArray(roomCustomPrompts) && roomCustomPrompts.length >= 10) {
+      showToast("Max 10 custom prompts per lobby", "warning");
+      return;
+    }
+    try {
+      await addCustomPromptMutation({ code: gameCode, text, createdBy: "anon" });
+      setSelectedPrompts((prev) => [...new Set([...prev, text])]);
+    } catch (_e) {
+      showToast("Failed to add prompt", "error");
+    }
   };
   
   /**
    * Removes a custom prompt
    * @param {number} index - Index of the prompt to remove
    */
-  const handleRemoveCustomPrompt = (index) => {
-    const promptToRemove = customPrompts[index];
-    const newCustomPrompts = customPrompts.filter((_, i) => i !== index);
-    setCustomPrompts(newCustomPrompts);
-    setSelectedPrompts(selectedPrompts.filter(p => p !== promptToRemove));
+  const handleRemoveCustomPrompt = async (index) => {
+    if (!Array.isArray(roomCustomPrompts)) return;
+    const promptToRemove = roomCustomPrompts[index];
+    if (!promptToRemove) return;
+    try {
+      await removeCustomPromptMutation({ code: gameCode, text: promptToRemove });
+      setSelectedPrompts((prev) => prev.filter((p) => p !== promptToRemove));
+    } catch (_e) {
+      showToast("Failed to remove prompt", "error");
+    }
   };
 
   /**
@@ -123,8 +154,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
     // Save settings to localStorage for future games
     localStorage.setItem('aux-wars-settings', JSON.stringify({
       numberOfRounds: rounds,
-      selectedPrompts,
-      customPrompts
+      selectedPrompts
     }));
     
     // Update settings in Convex
@@ -201,7 +231,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
             
             {/* Custom prompts */}
             <CustomPromptInput
-              customPrompts={customPrompts}
+              customPrompts={Array.isArray(roomCustomPrompts) ? roomCustomPrompts : []}
               onAddPrompt={handleAddCustomPrompt}
               onRemovePrompt={handleRemoveCustomPrompt}
               maxPrompts={10}
