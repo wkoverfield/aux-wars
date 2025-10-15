@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation, useParams, Outlet } from 'react-router-dom';
-import { useSocket, useSocketConnection } from '../services/SocketProvider';
+// import { useSocket, useSocketConnection } from '../services/SocketProvider';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { useSession } from '../hooks/useSession';
 import { useGame } from '../services/GameContext';
 
@@ -12,72 +14,34 @@ export default function GameRouteGuard() {
   const navigate = useNavigate();
   const location = useLocation();
   const { gameCode } = useParams();
-  const socket = useSocket();
-  const isConnected = useSocketConnection();
+  // const socket = useSocket();
+  // const isConnected = useSocketConnection();
   const { session, updateSession, isSessionValid } = useSession();
   const { state, dispatch } = useGame();
   const [isValidating, setIsValidating] = useState(true);
   const hasInitialized = useRef(false);
+  const roomData = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
 
   // Initial validation on mount
   useEffect(() => {
-    if (hasInitialized.current) {
-      return;
-    }
-
-    if (!socket || !isConnected) {
-      return;
-    }
-    
-    // If already in game, no need to validate
-    if (state.players?.some(p => p.id === socket.id)) {
+    if (hasInitialized.current) return;
+    // When room data arrives, sync basics and stop validating
+    if (roomData) {
+      const room = roomData.room || roomData;
+      const players = roomData.players || [];
+      if (room?.settings) {
+        dispatch({ type: 'SET_ROUNDS', payload: room.settings.numberOfRounds });
+        dispatch({ type: 'SET_ROUND_LENGTH', payload: room.settings.roundLength });
+        dispatch({ type: 'SET_SELECTED_PROMPTS', payload: room.settings.selectedPrompts });
+      }
+      dispatch({ type: 'SET_PLAYERS', payload: players });
+      dispatch({ type: 'SET_PHASE', payload: room?.phase });
+      dispatch({ type: 'SET_CURRENT_ROUND', payload: room?.currentRound || 1 });
+      if (room?.phase) updateSession({ lastPhase: room.phase });
       hasInitialized.current = true;
       setIsValidating(false);
-      return;
     }
-
-    const validateSession = async () => {
-      
-      // Check for valid session and attempt rejoin
-      if (session && session.gameCode === gameCode && isSessionValid()) {
-        socket.emit('rejoin-game', {
-          gameCode,
-          playerId: session.playerId,
-          playerName: session.playerName
-        }, (response) => {
-          if (response.success) {
-            // Update game state with response data
-            dispatch({ type: 'SET_PLAYERS', payload: response.players });
-            dispatch({ type: 'SET_PHASE', payload: response.phase });
-            dispatch({ type: 'SET_CURRENT_ROUND', payload: response.currentRound });
-            if (response.settings) {
-              dispatch({ type: 'SET_ROUNDS', payload: response.settings.numberOfRounds });
-              dispatch({ type: 'SET_ROUND_LENGTH', payload: response.settings.roundLength });
-              dispatch({ type: 'SET_SELECTED_PROMPTS', payload: response.settings.selectedPrompts });
-            }
-            updateSession({ lastPhase: response.phase });
-          } else {
-            // Invalid session - will redirect to lobby
-          }
-          setIsValidating(false);
-        });
-      } else {
-        // No valid session, check if already in game
-        if (state.players?.some(p => p.id === socket.id)) {
-          setIsValidating(false);
-        } else if (location.pathname === `/lobby/${gameCode}`) {
-          // We're already in the lobby, let the Lobby component handle joining
-          setIsValidating(false);
-        } else {
-          // Need to join from lobby
-          navigate(`/lobby/${gameCode}`, { replace: true });
-        }
-      }
-    };
-
-    hasInitialized.current = true;
-    validateSession();
-  }, [socket, isConnected, gameCode, session, isSessionValid, state.players, dispatch, updateSession, navigate]);
+  }, [roomData]);
 
   // Handle phase-based routing
   useEffect(() => {

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useSocket, useSocketConnection } from "../../services/SocketProvider";
+// import { useSocket, useSocketConnection } from "../../services/SocketProvider";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import PlayerList from "../../components/PlayerList";
@@ -17,7 +19,7 @@ import settingsIcon from "../../assets/settings-btn.svg";
  * @returns {JSX.Element} Rendered component
  */
 export default function Lobby() {
-  const socket = useSocket();
+  // const socket = useSocket();
   const navigate = useNavigate();
   const { gameCode: routeGameCode } = useParams();
   const { dispatch } = useGame();
@@ -31,149 +33,67 @@ export default function Lobby() {
   const [animateInput, setAnimateInput] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const allPlayersReady = players.every((player) => player.isReady);
-  const isConnected = useSocketConnection();
+  // const isConnected = useSocketConnection();
+  const playersQuery = useQuery(api.game.rooms.getPlayers, routeGameCode ? { code: routeGameCode } : 'skip');
+  const roomQuery = useQuery(api.game.rooms.getRoomByCode, routeGameCode ? { code: routeGameCode } : 'skip');
+  const updatePlayerName = useMutation(api.game.rooms.updatePlayerName);
+  const leaveGame = useMutation(api.game.rooms.leaveGame);
+  const startGame = useMutation(api.game.flow.startGame);
   const hasJoinedGame = useRef(false);
 
   // Join game only once when component mounts
   useEffect(() => {
-    if (!socket || hasJoinedGame.current) {
-      return;
-    }
-
-    // Check if we have a valid session and are already joined
-    if (session && session.gameCode === routeGameCode) {
-      hasJoinedGame.current = true;
-      setGameCode(routeGameCode);
-      setName(session.playerName || "");
-      // We've already joined from Home, no need to rejoin
-      return;
-    }
-
-    const joinGame = (code, initialName = "") => {
-      const playerId = session?.playerId || crypto.randomUUID();
-      
-      socket.emit("join-game", { gameCode: code, name: initialName, playerId }, (response) => {
-        if (!response.success) {
-          navigate("/");
-        } else {
-          // Create or update session
-          createSession({
-            playerId: response.playerId || playerId,
-            gameCode: code,
-            playerName: initialName,
-            lastPhase: 'lobby'
-          });
-          
-          if (response.settings) {
-            // Apply the game settings from the host
-            dispatch({ type: "SET_ROUNDS", payload: response.settings.numberOfRounds });
-            dispatch({ type: "SET_ROUND_LENGTH", payload: response.settings.roundLength });
-            dispatch({ type: "SET_SELECTED_PROMPTS", payload: response.settings.selectedPrompts });
-          }
-          
-          hasJoinedGame.current = true;
-        }
-      });
-    };
-
     if (!routeGameCode) {
-      // This shouldn't happen since we join from Home now
       navigate("/");
-    } else {
-      // Join existing game - but this should already be done from Home
-      setGameCode(routeGameCode);
-      joinGame(routeGameCode, name);
+      return;
     }
-  }, [socket, routeGameCode, navigate, session, createSession, dispatch, name]);
+    setGameCode(routeGameCode);
+    setName(session?.playerName || "");
+  }, [routeGameCode, session]);
 
   // Set up socket event listeners
   useEffect(() => {
-    if (!socket) {
-      navigate("/");
-      return;
+    if (Array.isArray(playersQuery)) {
+      setPlayers(playersQuery);
     }
-
-    // Set up event listener for player updates
-    const handleUpdatePlayers = (updatedPlayers) => setPlayers(updatedPlayers);
-    socket.on("update-players", handleUpdatePlayers);
-
-    // Cleanup function to remove event listeners
-    return () => {
-      socket.off("update-players", handleUpdatePlayers);
-    };
-  }, [socket, navigate]);
+  }, [playersQuery]);
 
   // Update host status when players change
   useEffect(() => {
-    const currentPlayer = players.find((player) => player.id === socket?.id);
-    if (currentPlayer) {
-      setIsHost(currentPlayer.isHost);
-      // Don't sync ready state from server to avoid infinite loops
-      // Local state should be the source of truth for user-controlled actions
-    }
-  }, [players, socket]);
+    const me = players.find((p) => p.playerId === session?.playerId);
+    if (me) setIsHost(me.isHost);
+  }, [players, session]);
 
   // Update player's name and ready status
   useEffect(() => {
-    // Always emit player updates when name or ready status changes
-    if (gameCode && socket) {
-      socket.emit("update-player-name", { gameCode, name, isReady });
-      // Update session with new name
-      if (session && name !== session.playerName) {
-        updateSession({ playerName: name });
-      }
-    }
+    const run = async () => {
+      if (!gameCode || !session?.playerId) return;
+      await updatePlayerName({ code: gameCode, playerId: session.playerId, name, isReady });
+      if (session && name !== session.playerName) updateSession({ playerName: name });
+    };
+    run();
   }, [name, isReady]);
 
   // Listen for game settings updates from the server
   useEffect(() => {
-    if (!socket) return;
-    socket.on("game-settings-updated", (updatedSettings) => {
+    const updatedSettings = roomQuery?.room?.settings || roomQuery?.settings;
+    if (updatedSettings) {
       dispatch({ type: "SET_ROUNDS", payload: updatedSettings.numberOfRounds });
-      dispatch({
-        type: "SET_ROUND_LENGTH",
-        payload: updatedSettings.roundLength,
-      });
-      dispatch({
-        type: "SET_SELECTED_PROMPTS",
-        payload: updatedSettings.selectedPrompts,
-      });
-    });
-    return () => socket.off("game-settings-updated");
-  }, [socket, dispatch]);
+      dispatch({ type: "SET_ROUND_LENGTH", payload: updatedSettings.roundLength });
+      dispatch({ type: "SET_SELECTED_PROMPTS", payload: updatedSettings.selectedPrompts });
+    }
+  }, [roomQuery]);
 
-  // Listen for phase updates
-  useEffect(() => {
-    if (!socket) return;
-    socket.on("game-phase-updated", ({ phase }) => {
-      // GameRouteGuard will handle navigation based on phase
-      dispatch({ type: "SET_PHASE", payload: phase });
-    });
-    return () => socket.off("game-phase-updated");
-  }, [socket, dispatch]);
-
-  // Listen for "game-started" event and update current prompt
-  useEffect(() => {
-    if (!socket) return;
-    socket.on("game-started", (data = {}) => {
-      const { prompt } = data;
-      if (prompt) {
-        dispatch({ type: "SET_CURRENT_PROMPT", payload: prompt });
-      }
-      // Navigation will be handled by phase update
-    });
-    return () => socket.off("game-started");
-  }, [socket, dispatch]);
+  // Phase and prompt updates are driven by Convex queries via GameRouteGuard
 
   /**
    * Handles leaving the game and returning to home
    */
-  const handleLeaveGame = () => {
-    if (gameCode) {
-      socket.emit("leave-game", { gameCode });
-      clearSession(); // Clear the session when leaving
-      navigate("/lobby", { replace: true });
-    }
+  const handleLeaveGame = async () => {
+    if (!gameCode || !session?.playerId) return;
+    await leaveGame({ code: gameCode, playerId: session.playerId });
+    clearSession();
+    navigate("/lobby", { replace: true });
   };
 
   const pulseAnimation = {
@@ -196,25 +116,8 @@ export default function Lobby() {
   /**
    * Handles starting the game with validation checks
    */
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
     
-    if (!socket) {
-      return;
-    }
-
-    if (!isConnected) {
-      // Try to reconnect the socket
-      socket.connect();
-      // Wait a moment for the connection to establish
-      setTimeout(() => {
-        if (socket.connected) {
-          socket.emit("start-game", { gameCode });
-        } else {
-        }
-      }, 1000);
-      return;
-    }
-
     if (!isHost) {
       return;
     }
@@ -226,8 +129,8 @@ export default function Lobby() {
     if (players.length < 3) {
       return;
     }
-
-    socket.emit("start-game", { gameCode });
+    if (!session?.playerId) return;
+    await startGame({ code: gameCode, playerId: session.playerId });
   };
 
   return (

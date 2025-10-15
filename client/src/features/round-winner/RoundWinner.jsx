@@ -2,11 +2,9 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGame } from "../../services/GameContext";
-import {
-  useSocket,
-  useSocketConnection,
-  useGameTransition,
-} from "../../services/SocketProvider";
+// import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
 import Song from "../../components/Song";
 import SearchBar from "../../components/SearchBar";
 import recordLogo from "../../components/record-logo.svg";
@@ -21,10 +19,12 @@ import nextIcon from "../../assets/next-icon.svg";
 export default function RoundWinner() {
   const { gameCode } = useParams();
   const navigate = useNavigate();
-  const socket = useSocket();
-  const isConnected = useSocketConnection();
-  const setGameTransition = useGameTransition();
+  // const socket = useSocket();
+  // const isConnected = useSocketConnection();
+  const setGameTransition = () => {};
   const { state, dispatch } = useGame();
+  const roundResultsQuery = useQuery(api.game.flow.getRoundResults, gameCode && state.currentRound ? { code: gameCode, round: state.currentRound } : 'skip');
+  const nextRoundMutation = useMutation(api.game.flow.nextRound);
   const { roundResults, currentPrompt, currentRound, numberOfRounds } = state;
   const [receivedResults, setReceivedResults] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -52,62 +52,19 @@ export default function RoundWinner() {
   }, [setGameTransition]);
 
   // Handle connection state
-  useEffect(() => {
-    if (!isConnected && !isTransitioning) {
-      navigate("/lobby", { replace: true });
-    }
-  }, [isConnected, navigate, isTransitioning]);
+  useEffect(() => {}, []);
 
   // Handle game phase updates
-  useEffect(() => {
-    if (!socket || !isConnected) return;
-
-    const handlePhaseUpdate = ({ phase, currentRound }) => {
-      if (typeof currentRound !== "undefined") {
-        dispatch({ type: "SET_CURRENT_ROUND", payload: currentRound });
-      }
-      if (phase === "results") {
-        dispatch({ type: "CLEAR_ROUND_RESULTS" });
-        setLoadingResults(true);
-        setReceivedResults(false);
-        socket.emit("request-round-results", { gameCode });
-      }
-      dispatch({ type: "SET_PHASE", payload: phase });
-    };
-
-    socket.on("game-phase-updated", handlePhaseUpdate);
-    return () => socket.off("game-phase-updated", handlePhaseUpdate);
-  }, [socket, gameCode, dispatch, isConnected]);
+  useEffect(() => {}, []);
 
   // Handle round results
   useEffect(() => {
-    if (!socket || !isConnected) {
-      return;
-    }
-    
-    if (receivedResults) {
-      return;
-    }
-
-    const handleRoundResults = ({ results }) => {
-      dispatch({ type: "SET_ROUND_RESULTS", payload: results });
+    if (roundResultsQuery) {
+      dispatch({ type: "SET_ROUND_RESULTS", payload: roundResultsQuery });
       setReceivedResults(true);
       setLoadingResults(false);
-    };
-
-    socket.on("round-results", handleRoundResults);
-
-    if (!roundResults?.songs || roundResults.songs.length === 0) {
-      setLoadingResults(true);
-      socket.emit("request-round-results", { gameCode });
-    } else {
-      setLoadingResults(false);
     }
-
-    return () => {
-      socket.off("round-results", handleRoundResults);
-    };
-  }, [socket, isConnected, gameCode, roundResults, dispatch]);
+  }, [roundResultsQuery]);
 
   // Handle prompt updates
   useEffect(() => {
@@ -125,18 +82,11 @@ export default function RoundWinner() {
   /**
    * Handles the transition to the next round or final results
    */
-  const handleNextRound = () => {
+  const handleNextRound = async () => {
     if (isTransitioning) return;
     setIsTransitioning(true);
     setGameTransition(true);
-
-    if (isFinalRound) {
-      dispatch({ type: "SET_GAME_OVER", payload: true });
-      socket.emit("next-round", { gameCode });
-    } else {
-      dispatch({ type: "NEXT_ROUND" });
-      socket.emit("next-round", { gameCode });
-    }
+    await nextRoundMutation({ code: gameCode, playerId: state.players.find(p => p.isHost)?.playerId });
   };
 
   // Use state to prevent button text flickering

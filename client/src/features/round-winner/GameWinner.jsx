@@ -1,7 +1,9 @@
 import React, { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useGame } from '../../services/GameContext';
-import { useSocket, useSocketConnection, useGameTransition } from '../../services/SocketProvider';
+// import { useSocket, useSocketConnection, useGameTransition } from '../../services/SocketProvider';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../../../../convex/_generated/api';
 import { useSession } from '../../hooks/useSession';
 import PlayerResultWithHover from '../../components/PlayerResultWithHover';
 import AnimatedLogo from '../../components/AnimatedLogo';
@@ -16,12 +18,14 @@ import backIcon from '../../assets/back-icon.svg';
 export default function GameWinner() {
   const { gameCode } = useParams();
   const navigate = useNavigate();
-  const socket = useSocket();
-  const isConnected = useSocketConnection();
-  const setGameTransition = useGameTransition();
+  // const socket = useSocket();
+  // const isConnected = useSocketConnection();
+  const setGameTransition = () => {};
+  const allRoundResultsQuery = useQuery(api.game.flow.getAllRoundResults, gameCode ? { code: gameCode } : 'skip');
+  const returnToLobbyMutation = useMutation(api.game.flow.returnToLobby);
   const { updateSession } = useSession();
   const { state, dispatch } = useGame();
-  const { allRoundResults } = state;
+  const { allRoundResults: stateAllRoundResults } = state;
 
   // Handle game transition animation
   useEffect(() => {
@@ -33,11 +37,7 @@ export default function GameWinner() {
   }, [setGameTransition]);
 
   // Handle disconnection
-  useEffect(() => {
-    if (!isConnected) {
-      navigate("/lobby", { replace: true });
-    }
-  }, [isConnected, navigate]);
+  useEffect(() => {}, []);
 
   /**
    * Builds player statistics from round results including wins, records, and songs.
@@ -50,7 +50,10 @@ export default function GameWinner() {
    */
   const buildPlayerStats = () => {
     const stats = {};
-    Object.values(allRoundResults || {}).forEach((round, roundIdx) => {
+    const rounds = Array.isArray(allRoundResultsQuery)
+      ? allRoundResultsQuery
+      : Object.values(stateAllRoundResults || {});
+    rounds.forEach((round, roundIdx) => {
       if (!round.songs) return;
       
       const winnerSongId = round.winnerSongId;
@@ -98,11 +101,11 @@ export default function GameWinner() {
    * Handles returning to the lobby and resetting game state.
    * Emits a return-to-lobby event to the server and navigates back to the lobby.
    */
-  const handleReturnToLobby = () => {
+  const handleReturnToLobby = async () => {
     setGameTransition(true);
     dispatch({ type: "RESET_GAME" });
-    socket.emit("return-to-lobby", { gameCode });
-    updateSession({ lastPhase: 'lobby' }); // Update session phase
+    await returnToLobbyMutation({ code: gameCode, playerId: state.players.find(p => p.isHost)?.playerId });
+    updateSession({ lastPhase: 'lobby' });
     navigate(`/lobby/${gameCode}`, { replace: true });
   };
 

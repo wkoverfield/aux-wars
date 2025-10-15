@@ -15,7 +15,7 @@ const errorCounts = new Map();
 const MAX_RETRIES = 3;
 
 // Server endpoint URL
-const SERVER_BASE_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+const CONVEX_SITE_URL = import.meta.env.VITE_CONVEX_SITE_URL || '';
 
 /**
  * Performs the actual YouTube search with error handling
@@ -26,7 +26,8 @@ const SERVER_BASE_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:300
 async function performSearch(query, cacheKey) {
   try {
     
-    const response = await fetch(`${SERVER_BASE_URL}/api/youtube/search`, {
+    const base = CONVEX_SITE_URL || '';
+    const response = await fetch(`${base}/youtube/search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

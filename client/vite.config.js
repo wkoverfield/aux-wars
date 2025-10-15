@@ -8,6 +8,12 @@ export default defineConfig({
     react(),
     tailwindcss()
   ],
+  server: {
+    fs: {
+      // allow importing Convex generated API types from project root
+      allow: ['..']
+    }
+  },
   test: {
     globals: true,
     environment: 'jsdom',

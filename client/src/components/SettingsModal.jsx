@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGame } from "../services/GameContext";
-import { useSocket } from "../services/SocketProvider";
+// import { useSocket } from "../services/SocketProvider";
+import { useMutation } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import { useToast } from "../contexts/ToastContext";
 import PromptCategory from "./PromptCategory";
 import CustomPromptInput from "./CustomPromptInput";
@@ -19,7 +21,8 @@ import { getSavedSettings } from "../hooks/useSettingsPersistence";
  */
 export default function SettingsModal({ showModal, onClose, gameCode, isHost = false }) {
   const { state, dispatch } = useGame();
-  const socket = useSocket();
+  // const socket = useSocket();
+  const updateSettingsMutation = useMutation(api.game.rooms.updateSettings);
   const { showToast } = useToast();
   
   // For hosts creating new games, use saved settings. For joining players, use game state.
@@ -124,13 +127,8 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
       customPrompts
     }));
     
-    // Emit updated settings to the server so all clients get synchronized
-    socket.emit("update-game-settings", {
-      gameCode,
-      numberOfRounds: rounds,
-      roundLength: 30, // Fixed for now
-      selectedPrompts
-    });
+    // Update settings in Convex
+    updateSettingsMutation({ code: gameCode, numberOfRounds: rounds, roundLength: 30, selectedPrompts });
     onClose();
   };
 

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useGame } from "../../services/GameContext";
-import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
+// import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
 import { searchTracks, getCachedResults } from "../../services/serverYoutubeApi";
 import { useToast } from "../../contexts/ToastContext";
 import RoundStart from "./RoundStart";
@@ -20,10 +22,15 @@ import SnippetSelector from "../../components/SnippetSelector";
 export default function Round() {
   const { gameCode } = useParams();
   const navigate = useNavigate();
-  const socket = useSocket();
-  const isConnected = useSocketConnection();
-  const setGameTransition = useGameTransition();
+  // const socket = useSocket();
+  // const isConnected = useSocketConnection();
+  const setGameTransition = () => {};
   const { state, dispatch } = useGame();
+  const currentRatingSong = useQuery(api.game.flow.getCurrentRatingSong, gameCode ? { code: gameCode } : 'skip');
+  const submissionStatus = useQuery(api.game.flow.getSubmissionStatus, gameCode ? { code: gameCode } : 'skip');
+  const currentRatingStatus = useQuery(api.game.flow.getCurrentRatingStatus, gameCode ? { code: gameCode } : 'skip');
+  const submitSong = useMutation(api.game.flow.submitSong);
+  const submitRating = useMutation(api.game.flow.submitRating);
   const { showToast } = useToast();
 
   // State Management
@@ -62,160 +69,51 @@ export default function Round() {
   /**
    * Redirects to lobby if not connected to socket
    */
-  useEffect(() => {
-    if (!isConnected && !isTransitioning) {
-      if (!window.location.pathname.includes('/lobby/')) {
-        navigate("/lobby", { replace: true });
-      }
-    }
-  }, [isConnected, navigate, isTransitioning]);
+  useEffect(() => {}, []);
 
   /**
    * Handles prompt updates and requests current prompt on mount
    */
   useEffect(() => {
-    if (!socket || !isConnected) return;
-
-    const handlePromptUpdate = ({ prompt }) => {
-      dispatch({ type: "SET_PROMPT", payload: prompt });
-    };
-
-    socket.on("prompt-updated", handlePromptUpdate);
-    socket.emit("request-prompt", { gameCode });
-
-    return () => {
-      socket.off("prompt-updated", handlePromptUpdate);
-    };
-  }, [socket, isConnected, dispatch, gameCode]);
+    if (currentRatingSong) {
+      // rating phase
+      setIsRatingPhase(true);
+      setSongToRate(currentRatingSong);
+      setHasRatingSubmitted(false);
+    }
+  }, [currentRatingSong]);
 
   /**
    * Manages song submission updates and tracking
    */
   useEffect(() => {
-    if (!socket || !isConnected) return;
+    if (submissionStatus) {
+      setSubmittedCount(submissionStatus.submitted || 0);
+      setTotalPlayers(submissionStatus.total || 0);
+    }
+  }, [submissionStatus]);
 
-    socket.on("song-selected", ({ playerId }) => {
-      if (playerId === socket.id) {
-        setHasSongSubmitted(true);
-      }
-      setSubmittedCount(prev => prev + 1);
-    });
-
-    socket.on("song-submission-update", ({ submitted, total }) => {
-      setSubmittedCount(submitted);
-      setTotalPlayers(total);
-    });
-
-    socket.emit("get-submission-status", { gameCode });
-
-    return () => {
-      socket.off("song-selected");
-      socket.off("song-submission-update");
-    };
-  }, [socket, isConnected, gameCode]);
+  useEffect(() => {
+    if (currentRatingStatus) {
+      setRatingSubmittedCount(currentRatingStatus.submitted || 0);
+      setTotalPlayers(currentRatingStatus.total || 0);
+    }
+  }, [currentRatingStatus]);
 
   /**
    * Handles rating phase events and transitions
    */
-  useEffect(() => {
-    if (!socket || !isConnected) return;
-
-    socket.on("start-rating", (data) => {
-      const { ratingIndex, totalSongs, songToRate } = data;
-      
-      setGameTransition(true);
-      
-      setIsRatingPhase(true);
-      setRatingIndex(ratingIndex);
-      setTotalSongs(totalSongs);
-      setSongToRate(songToRate);
-      setHasRatingSubmitted(false);
-      setRatingSubmittedCount(0);
-      
-      if (songToRate.player.id === socket.id) {
-        socket.emit("submit-rating", {
-          gameCode,
-          songId: songToRate.songId,
-          rating: -1,
-        });
-        setHasRatingSubmitted(true);
-      }
-    });
-
-    socket.on("rating-update", ({ submitted, total }) => {
-      setRatingSubmittedCount(submitted);
-      setTotalPlayers(total);
-    });
-
-    socket.on("round-results", ({ results }) => {
-      setIsTransitioning(true);
-      setGameTransition(true);
-      
-      
-      if (!results || !results.songs) {
-      } else {
-        }
-      
-      dispatch({ type: "SET_ROUND_RESULTS", payload: results });
-      navigate(`/lobby/${gameCode}/results`, { replace: true });
-    });
-
-    return () => {
-      socket.off("start-rating");
-      socket.off("rating-update");
-      socket.off("round-results");
-    };
-  }, [socket, isConnected, gameCode, navigate, dispatch, setGameTransition]);
+  useEffect(() => {}, []);
 
   /**
    * Auto-skips rating for player's own song
    */
-  useEffect(() => {
-    if (isRatingPhase && songToRate && songToRate.player.id === socket.id) {
-      socket.emit("submit-rating", {
-        gameCode,
-        songId: songToRate.songId,
-        rating: -1
-      });
-      setHasRatingSubmitted(true);
-    }
-  }, [isRatingPhase, songToRate, socket, gameCode]);
+  useEffect(() => {}, []);
 
   /**
    * Handles game phase changes and transitions
    */
-  useEffect(() => {
-    if (!socket || !isConnected) return;
-
-    socket.on("game-phase-updated", ({ phase, currentRound }) => {
-      setIsTransitioning(true);
-      setGameTransition(true);
-      
-      dispatch({ type: "SET_PHASE", payload: phase });
-      if (typeof currentRound !== 'undefined') {
-        dispatch({ type: "SET_CURRENT_ROUND", payload: currentRound });
-      }
-      
-      if (phase === "lobby") {
-        if (!window.location.pathname.includes('/lobby/')) {
-          navigate(`/lobby/${gameCode}`, { replace: true });
-        }
-      } else if (phase === "rating") {
-        setIsRatingPhase(true);
-        setHasSongSubmitted(false);
-        setIsTransitioning(false);
-      } else if (phase === "results") {
-        navigate(`/lobby/${gameCode}/results`, { replace: true });
-      } else if (phase === "songSelection") {
-        setIsRatingPhase(false);
-        setHasSongSubmitted(false);
-        setIsSongSelectionView(false);
-        setIsTransitioning(false);
-      }
-    });
-
-    return () => socket.off("game-phase-updated");
-  }, [socket, isConnected, gameCode, navigate, dispatch, setGameTransition]);
+  useEffect(() => {}, []);
 
   /**
    * Handles YouTube track search with caching and debouncing
@@ -302,34 +200,24 @@ export default function Round() {
    * Handles final song submission with snippet times
    * @param {Object} trackWithSnippet - Track object with snippet times
    */
-  const handleConfirmSongWithSnippet = (trackWithSnippet) => {
-    if (!socket || !isConnected) {
-      if (!isTransitioning) {
-        if (!window.location.pathname.includes('/lobby/')) {
-          navigate("/lobby", { replace: true });
-        }
-      }
-      return;
-    }
-
+  const handleConfirmSongWithSnippet = async (trackWithSnippet) => {
     try {
-      socket.emit("song-selected", {
-        gameCode,
+      await submitSong({
+        code: gameCode,
+        playerId: session?.playerId,
         trackId: trackWithSnippet.id,
         trackDetails: {
           name: trackWithSnippet.name,
           artist: trackWithSnippet.artists[0].name,
           albumCover: trackWithSnippet.album.images[0].url,
           previewUrl: trackWithSnippet.preview_url,
-          snippet: trackWithSnippet.snippet
+          snippet: trackWithSnippet.snippet,
         },
       });
     } catch (error) {
-      console.error("Failed to submit song:", error);
       showToast("Failed to submit song. Please try again.", "error");
       return;
     }
-
     setHasSongSubmitted(true);
     setIsSongSelectionView(false);
     setShowSnippetSelector(false);
@@ -341,32 +229,13 @@ export default function Round() {
    * @param {string} songId - The ID of the song being rated
    * @param {number} rating - The rating value
    */
-  const handleSubmitRating = (songId, rating) => {
-    if (!socket || !isConnected) {
-      if (!isTransitioning) {
-        if (!window.location.pathname.includes('/lobby/')) {
-          navigate("/lobby", { replace: true });
-        }
-      }
-      return;
+  const handleSubmitRating = async (songId, rating) => {
+    try {
+      await submitRating({ code: gameCode, playerId: session?.playerId, songId, rating });
+      setHasRatingSubmitted(true);
+    } catch (e) {
+      showToast("Failed to submit rating.", "error");
     }
-    
-    socket.emit("submit-rating", {
-      gameCode,
-      songId,
-      rating
-    });
-    
-    setHasRatingSubmitted(true);
-    
-    dispatch({
-      type: "ADD_SONG_RATING",
-      payload: {
-        songId,
-        rating,
-        voterId: socket.id
-      }
-    });
   };
 
   // Render Logic

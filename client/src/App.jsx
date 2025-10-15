@@ -2,7 +2,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import AppDisplay from "./components/AppDisplay";
 import PageTransition from "./components/PageTransition";
 import Home from "./features/lobby/Home";
-import { SocketProvider } from "./services/SocketProvider";
 import Lobby from "./features/lobby/Lobby";
 import { GameProvider } from "./services/GameContext";
 import Round from "./features/round/Round";
@@ -24,10 +23,9 @@ export default function App() {
     <Router>
       <ToastProvider>
         <GameProvider>
-          <SocketProvider>
-            <NavigationBlocker />
-            <ConnectionStatus />
-            <Routes>
+          <NavigationBlocker />
+          <ConnectionStatus />
+          <Routes>
               <Route path="/" element={<AppDisplay />}>
                 <Route index element={<PageTransition><Home /></PageTransition>} />
                 <Route path="/lobby" element={<Navigate to="/" replace />} />
@@ -38,8 +36,7 @@ export default function App() {
                   <Route path="gamewinner" element={<PageTransition><GameWinner /></PageTransition>} />
                 </Route>
               </Route>
-            </Routes>
-          </SocketProvider>
+          </Routes>
         </GameProvider>
       </ToastProvider>
     </Router>
