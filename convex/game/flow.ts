@@ -49,6 +49,14 @@ export const submitSong = mutation({
       console.log(`[submitSong] Early return - room: ${!!room}, phase: ${room?.phase}`);
       return;
     }
+    // Validate that the submitting player belongs to this room
+    const players = await getPlayers(ctx, code);
+    const isKnownPlayer = players.some((p) => p.playerId === playerId);
+    if (!isKnownPlayer) {
+      console.log(`[submitSong] Rejecting submission: player ${playerId} not in room ${code}. Known players:`, players.map(p => p.playerId));
+      return;
+    }
+
     // Prevent duplicate submission by the same player in the same round
     const existingForPlayerThisRound = await ctx.db
       .query("submissions")
@@ -68,7 +76,6 @@ export const submitSong = mutation({
       });
     }
     
-    const players = await getPlayers(ctx, code);
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
