@@ -37,6 +37,7 @@ export default function Lobby() {
   const playersQuery = useQuery(api.game.rooms.getPlayers, routeGameCode ? { code: routeGameCode } : 'skip');
   const roomQuery = useQuery(api.game.rooms.getRoomByCode, routeGameCode ? { code: routeGameCode } : 'skip');
   const updatePlayerName = useMutation(api.game.rooms.updatePlayerName);
+  const joinGame = useMutation(api.game.rooms.joinGame);
   const leaveGame = useMutation(api.game.rooms.leaveGame);
   const startGame = useMutation(api.game.flow.startGame);
   const hasJoinedGame = useRef(false);
@@ -63,6 +64,29 @@ export default function Lobby() {
     const me = players.find((p) => p.playerId === session?.playerId);
     if (me) setIsHost(me.isHost);
   }, [players, session]);
+
+  // If this tab's session.playerId is not present in room players, auto-join as a new player
+  const autoJoinAttempted = useRef(false);
+  useEffect(() => {
+    const run = async () => {
+      if (autoJoinAttempted.current) return;
+      if (!routeGameCode || !Array.isArray(players)) return;
+
+      const isInRoom = session?.playerId && players.some(p => p.playerId === session.playerId);
+      if (isInRoom) return;
+
+      autoJoinAttempted.current = true;
+      const newPlayerId = crypto.randomUUID();
+      const tempName = session?.playerName?.trim() || `Player ${Math.floor(Math.random() * 100) + 1}`;
+      try {
+        const resp = await joinGame({ code: routeGameCode, playerId: newPlayerId, name: tempName });
+        if (resp?.success) {
+          createSession({ gameCode: routeGameCode, playerId: newPlayerId, playerName: tempName, lastPhase: 'lobby' });
+        }
+      } catch (_) {}
+    };
+    run();
+  }, [players, routeGameCode, session?.playerId]);
 
   // Update player's name and ready status
   useEffect(() => {
