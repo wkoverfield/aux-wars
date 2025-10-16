@@ -74,10 +74,15 @@ export default function Home() {
     }
 
     const code = joinCode.trim().toUpperCase();
-    const playerId = crypto.randomUUID();
+    let playerId = crypto.randomUUID();
     const tempName = `Player ${Math.floor(Math.random() * 100) + 1}`;
     try {
-      const resp = await joinGame({ code, name: tempName, playerId });
+      let resp = await joinGame({ code, name: tempName, playerId });
+      // If duplicate player detected (e.g., second tab with same storage), retry with a new ID
+      if (resp && resp.code === "DUPLICATE_PLAYER") {
+        playerId = crypto.randomUUID();
+        resp = await joinGame({ code, name: tempName, playerId });
+      }
       if (resp?.success) {
         createSession({ gameCode: code, playerId, playerName: tempName, lastPhase: 'lobby' });
         navigate(`/lobby/${code}`);

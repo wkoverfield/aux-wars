@@ -37,7 +37,6 @@ export default function Lobby() {
   const playersQuery = useQuery(api.game.rooms.getPlayers, routeGameCode ? { code: routeGameCode } : 'skip');
   const roomQuery = useQuery(api.game.rooms.getRoomByCode, routeGameCode ? { code: routeGameCode } : 'skip');
   const updatePlayerName = useMutation(api.game.rooms.updatePlayerName);
-  const joinGame = useMutation(api.game.rooms.joinGame);
   const leaveGame = useMutation(api.game.rooms.leaveGame);
   const startGame = useMutation(api.game.flow.startGame);
   const hasJoinedGame = useRef(false);
@@ -65,32 +64,18 @@ export default function Lobby() {
     if (me) setIsHost(me.isHost);
   }, [players, session]);
 
-  // If this tab's session.playerId is not in the room, auto-create a new player and update session
-  useEffect(() => {
-    const ensurePresence = async () => {
-      if (!routeGameCode) return;
-      if (!session) return;
-      const inRoom = players.some((p) => p.playerId === session.playerId);
-      if (!inRoom) {
-        const newPlayerId = crypto.randomUUID();
-        const tempName = session.playerName || `Player ${Math.floor(Math.random() * 100) + 1}`;
-        try {
-          const resp = await joinGame({ code: routeGameCode, name: tempName, playerId: newPlayerId });
-          if (resp?.success) {
-            updateSession({ playerId: newPlayerId, playerName: tempName, gameCode: routeGameCode });
-            showToast("Rejoined lobby as a new player in this tab.", "info");
-          }
-        } catch {}
-      }
-    };
-    ensurePresence();
-  }, [players, routeGameCode, session, joinGame, updateSession, showToast]);
-
   // Update player's name and ready status
   useEffect(() => {
     const run = async () => {
       if (!gameCode || !session?.playerId) return;
-      await updatePlayerName({ code: gameCode, playerId: session.playerId, name, isReady });
+      const resp = await updatePlayerName({ code: gameCode, playerId: session.playerId, name, isReady });
+      // If update failed because player not found (e.g., duplicate ID in another tab), force rejoin flow
+      if (resp && resp.code === 'PLAYER_NOT_FOUND') {
+        // Clear session so Home will create a fresh playerId on next navigation
+        clearSession();
+        navigate('/', { replace: true });
+        return;
+      }
       if (session && name !== session.playerName) updateSession({ playerName: name });
     };
     run();

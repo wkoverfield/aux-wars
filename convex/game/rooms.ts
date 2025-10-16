@@ -57,11 +57,13 @@ export const joinGame = mutation({
         await ctx.db.patch(room._id, { hostPlayerId: playerDocId });
       }
     } else {
-      await ctx.db.patch(existing._id, { name, lastSeenAt: now() });
+      // Duplicate playerId attempting to join from another tab/device.
+      // Reject and let the client retry with a fresh playerId to ensure uniqueness.
+      return { success: false, code: "DUPLICATE_PLAYER", message: "Player ID already in use in this room" } as const;
     }
 
     await touchRoom(ctx, room._id);
-    return { success: true, settings: room.settings, playerId };
+    return { success: true, settings: room.settings, playerId } as const;
   },
 });
 
@@ -120,7 +122,7 @@ export const updatePlayerName = mutation({
       .query("players")
       .withIndex("by_player", (q) => q.eq("playerId", playerId).eq("roomCode", code))
       .unique();
-    if (!player) return;
+    if (!player) return { code: 'PLAYER_NOT_FOUND' } as const;
     await ctx.db.patch(player._id, {
       name: name ?? player.name,
       isReady: typeof isReady === "boolean" ? isReady : player.isReady,
@@ -128,6 +130,7 @@ export const updatePlayerName = mutation({
     });
     const room = await getRoomByCodeInternal(ctx, code);
     if (room) await touchRoom(ctx, room._id);
+    return { code: 'OK' } as const;
   },
 });
 
