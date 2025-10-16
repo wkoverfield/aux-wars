@@ -65,28 +65,26 @@ export default function Lobby() {
     if (me) setIsHost(me.isHost);
   }, [players, session]);
 
-  // If this tab's session.playerId is not present in room players, auto-join as a new player
-  const autoJoinAttempted = useRef(false);
+  // If this tab's session.playerId is not in the room, auto-create a new player and update session
   useEffect(() => {
-    const run = async () => {
-      if (autoJoinAttempted.current) return;
-      if (!routeGameCode || !Array.isArray(players)) return;
-
-      const isInRoom = session?.playerId && players.some(p => p.playerId === session.playerId);
-      if (isInRoom) return;
-
-      autoJoinAttempted.current = true;
-      const newPlayerId = crypto.randomUUID();
-      const tempName = session?.playerName?.trim() || `Player ${Math.floor(Math.random() * 100) + 1}`;
-      try {
-        const resp = await joinGame({ code: routeGameCode, playerId: newPlayerId, name: tempName });
-        if (resp?.success) {
-          createSession({ gameCode: routeGameCode, playerId: newPlayerId, playerName: tempName, lastPhase: 'lobby' });
-        }
-      } catch (_) {}
+    const ensurePresence = async () => {
+      if (!routeGameCode) return;
+      if (!session) return;
+      const inRoom = players.some((p) => p.playerId === session.playerId);
+      if (!inRoom) {
+        const newPlayerId = crypto.randomUUID();
+        const tempName = session.playerName || `Player ${Math.floor(Math.random() * 100) + 1}`;
+        try {
+          const resp = await joinGame({ code: routeGameCode, name: tempName, playerId: newPlayerId });
+          if (resp?.success) {
+            updateSession({ playerId: newPlayerId, playerName: tempName, gameCode: routeGameCode });
+            showToast("Rejoined lobby as a new player in this tab.", "info");
+          }
+        } catch {}
+      }
     };
-    run();
-  }, [players, routeGameCode, session?.playerId]);
+    ensurePresence();
+  }, [players, routeGameCode, session, joinGame, updateSession, showToast]);
 
   // Update player's name and ready status
   useEffect(() => {
