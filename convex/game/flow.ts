@@ -40,23 +40,51 @@ export const submitSong = mutation({
     }),
   },
   handler: async (ctx, { code, playerId, trackId, trackDetails }) => {
+    console.log(`[submitSong] Starting submission for player ${playerId} in room ${code}`);
+    
     const room = await getRoom(ctx, code);
-    if (!room || room.phase !== "songSelection") return;
-    await ctx.db.insert("submissions", {
-      roomCode: code,
-      round: room.currentRound,
-      playerId,
-      trackId,
-      trackDetails,
-      submittedAt: now(),
-    });
+    console.log(`[submitSong] Room phase: ${room?.phase}, currentRound: ${room?.currentRound}`);
+    
+    if (!room || room.phase !== "songSelection") {
+      console.log(`[submitSong] Early return - room: ${!!room}, phase: ${room?.phase}`);
+      return;
+    }
+    // Prevent duplicate submission by the same player in the same round
+    const existingForPlayerThisRound = await ctx.db
+      .query("submissions")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+      .collect();
+    const alreadySubmitted = existingForPlayerThisRound.find((s) => s.playerId === playerId);
+    if (alreadySubmitted) {
+      console.log(`[submitSong] Player ${playerId} already submitted for round ${room.currentRound}, skipping insert`);
+    } else {
+      await ctx.db.insert("submissions", {
+        roomCode: code,
+        round: room.currentRound,
+        playerId,
+        trackId,
+        trackDetails,
+        submittedAt: now(),
+      });
+    }
+    
     const players = await getPlayers(ctx, code);
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
       .collect();
-    const allSubmitted = players.every((p) => subs.some((s) => s.playerId === p.playerId));
+      
+    console.log(`[submitSong] Players: ${players.length}, Submissions: ${subs.length}`);
+    console.log(`[submitSong] Player IDs:`, players.map(p => p.playerId));
+    console.log(`[submitSong] Submission player IDs:`, subs.map(s => s.playerId));
+    
+    // Robust unique-submitter check
+    const submittedPlayerIds = new Set(subs.map((s) => s.playerId));
+    const allSubmitted = players.every((p) => submittedPlayerIds.has(p.playerId));
+    console.log(`[submitSong] All submitted: ${allSubmitted}`);
+    
     if (allSubmitted) {
+      console.log(`[submitSong] Starting rating phase!`);
       await startRatingPhaseInternal(ctx, { code });
     }
   },
@@ -134,7 +162,8 @@ export const getSubmissionStatus = query({
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
       .collect();
-    return { submitted: subs.length, total: players.length };
+    const uniqueSubmitters = new Set(subs.map((s) => s.playerId)).size;
+    return { submitted: uniqueSubmitters, total: players.length };
   },
 });
 
@@ -216,11 +245,18 @@ export const getCurrentRatingStatus = query({
 export const startRatingPhaseInternal = internalMutation({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {
+    console.log(`[startRatingPhaseInternal] Starting rating phase for room ${code}`);
     const room = await getRoom(ctx, code);
-    if (!room) return;
+    if (!room) {
+      console.log(`[startRatingPhaseInternal] Room not found for code ${code}`);
+      return;
+    }
+    console.log(`[startRatingPhaseInternal] Updating room phase from ${room.phase} to rating`);
     await ctx.db.patch(room._id, { phase: "rating", currentRatingIndex: 0, lastActivityAt: now() });
+    console.log(`[startRatingPhaseInternal] Room phase updated, scheduling advanceRating`);
     // kick off first rating step shortly
     await ctx.scheduler.runAfter(500, internal.game.flow.advanceRating, { code });
+    console.log(`[startRatingPhaseInternal] advanceRating scheduled for 500ms from now`);
   },
 });
 
@@ -286,7 +322,7 @@ export const advanceRating = internalMutation({
         .query("ratings")
         .withIndex("by_song", (q) => q.eq("songId", current._id))
         .collect();
-      const hasSubmitterSkip = existing.some((r) => r.voterId === current.playerId);
+    const hasSubmitterSkip = existing.some((r) => r.voterId === current.playerId && r.rating === -1);
       if (!hasSubmitterSkip) {
         await ctx.db.insert("ratings", {
           roomCode: code,
