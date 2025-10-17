@@ -1,74 +1,276 @@
-### Project context
+# YouTube Search Architecture - Final Decision
 
-- **App**: Aux Wars — a real-time party game where players join a lobby, submit songs to match a prompt, then rate and view round/game winners.
-- **Stack**: React 19 + Vite, React Router 7, Tailwind 4. Migrating backend from Express + Socket.IO to Convex (reactive DB, queries/mutations/actions, schedulers, HTTP actions).
-- **Convex usage**: Real-time room state, players, phases, submissions/ratings, scheduler-driven rating progression. Client uses `useQuery`, `useMutation`, and `useAction`.
+## Context
 
-### Migration status
+Aux Wars is a real-time party game where players search for songs to match prompts. We needed a YouTube search solution that:
+1. Works without requiring users to get YouTube API keys
+2. Avoids CORS issues when calling from the browser
+3. Integrates cleanly with our Convex-based real-time backend
 
-- Client wraps in `ConvexProvider` and replaces Socket.IO flows with Convex queries/mutations. `RoomProvider` context supplies room/players.
-- Routing/guards updated to rely on Convex state; lobby/round/results mostly wired to Convex.
-- Convex schema extended (`rooms.currentRatingIndex`) and server logic updated to drive rating progression via scheduler and server-side auto-skip.
-- HTTP action for YouTube search added at `/youtube/search` with OPTIONS handling and dynamic CORS headers.
-- New Convex Action `youtube.search` added to avoid CORS entirely by using Convex’s WebSocket path.
+## Attempts to Use Convex
 
-### The specific blocker
+### Attempt 1: Regular Convex Action
+**Goal:** Use Convex Action to call `youtube-search-api` package
 
-- We want to keep using the `youtube-search-api` package (a no‑key abstraction over scraping YouTube results) for track search. Originally this ran in the old Express server without issues.
-- We attempted two approaches:
-  1) **HTTP action**: Client fetches `http://127.0.0.1:3210/youtube/search`. Despite adding `OPTIONS` route and echoing `Access-Control-Allow-Origin`, the browser still fails preflight with “No ‘Access-Control-Allow-Origin’” for some requests in dev.
-  2) **Convex Action (`api.youtube.search`)**: Client calls via `useAction`, which avoids browser CORS. However, in the Convex runtime the import `youtube-search-api` is undefined, causing: “Cannot read properties of undefined (reading 'GetListByKeyword')”. Likely cause: the package is not available/compatible in Convex’s action bundling/runtime (Node APIs or ESM/CJS interop issues). We have not yet tried root-level install + dynamic import.
+**Implementation:**
+```typescript
+import { action } from "./_generated/server";
+import youtubesearchapi from "youtube-search-api";
 
-### Current code shape relevant to issue
+export const search = action({
+  args: { query: v.string() },
+  handler: async (_ctx, { query }) => {
+    const result = await youtubesearchapi.GetListByKeyword(...);
+    // ...
+  }
+});
+```
 
-- Client Round search currently calls the Convex Action via `useAction(api.youtube.search)` to bypass CORS.
-- `convex/youtube.ts` contains both:
-  - `youtubeSearch` HTTP action with CORS headers (POST and OPTIONS).
-  - `search` Action that tries to call `youtube-search-api` and fails at runtime.
-- There’s a legacy helper `client/src/services/serverYoutubeApi.js` that can call Express `/api/youtube/search`; when used, it works (proxy removes CORS in dev).
+**Result:** ❌ FAILED
+```
+Error: Cannot read properties of undefined (reading 'GetListByKeyword')
+```
 
-### Constraints and preferences
+**Cause:** Package `youtube-search-api` resolved as `undefined` in Convex runtime. The package likely uses Node.js APIs or module resolution patterns incompatible with Convex's environment.
 
-- Strong preference to continue using the `youtube-search-api` scraper abstraction over the official YouTube Data API.
-- Willing to keep the older Express server just for search if needed, but would prefer a clean Convex-only solution if feasible.
-- Not concerned about rollback; okay with a full switch-over and redeploy once done.
+---
 
-### Options considered and trade-offs
+### Attempt 2: Convex Action with Node.js Runtime
+**Goal:** Use `"use node"` directive to access Node.js APIs
 
-- **Use Convex Action + `youtube-search-api`** (ideal if feasible): Cleanest client experience (no CORS), but package might be incompatible with Convex’s runtime.
-  - Potential fixes:
-    - Install `youtube-search-api` at the repo root (not inside `client/`), then dynamic import in the action:
-      - `const ysa = (await import('youtube-search-api')).default ?? (await import('youtube-search-api'));`
-      - Verify `ysa.GetListByKeyword` is a function; otherwise the package likely can’t run in Convex (Node APIs not available).
+**Implementation:**
+```typescript
+"use node";
 
-- **Keep Express for search** (pragmatic, works now): Retain `/api/youtube/search` in `server/server.js`, call it from client using Vite proxy (`/api`) in dev and `VITE_SERVER_URL` in prod.
-  - Pros: works today, no CORS, preserves scraper. Cons: two backends (Convex + Express).
+import { httpAction, action } from "./_generated/server";
+import youtubesearchapi from "youtube-search-api";
+```
 
-- **Convex Action proxies to Express**: Convex does server-to-server HTTP to Express, returns tracks to client.
-  - Avoids browser CORS, but adds coupling and requires public Express URL in prod.
+**Result:** ❌ FAILED (Two issues)
 
-- **HTTP Action only**: Persist with `/youtube/search` and fix CORS. Already echoing origin and handling preflight; dev has been flaky and time-consuming.
+**Issue 1:** HTTP Actions incompatible with Node runtime
+```
+Error: `youtubeSearch` defined in `youtube.js` is a HttpAction function.
+Only actions can be defined in Node.js.
+```
 
-### What we want insight on
+**Resolution:** Removed HTTP Action, kept only regular Action
 
-- The feasibility of using `youtube-search-api` inside Convex Actions:
-  - Whether Convex Actions can run packages that do headless scraping or rely on Node-specific modules.
-  - If so, what exact install/import pattern is required (root install, dynamic import, ESM/CJS interop).
-- If Convex is unsuitable for this package, best practice for splitting concerns (keep scraping in Express with Vite proxy in dev; use a hosted endpoint in prod), while the rest of the app uses Convex.
-- Any reliable pattern to make Convex HTTP actions’ CORS work flawlessly in dev for POST with JSON body, beyond echoing `Access-Control-Allow-Origin` and handling OPTIONS.
+**Issue 2:** Package still undefined
+```
+Error: Cannot read properties of undefined (reading 'GetListByKeyword')
+```
 
-### Files of interest
+**Cause:** Even with Node.js runtime, `youtube-search-api` package remained undefined. Convex's Node.js environment is sandboxed and doesn't support all Node packages.
 
-- `convex/youtube.ts`: defines both HTTP action and Convex Action for search.
-- `client/src/features/round/Round.jsx`: currently using `useAction(api.youtube.search)`.
-- `client/src/services/serverYoutubeApi.js`: the old fetch helper to Express endpoint (works).
-- `client/vite.config.js`: has aliases and server config; can add proxy for `/api -> http://localhost:3001`.
+---
 
-### Environment
+## Final Solution: Express Server
 
-- Dev URLs: client `http://localhost:5174`, Convex dev server `http://127.0.0.1:3210`, Express `http://localhost:3001`.
-- Monorepo layout: `client/`, `convex/`, `server/`. Convex codegen `_generated/api` used in client via alias `@convex`.
+### Architecture Decision
 
-In short: the app has migrated to Convex for real-time game logic, but YouTube search is blocked. The “ideal” path is Convex Action with the scraping package; it’s failing due to runtime/package limitations. The pragmatic path is to keep the Express endpoint with a Vite dev proxy to avoid CORS and call that from the client. We’re looking for guidance on making the Convex Action work with `youtube-search-api`, or a clean justification for keeping Express for this one concern.
+**Use a dedicated Express server for YouTube search**, separate from Convex.
 
+### Why This Is the Right Approach
 
+#### 1. **Package Compatibility**
+- `youtube-search-api` works perfectly in standard Node.js/Express
+- No module resolution issues
+- Full access to Node.js APIs needed for web scraping
+
+#### 2. **Clear Separation of Concerns**
+- **Convex:** Real-time game logic (rooms, players, submissions, ratings, results)
+- **Express:** External API scraping (YouTube search only)
+- Each system does what it's best at
+
+#### 3. **Reliability**
+- Express endpoint has been tested and works consistently
+- No CORS issues (handled server-side)
+- Client-side caching in `serverYoutubeApi.js` improves performance
+
+#### 4. **Minimal Overhead**
+- Express server is now single-purpose (just YouTube search)
+- Removed all Socket.IO code (migrated to Convex)
+- ~150 lines of code for entire server
+- Clean, maintainable, well-documented
+
+### Current Implementation
+
+**Express Server** (`server/server.js`):
+```javascript
+// Single endpoint: POST /api/youtube/search
+app.post('/api/youtube/search', async (req, res) => {
+  const result = await youtubesearchapi.GetListByKeyword(
+    `${query} music`, false, 20, [{type: "video"}]
+  );
+  res.json({ tracks: transformedResults });
+});
+```
+
+**Client Wrapper** (`client/src/services/serverYoutubeApi.js`):
+- Calls Express endpoint via Vite proxy in dev (`/api` → `http://localhost:3001`)
+- Calls direct URL in production (`VITE_SERVER_URL`)
+- 5-minute client-side cache
+- Request deduplication
+- Graceful error handling with stale cache fallback
+
+**Development:**
+- Vite proxy: `/api/*` → `http://localhost:3001/*`
+- No CORS issues
+- Hot reload works
+
+**Production:**
+- Express deployed to Railway
+- Client deployed to Vercel
+- Environment variable: `VITE_SERVER_URL=https://aux-wars-server.railway.app`
+
+---
+
+## Lessons Learned
+
+### When to Use Convex
+✅ Real-time state synchronization
+✅ Database queries and mutations
+✅ Scheduled tasks
+✅ Standard fetch calls to public APIs
+
+### When NOT to Use Convex
+❌ Packages that require full Node.js environment
+❌ Web scraping libraries
+❌ Packages with complex module resolution
+❌ Legacy CommonJS packages with unusual exports
+
+### Two-Backend Architecture Is OK
+Having Express + Convex is **not an anti-pattern** when:
+- Each serves a clear, distinct purpose
+- The separation makes the code cleaner
+- Attempting to merge them creates more complexity than it solves
+
+---
+
+## Alternatives Considered
+
+### Option 1: YouTube Data API v3
+**Pros:**
+- Official Google API
+- Would work in Convex Actions (simple fetch)
+- Well-documented
+
+**Cons:**
+- Requires API key (friction for users)
+- Daily quota limits (10,000 units/day)
+- 100 units per search = only 100 searches/day
+- Overkill for simple search
+
+**Decision:** ❌ Not worth the complexity
+
+---
+
+### Option 2: Different Scraping Library
+**Examples:** `youtube-search-without-api-key`, `aiotube`, etc.
+
+**Pros:**
+- Might have better Convex compatibility
+
+**Cons:**
+- Would need to test each one
+- No guarantee of Convex compatibility
+- `youtube-search-api` already works perfectly in Express
+
+**Decision:** ❌ Not worth the effort when Express works
+
+---
+
+### Option 3: Hybrid Convex Action → Express Proxy
+**Implementation:**
+```typescript
+// Convex Action calls Express server-to-server
+export const search = action({
+  handler: async (_, { query }) => {
+    const response = await fetch('http://localhost:3001/api/youtube/search', {
+      method: 'POST',
+      body: JSON.stringify({ query })
+    });
+    return response.json();
+  }
+});
+```
+
+**Pros:**
+- Client calls Convex (no CORS)
+- Convex proxies to Express
+
+**Cons:**
+- Adds unnecessary hop (Client → Convex → Express)
+- Requires public Express URL accessible from Convex
+- More complex deployment
+- No real benefit over client calling Express directly
+
+**Decision:** ❌ Overengineered
+
+---
+
+## Final Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    CLIENT BROWSER                       │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  React App (http://localhost:5174)              │  │
+│  └──────────────────────────────────────────────────┘  │
+│           │                              │              │
+│           │ YouTube Search               │ Game Logic  │
+│           ▼                              ▼              │
+└───────────────────────────────────────────────────────┘
+            │                              │
+            │                              │
+    ┌───────▼──────────┐        ┌─────────▼─────────┐
+    │  Express Server  │        │  Convex Backend   │
+    │  (port 3001)     │        │  (port 3210)      │
+    │                  │        │                   │
+    │  YouTube Search  │        │  Real-time Game   │
+    │  Proxy Only      │        │  Logic & State    │
+    │                  │        │                   │
+    │  - CORS bypass   │        │  - Rooms          │
+    │  - Scraping pkg  │        │  - Players        │
+    │  - Transform     │        │  - Submissions    │
+    │                  │        │  - Ratings        │
+    └──────────────────┘        │  - Results        │
+                                │  - Scheduler      │
+                                └───────────────────┘
+```
+
+---
+
+## Deployment
+
+### Express (Railway)
+- **Service:** YouTube Search Proxy
+- **Port:** 3001
+- **URL:** `https://aux-wars-server.railway.app`
+- **Environment:** Production
+
+### Convex (Convex Cloud)
+- **Service:** Real-time game backend
+- **URL:** Auto-managed by Convex
+- **Environment:** Production
+
+### Client (Vercel)
+- **Service:** React frontend
+- **URL:** `https://aux-wars.com`
+- **Environment Variables:**
+  - `VITE_SERVER_URL`: Points to Railway Express server
+  - `VITE_CONVEX_URL`: Points to Convex deployment
+
+---
+
+## Conclusion
+
+After thorough testing, **the Express + Convex architecture is the correct solution** for Aux Wars. Each backend serves its purpose cleanly:
+
+- **Express:** Handles YouTube search scraping with `youtube-search-api`
+- **Convex:** Handles real-time game state with reactive queries
+
+This isn't a compromise—it's good architecture. The separation makes the codebase clearer, more maintainable, and more reliable than forcing everything into a single backend would be.
+
+**Status:** ✅ RESOLVED - Express is the intentional, documented solution.

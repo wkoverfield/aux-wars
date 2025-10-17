@@ -28,8 +28,8 @@ export const hostGame = mutation({
 });
 
 export const joinGame = mutation({
-  args: { code: v.string(), playerId: v.string(), name: v.string() },
-  handler: async (ctx, { code, playerId, name }) => {
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string(), name: v.string() },
+  handler: async (ctx, { code, playerId, connectionId, name }) => {
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return { success: false, message: "Game code not found" };
 
@@ -44,26 +44,57 @@ export const joinGame = mutation({
       .withIndex("by_player", (q) => q.eq("playerId", playerId).eq("roomCode", code))
       .unique();
 
-    if (!existing) {
+    if (existing) {
+      // CONNECTION TAKEOVER: This player is rejoining from another tab/device
+      // Deactivate the old connection and activate this new one
+      const oldConnectionId = existing.connectionId;
+
+      await ctx.db.patch(existing._id, {
+        connectionId,           // Update to new connection ID
+        name,                   // Update name in case it changed
+        connectedAt: now(),     // Record when this connection was established
+        lastSeenAt: now(),      // Update last seen
+        isActive: true,         // Mark this connection as active
+      });
+
+      console.log(`[joinGame] Connection takeover for player ${playerId}: ${oldConnectionId} → ${connectionId}`);
+
+      await touchRoom(ctx, room._id);
+      return {
+        success: true,
+        settings: room.settings,
+        playerId,
+        tookOver: true,              // Signal that we kicked another connection
+        oldConnectionId              // Which connection was replaced
+      } as const;
+    } else {
+      // New player joining for the first time
       const playerDocId = await ctx.db.insert("players", {
         roomCode: code,
         playerId,
+        connectionId,
         name,
         isHost: isFirst,
         isReady: false,
+        connectedAt: now(),
         lastSeenAt: now(),
+        isActive: true,
       });
+
       if (isFirst) {
         await ctx.db.patch(room._id, { hostPlayerId: playerDocId });
       }
-    } else {
-      // Duplicate playerId attempting to join from another tab/device.
-      // Reject and let the client retry with a fresh playerId to ensure uniqueness.
-      return { success: false, code: "DUPLICATE_PLAYER", message: "Player ID already in use in this room" } as const;
-    }
 
-    await touchRoom(ctx, room._id);
-    return { success: true, settings: room.settings, playerId } as const;
+      console.log(`[joinGame] New player joined: ${playerId} with connection ${connectionId}`);
+
+      await touchRoom(ctx, room._id);
+      return {
+        success: true,
+        settings: room.settings,
+        playerId,
+        tookOver: false
+      } as const;
+    }
   },
 });
 
@@ -93,25 +124,71 @@ export const leaveGame = mutation({
   handler: async (ctx, { code, playerId }) => {
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return;
+
     const players = await ctx.db
       .query("players")
       .withIndex("by_room", (q) => q.eq("roomCode", code))
       .collect();
+
     const leaving = players.find((p) => p.playerId === playerId);
     if (leaving) await ctx.db.delete(leaving._id);
 
+    // Check remaining players
+    const remaining = await ctx.db
+      .query("players")
+      .withIndex("by_room", (q) => q.eq("roomCode", code))
+      .collect();
+
+    // If room is now empty, delete it immediately
+    if (remaining.length === 0) {
+      console.log(`[leaveGame] Room ${code} is now empty - deleting`);
+      await deleteRoomAndData(ctx, room);
+      return { roomDeleted: true } as const;
+    }
+
     // Reassign host if needed
     if (room.hostPlayerId && leaving && room.hostPlayerId.id === leaving._id.id) {
-      const remaining = (await ctx.db
-        .query("players")
-        .withIndex("by_room", (q) => q.eq("roomCode", code))
-        .collect()).sort((a, b) => a._creationTime - b._creationTime);
-      if (remaining[0]) {
-        await ctx.db.patch(room._id, { hostPlayerId: remaining[0]._id });
-        await ctx.db.patch(remaining[0]._id, { isHost: true });
+      const sortedRemaining = [...remaining].sort((a, b) => a._creationTime - b._creationTime);
+      if (sortedRemaining[0]) {
+        await ctx.db.patch(room._id, { hostPlayerId: sortedRemaining[0]._id });
+        await ctx.db.patch(sortedRemaining[0]._id, { isHost: true });
+        console.log(`[leaveGame] Host reassigned to ${sortedRemaining[0].playerId}`);
       }
     }
+
     await touchRoom(ctx, room._id);
+    return { roomDeleted: false } as const;
+  },
+});
+
+export const heartbeat = mutation({
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
+    const player = await ctx.db
+      .query("players")
+      .withIndex("by_player", (q) => q.eq("playerId", playerId).eq("roomCode", code))
+      .unique();
+
+    if (!player) {
+      return { status: 'NOT_FOUND' } as const;
+    }
+
+    // Check if THIS connection is still the active one
+    if (player.connectionId !== connectionId) {
+      // Another connection has taken over - this tab should disconnect
+      return {
+        status: 'TAKEN_OVER',
+        activeConnectionId: player.connectionId
+      } as const;
+    }
+
+    // Update last seen timestamp
+    await ctx.db.patch(player._id, { lastSeenAt: now() });
+
+    const room = await getRoomByCodeInternal(ctx, code);
+    if (room) await touchRoom(ctx, room._id);
+
+    return { status: 'OK' } as const;
   },
 });
 
@@ -227,6 +304,45 @@ async function getRoomByCodeInternal(ctx: any, code: string) {
 
 async function touchRoom(ctx: any, roomId: any) {
   await ctx.db.patch(roomId, { lastActivityAt: now() });
+}
+
+/**
+ * Deletes a room and all associated data (cascading delete)
+ * Called when a room becomes empty or during cleanup
+ */
+async function deleteRoomAndData(ctx: any, room: any) {
+  const code = room.code;
+
+  // Delete all associated data in order
+  const players = await ctx.db.query("players").withIndex("by_room", (q: any) => q.eq("roomCode", code)).collect();
+  for (const player of players) {
+    await ctx.db.delete(player._id);
+  }
+
+  const submissions = await ctx.db.query("submissions").withIndex("by_room_round", (q: any) => q.eq("roomCode", code)).collect();
+  for (const submission of submissions) {
+    await ctx.db.delete(submission._id);
+  }
+
+  const ratings = await ctx.db.query("ratings").withIndex("by_room_round", (q: any) => q.eq("roomCode", code)).collect();
+  for (const rating of ratings) {
+    await ctx.db.delete(rating._id);
+  }
+
+  const results = await ctx.db.query("roundResults").withIndex("by_room_round", (q: any) => q.eq("roomCode", code)).collect();
+  for (const result of results) {
+    await ctx.db.delete(result._id);
+  }
+
+  const customPrompts = await ctx.db.query("customPrompts").withIndex("by_room", (q: any) => q.eq("roomCode", code)).collect();
+  for (const prompt of customPrompts) {
+    await ctx.db.delete(prompt._id);
+  }
+
+  // Finally delete the room itself
+  await ctx.db.delete(room._id);
+
+  console.log(`[deleteRoomAndData] Deleted room ${code} and all associated data`);
 }
 
 const defaultPrompts = [

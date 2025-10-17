@@ -27,12 +27,15 @@ export default defineSchema({
   players: defineTable({
     roomCode: v.string(),
     playerId: v.string(),
+    connectionId: v.optional(v.string()), // Unique per browser tab/connection
     name: v.string(),
     isHost: v.boolean(),
     isReady: v.boolean(),
-    lastSeenAt: v.number(),
+    connectedAt: v.optional(v.number()), // When this connection was established
+    lastSeenAt: v.number(), // Last heartbeat timestamp
+    isActive: v.optional(v.boolean()), // Is this the currently active connection for this playerId?
   })
-    .index("by_room", ["roomCode"]) 
+    .index("by_room", ["roomCode"])
     .index("by_player", ["playerId", "roomCode"]),
 
   submissions: defineTable({

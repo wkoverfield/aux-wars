@@ -13,6 +13,7 @@ import type * as game_flow from "../game/flow.js";
 import type * as game_rooms from "../game/rooms.js";
 import type * as game_scheduler from "../game/scheduler.js";
 import type * as http from "../http.js";
+import type * as youtube from "../youtube.js";
 
 import type {
   ApiFromModules,
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   "game/rooms": typeof game_rooms;
   "game/scheduler": typeof game_scheduler;
   http: typeof http;
+  youtube: typeof youtube;
 }>;
 declare const fullApiWithMounts: typeof fullApi;
 

@@ -116,7 +116,9 @@ export default function Round() {
   // Phase changes handled by GameRouteGuard
 
   /**
-   * Handles YouTube track search with caching and debouncing
+   * Handles YouTube track search with caching and debouncing via Express server
+   * NOTE: Uses Express endpoint instead of Convex Action because youtube-search-api
+   * is incompatible with Convex's Node.js runtime (package resolves as undefined)
    */
   useEffect(() => {
     if (!searchTerm.trim()) {
@@ -136,7 +138,7 @@ export default function Round() {
       try {
         setSearchError(null);
         const result = await searchTracks(searchTerm);
-        
+
         if (Array.isArray(result)) {
           setSearchResults(result);
           setSearchError(result.length === 0 ? "No songs found. Try different keywords." : null);

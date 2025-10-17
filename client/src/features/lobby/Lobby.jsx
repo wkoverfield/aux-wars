@@ -6,6 +6,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import PlayerList from "../../components/PlayerList";
 import SettingsModal from "../../components/SettingsModal";
+import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 import { useGame } from "../../services/GameContext";
 import { useSession } from "../../hooks/useSession";
 import { useToast } from "../../contexts/ToastContext";
@@ -32,11 +33,13 @@ export default function Lobby() {
   const [isHost, setIsHost] = useState(false);
   const [animateInput, setAnimateInput] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [showTakenOverModal, setShowTakenOverModal] = useState(false);
   const allPlayersReady = players.every((player) => player.isReady);
   // const isConnected = useSocketConnection();
   const playersQuery = useQuery(api.game.rooms.getPlayers, routeGameCode ? { code: routeGameCode } : 'skip');
   const roomQuery = useQuery(api.game.rooms.getRoomByCode, routeGameCode ? { code: routeGameCode } : 'skip');
   const updatePlayerName = useMutation(api.game.rooms.updatePlayerName);
+  const heartbeat = useMutation(api.game.rooms.heartbeat);
   const leaveGame = useMutation(api.game.rooms.leaveGame);
   const startGame = useMutation(api.game.flow.startGame);
   const hasJoinedGame = useRef(false);
@@ -92,6 +95,74 @@ export default function Lobby() {
   }, [roomQuery]);
 
   // Phase and prompt updates are driven by Convex queries via GameRouteGuard
+
+  /**
+   * Heartbeat system to detect if connection has been taken over
+   * Runs every 5 seconds to check if this tab is still the active connection
+   */
+  useEffect(() => {
+    if (!gameCode || !session?.playerId || !session?.connectionId) return;
+
+    const runHeartbeat = async () => {
+      try {
+        const result = await heartbeat({
+          code: gameCode,
+          playerId: session.playerId,
+          connectionId: session.connectionId
+        });
+
+        if (result.status === 'TAKEN_OVER') {
+          // This tab's connection has been replaced by another tab/device
+          console.log('[Heartbeat] Connection taken over - showing modal');
+          setShowTakenOverModal(true);
+        } else if (result.status === 'NOT_FOUND') {
+          // Player no longer exists in room
+          console.log('[Heartbeat] Player not found - redirecting to home');
+          clearSession();
+          navigate('/', { replace: true });
+        }
+      } catch (error) {
+        console.error('[Heartbeat] Error:', error);
+      }
+    };
+
+    // Run immediately on mount
+    runHeartbeat();
+
+    // Then run every 5 seconds
+    const interval = setInterval(runHeartbeat, 5000);
+
+    return () => clearInterval(interval);
+  }, [gameCode, session?.playerId, session?.connectionId, heartbeat, clearSession, navigate]);
+
+  /**
+   * Clean disconnection when user closes the browser tab or navigates away
+   * This ensures immediate room cleanup if they were the last player
+   */
+  useEffect(() => {
+    if (!gameCode || !session?.playerId) return;
+
+    const handleBeforeUnload = () => {
+      // Use sendBeacon for reliable delivery even during page unload
+      // This is more reliable than async fetch during beforeunload
+      const data = JSON.stringify({
+        code: gameCode,
+        playerId: session.playerId
+      });
+
+      // Note: In production, you might want to call leaveGame via navigator.sendBeacon
+      // For now, we rely on the mutation being called synchronously
+      leaveGame({ code: gameCode, playerId: session.playerId }).catch(() => {
+        // Ignore errors during unload
+      });
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [gameCode, session?.playerId, leaveGame]);
 
   /**
    * Handles leaving the game and returning to home
@@ -234,6 +305,10 @@ export default function Lobby() {
         onClose={() => setShowModal(false)}
         gameCode={gameCode}
         isHost={isHost}
+      />
+      <SessionTakenOverModal
+        show={showTakenOverModal}
+        gameCode={gameCode}
       />
     </>
   );

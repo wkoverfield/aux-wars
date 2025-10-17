@@ -23,7 +23,7 @@ export default function Home() {
   const hostGame = useMutation(api.game.rooms.hostGame);
   const joinGame = useMutation(api.game.rooms.joinGame);
   const navigate = useNavigate();
-  const { clearSession, createSession } = useSession();
+  const { connectionId, clearSession, createSession } = useSession();
   const { showToast } = useToast();
   const [joinCode, setJoinCode] = useState("");
   const [isHosting, setIsHosting] = useState(false);
@@ -47,7 +47,7 @@ export default function Home() {
       const { code } = await hostGame();
       const playerId = crypto.randomUUID();
       const tempName = "Host";
-      const joinResp = await joinGame({ code, name: tempName, playerId });
+      const joinResp = await joinGame({ code, name: tempName, playerId, connectionId });
       if (joinResp?.success) {
         createSession({ gameCode: code, playerId, playerName: tempName, lastPhase: 'lobby' });
         navigate(`/lobby/${code}`);
@@ -74,15 +74,10 @@ export default function Home() {
     }
 
     const code = joinCode.trim().toUpperCase();
-    let playerId = crypto.randomUUID();
+    const playerId = crypto.randomUUID();
     const tempName = `Player ${Math.floor(Math.random() * 100) + 1}`;
     try {
-      let resp = await joinGame({ code, name: tempName, playerId });
-      // If duplicate player detected (e.g., second tab with same storage), retry with a new ID
-      if (resp && resp.code === "DUPLICATE_PLAYER") {
-        playerId = crypto.randomUUID();
-        resp = await joinGame({ code, name: tempName, playerId });
-      }
+      const resp = await joinGame({ code, name: tempName, playerId, connectionId });
       if (resp?.success) {
         createSession({ gameCode: code, playerId, playerName: tempName, lastPhase: 'lobby' });
         navigate(`/lobby/${code}`);
