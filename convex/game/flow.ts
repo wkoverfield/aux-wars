@@ -58,6 +58,18 @@ export const submitSong = mutation({
       return;
     }
 
+    // Rate limiting: Prevent rapid submission attempts (max 1 per second)
+    const lastAttempt = (player as any).lastSubmissionAttempt;
+    if (lastAttempt && now() - lastAttempt < 1000) {
+      console.log(`[submitSong] Rate limit: Player ${playerId} attempting too quickly`);
+      return;
+    }
+
+    // Update last attempt timestamp
+    await ctx.db.patch(player._id, {
+      lastSubmissionAttempt: now()
+    } as any);
+
     const players = await getPlayers(ctx, code);
 
     // Prevent duplicate submission by the same player in the same round
@@ -116,6 +128,18 @@ export const submitRating = mutation({
       console.log(`[submitRating] Rejecting rating: connection validation failed`);
       return;
     }
+
+    // Rate limiting: Prevent rapid rating attempts (max 1 per second)
+    const lastAttempt = (player as any).lastRatingAttempt;
+    if (lastAttempt && now() - lastAttempt < 1000) {
+      console.log(`[submitRating] Rate limit: Player ${playerId} attempting too quickly`);
+      return;
+    }
+
+    // Update last attempt timestamp
+    await ctx.db.patch(player._id, {
+      lastRatingAttempt: now()
+    } as any);
 
     // Check if player already rated this song (prevents duplicate ratings)
     const existingRatings = await ctx.db
