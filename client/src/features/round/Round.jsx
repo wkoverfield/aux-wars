@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useGame } from "../../services/GameContext";
+// GameContext removed - using Convex queries directly
 // import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -17,7 +17,7 @@ import { useSession } from "../../hooks/useSession";
 /**
  * Round component manages the game round flow including song selection and rating phases.
  * Handles socket events for game state updates, player interactions, and phase transitions.
- * 
+ *
  * @returns {JSX.Element} The rendered round component
  */
 export default function Round() {
@@ -26,7 +26,7 @@ export default function Round() {
   // const socket = useSocket();
   // const isConnected = useSocketConnection();
   const setGameTransition = () => {};
-  const { state, dispatch } = useGame();
+  const roomQuery = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
   const currentRatingSong = useQuery(api.game.flow.getCurrentRatingSong, gameCode ? { code: gameCode } : 'skip');
   const submissionStatus = useQuery(api.game.flow.getSubmissionStatus, gameCode ? { code: gameCode } : 'skip');
   const currentRatingStatus = useQuery(api.game.flow.getCurrentRatingStatus, gameCode ? { code: gameCode } : 'skip');
@@ -35,10 +35,22 @@ export default function Round() {
   const { showToast } = useToast();
   const { session } = useSession();
 
+  // Extract current prompt from room data
+  const room = roomQuery?.room || roomQuery;
+  const currentPrompt = room?.currentPrompt || '';
+
+  // Query for player's submission in current round
+  const mySubmission = useQuery(
+    api.game.flow.getMySubmission,
+    gameCode && session?.playerId && room?.currentRound
+      ? { code: gameCode, playerId: session.playerId, round: room.currentRound }
+      : "skip"
+  );
+
   // State Management
   // ===============
 
-  // Song Selection State
+  // Song Selection State (truly local UI state)
   const [isSongSelectionView, setIsSongSelectionView] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -47,22 +59,22 @@ export default function Round() {
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState(null);
   const [showSnippetSelector, setShowSnippetSelector] = useState(false);
-  
-  // Submission Tracking State
-  const [hasSongSubmitted, setHasSongSubmitted] = useState(false);
-  const [submittedCount, setSubmittedCount] = useState(0);
-  const [totalPlayers, setTotalPlayers] = useState(0);
-  
-  // Rating Phase State
-  const [isRatingPhase, setIsRatingPhase] = useState(false);
-  const [songToRate, setSongToRate] = useState(null);
-  const [ratingIndex, setRatingIndex] = useState(0);
-  const [totalSongs, setTotalSongs] = useState(0);
+
+  // Optimistic UI flag for rating phase (prevent double-submission during query update window)
   const [hasRatingSubmitted, setHasRatingSubmitted] = useState(false);
-  const [ratingSubmittedCount, setRatingSubmittedCount] = useState(0);
-  
+
   // Transition State
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Derive from queries - no local state duplication
+  const isRatingPhase = currentRatingSong !== null && currentRatingSong !== undefined;
+  const songToRate = currentRatingSong;
+  const submittedCount = submissionStatus?.submitted || 0;
+  const totalPlayers = submissionStatus?.total || currentRatingStatus?.total || 0;
+  const ratingSubmittedCount = currentRatingStatus?.submitted || 0;
+  const ratingIndex = room?.currentRatingIndex ?? 0;
+  const totalSongs = submissionStatus?.total || 0;
+  const hasSongSubmitted = mySubmission !== null && mySubmission !== undefined;
 
   // Effects
   // =======
@@ -70,48 +82,30 @@ export default function Round() {
 
   // Phase-driven navigation handled by GameRouteGuard
 
-  /**
-   * Handles prompt updates and requests current prompt on mount
-   */
+  // Reset hasRatingSubmitted when moving to a new song
   useEffect(() => {
     if (currentRatingSong) {
-      // rating phase
-      setIsRatingPhase(true);
-      setSongToRate(currentRatingSong);
       setHasRatingSubmitted(false);
     }
   }, [currentRatingSong]);
 
-  /**
-   * Manages song submission updates and tracking
-   */
-  useEffect(() => {
-    if (submissionStatus) {
-      setSubmittedCount(submissionStatus.submitted || 0);
-      setTotalPlayers(submissionStatus.total || 0);
-    }
-  }, [submissionStatus]);
-
-  useEffect(() => {
-    if (currentRatingStatus) {
-      setRatingSubmittedCount(currentRatingStatus.submitted || 0);
-      setTotalPlayers(currentRatingStatus.total || 0);
-    }
-  }, [currentRatingStatus]);
-
-  // Rating transitions are handled on the backend via scheduler and queries
-
   // Auto-skip rating for player's own song
   useEffect(() => {
-    if (isRatingPhase && songToRate && session?.playerId) {
+    if (isRatingPhase && songToRate && session?.playerId && session?.connectionId) {
       if (songToRate.player?.id === session.playerId && !hasRatingSubmitted) {
-        submitRating({ code: gameCode, playerId: session.playerId, songId: songToRate.songId, rating: -1 })
+        submitRating({
+          code: gameCode,
+          playerId: session.playerId,
+          connectionId: session.connectionId,
+          songId: songToRate.songId,
+          rating: -1
+        })
           .then(() => setHasRatingSubmitted(true))
           .catch(() => {});
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRatingPhase, songToRate, session?.playerId]);
+  }, [isRatingPhase, songToRate, session?.playerId, session?.connectionId]);
 
   // Phase changes handled by GameRouteGuard
 
@@ -185,6 +179,7 @@ export default function Round() {
       await submitSong({
         code: gameCode,
         playerId: session?.playerId,
+        connectionId: session?.connectionId,
         trackId: trackWithSnippet.id,
         trackDetails: {
           name: trackWithSnippet.name,
@@ -198,7 +193,6 @@ export default function Round() {
       showToast("Failed to submit song. Please try again.", "error");
       return;
     }
-    setHasSongSubmitted(true);
     setIsSongSelectionView(false);
     setShowSnippetSelector(false);
     setSelectedTrack(null);
@@ -211,7 +205,13 @@ export default function Round() {
    */
   const handleSubmitRating = async (songId, rating) => {
     try {
-      await submitRating({ code: gameCode, playerId: session?.playerId, songId, rating });
+      await submitRating({
+        code: gameCode,
+        playerId: session?.playerId,
+        connectionId: session?.connectionId,
+        songId,
+        rating
+      });
       setHasRatingSubmitted(true);
     } catch (e) {
       showToast("Failed to submit rating.", "error");
@@ -226,18 +226,23 @@ export default function Round() {
 
   const renderContent = () => {
     if (isRatingPhase) {
-      if (hasRatingSubmitted) {
+      // Check if this is the player's own song - never show rating UI for own song
+      const isOwnSong = songToRate?.player?.id === session?.playerId;
+
+      if (hasRatingSubmitted || isOwnSong) {
         return (
-          <WaitingScreen 
-            completedCount={ratingSubmittedCount} 
+          <WaitingScreen
+            completedCount={ratingSubmittedCount}
             totalCount={totalPlayers}
-            message="Waiting for other players to rate this song..." 
+            message={isOwnSong
+              ? "This is your song! Waiting for others to rate..."
+              : "Waiting for other players to rate this song..."}
           />
         );
       } else if (songToRate) {
         return (
           <RatingScreen
-            currentPrompt={state.currentPrompt}
+            currentPrompt={currentPrompt}
             songToRate={songToRate}
             onSubmitRating={handleSubmitRating}
             currentIndex={ratingIndex}
@@ -270,7 +275,7 @@ export default function Round() {
       } else {
         return (
           <RoundStart 
-            currentPrompt={state.currentPrompt}
+            currentPrompt={currentPrompt}
             onStartSelection={() => setIsSongSelectionView(true)}
           />
         );
@@ -285,7 +290,7 @@ export default function Round() {
 
         {showPromptModal && !hasSongSubmitted && !isRatingPhase && (
           <PromptModal
-            currentPrompt={state.currentPrompt}
+            currentPrompt={currentPrompt}
             onClose={() => setShowPromptModal(false)}
           />
         )}

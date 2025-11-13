@@ -12,9 +12,18 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 export function useSession() {
   const STORAGE_KEY = 'auxWarsSession';
 
-  // Generate unique connectionId for this tab/page load
-  // This is ephemeral - NOT stored, regenerated every page load
-  const connectionId = useMemo(() => crypto.randomUUID(), []);
+  // Generate unique connectionId for this browser tab
+  // Stored in sessionStorage to persist across navigation within same tab
+  // but unique per tab (prevents duplicate tab issues)
+  const connectionId = useMemo(() => {
+    const key = 'aux-wars-connection-id';
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = crypto.randomUUID();
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  }, []);
 
   // Initialize state from localStorage
   const [session, setSession] = useState(() => {
@@ -33,10 +42,13 @@ export function useSession() {
   });
 
   // Save session to localStorage whenever it changes
+  // Note: connectionId is NOT saved to localStorage (it's in sessionStorage)
   useEffect(() => {
     if (session) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+        // Exclude connectionId from localStorage (it's tab-specific, stored in sessionStorage)
+        const { connectionId: _, ...sessionToStore } = session;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionToStore));
       } catch (error) {
         // Storage not available - session won't persist
       }

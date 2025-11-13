@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useGame } from "../services/GameContext";
+// GameContext removed - using Convex queries directly
 // import { useSocket } from "../services/SocketProvider";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
@@ -12,7 +12,7 @@ import { getSavedSettings } from "../hooks/useSettingsPersistence";
 
 /**
  * SettingsModal component for configuring game settings.
- * 
+ *
  * @param {Object} props - Component props
  * @param {boolean} props.showModal - Controls modal visibility
  * @param {Function} props.onClose - Callback for closing the modal
@@ -20,39 +20,26 @@ import { getSavedSettings } from "../hooks/useSettingsPersistence";
  * @returns {JSX.Element|null} Rendered component or null if not visible
  */
 export default function SettingsModal({ showModal, onClose, gameCode, isHost = false }) {
-  const { state, dispatch } = useGame();
+  const roomQuery = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
   // const socket = useSocket();
   const updateSettingsMutation = useMutation(api.game.rooms.updateSettings);
   const addCustomPromptMutation = useMutation(api.game.rooms.addCustomPrompt);
   const removeCustomPromptMutation = useMutation(api.game.rooms.removeCustomPrompt);
   const { showToast } = useToast();
-  
-  // For hosts creating new games, use saved settings. For joining players, use game state.
+
+  // Extract settings from room data
+  const room = roomQuery?.room || roomQuery;
+  const roomSettings = room?.settings;
+
+  // For hosts creating new games, use saved settings. For joining players, use room state.
   const savedSettings = isHost ? getSavedSettings() : null;
-  const [rounds, setRounds] = useState(state.numberOfRounds);
-  const [selectedPrompts, setSelectedPrompts] = useState(state.selectedPrompts);
+  const [rounds, setRounds] = useState(roomSettings?.numberOfRounds || 3);
+  const [selectedPrompts, setSelectedPrompts] = useState(roomSettings?.selectedPrompts || []);
   // Shared custom prompts, reactive per room
   const roomCustomPrompts = useQuery(
     api.game.rooms.getCustomPrompts,
     gameCode ? { code: gameCode } : 'skip'
   );
-
-  // Sync local state if game context changes externally
-  useEffect(() => {
-    setRounds(state.numberOfRounds);
-    setSelectedPrompts(state.selectedPrompts);
-  }, [state.numberOfRounds, state.selectedPrompts]);
-
-  // Merge shared custom prompts into current selection when they change
-  useEffect(() => {
-    if (Array.isArray(roomCustomPrompts)) {
-      setSelectedPrompts((prev) => {
-        const next = new Set(prev);
-        roomCustomPrompts.forEach((p) => next.add(p));
-        return Array.from(next);
-      });
-    }
-  }, [roomCustomPrompts]);
 
   // Handle escape key to close modal
   useEffect(() => {
@@ -63,13 +50,27 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
     return () => document.removeEventListener("keydown", handleEscape);
   }, [showModal, onClose]);
 
-  // Initialize with saved settings only for hosts on first render
+  // Load fresh from database when modal opens (not while editing)
+  // This ensures players see the latest settings from other players
   useEffect(() => {
-    if (isHost && savedSettings && showModal) {
-      if (savedSettings.numberOfRounds) setRounds(savedSettings.numberOfRounds);
-      if (savedSettings.selectedPrompts) setSelectedPrompts(savedSettings.selectedPrompts);
+    if (!showModal) return;
+
+    // Always load from database (single source of truth)
+    if (roomSettings) {
+      setRounds(roomSettings.numberOfRounds);
+      setSelectedPrompts(roomSettings.selectedPrompts);
     }
-  }, [showModal]); // Only on modal open
+
+    // Merge custom prompts into selection
+    if (Array.isArray(roomCustomPrompts) && roomCustomPrompts.length > 0) {
+      setSelectedPrompts((prev) => {
+        const next = new Set(prev);
+        roomCustomPrompts.forEach((p) => next.add(p));
+        return Array.from(next);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showModal]); // Only reload when modal opens, not when database updates during editing
 
   /**
    * Toggles a prompt in the selected prompts list
@@ -135,31 +136,36 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
   /**
    * Applies the current settings to the game
    */
-  const applySettings = () => {
+  const applySettings = async () => {
     // Validate settings
     if (selectedPrompts.length < 5) {
       showToast("Please select at least 5 prompts", "warning");
       return;
     }
-    
+
     if (selectedPrompts.length > 20) {
       showToast("Please select no more than 20 prompts", "warning");
       return;
     }
-    
-    // Update local game context
-    dispatch({ type: "SET_ROUNDS", payload: rounds });
-    dispatch({ type: "SET_SELECTED_PROMPTS", payload: selectedPrompts });
-    
+
     // Save settings to localStorage for future games
     localStorage.setItem('aux-wars-settings', JSON.stringify({
       numberOfRounds: rounds,
       selectedPrompts
     }));
-    
-    // Update settings in Convex
-    updateSettingsMutation({ code: gameCode, numberOfRounds: rounds, roundLength: 30, selectedPrompts });
-    onClose();
+
+    // Update settings in Convex and wait for completion
+    try {
+      await updateSettingsMutation({
+        code: gameCode,
+        numberOfRounds: rounds,
+        roundLength: 30,
+        selectedPrompts
+      });
+      onClose(); // Only close after successful update
+    } catch (error) {
+      showToast("Failed to update settings. Please try again.", "error");
+    }
   };
 
   return (

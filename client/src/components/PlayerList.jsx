@@ -12,8 +12,8 @@ export default function PlayerList({ players }) {
     <div
       className="lobby-players flex flex-col w-full items-center gap-2 pb-8 overflow-y-auto flex-1 min-h-0"
     >
-      {players.map((player, index) => (
-        <PlayerBox key={index} player={player} />
+      {players.map((player) => (
+        <PlayerBox key={player.playerId || player._id} player={player} />
       ))}
     </div>
   );

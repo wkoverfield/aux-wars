@@ -4,7 +4,7 @@ import { useNavigate, useLocation, useParams, Outlet } from 'react-router-dom';
 import { useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { useSession } from '../hooks/useSession';
-import { useGame } from '../services/GameContext';
+// GameContext removed - using RoomProvider's Convex queries directly
 
 /**
  * GameRouteGuard component that protects game routes and handles rejoining
@@ -17,7 +17,6 @@ export default function GameRouteGuard() {
   // const socket = useSocket();
   // const isConnected = useSocketConnection();
   const { session, updateSession, isSessionValid } = useSession();
-  const { state, dispatch } = useGame();
   const [isValidating, setIsValidating] = useState(true);
   const hasInitialized = useRef(false);
   const roomData = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
@@ -35,7 +34,7 @@ export default function GameRouteGuard() {
     }
   }, [roomData, navigate]);
 
-  // Always sync state from room data so routing can react to changes
+  // Update session with current phase (for rejoin logic)
   useEffect(() => {
     if (roomData === null) {
       navigate('/', { replace: true });
@@ -43,33 +42,30 @@ export default function GameRouteGuard() {
     }
     if (!roomData) return;
     const room = roomData.room || roomData;
-    const players = roomData.players || [];
-    if (room?.settings) {
-      dispatch({ type: 'SET_ROUNDS', payload: room.settings.numberOfRounds });
-      dispatch({ type: 'SET_ROUND_LENGTH', payload: room.settings.roundLength });
-      dispatch({ type: 'SET_SELECTED_PROMPTS', payload: room.settings.selectedPrompts });
-    }
-    dispatch({ type: 'SET_PROMPT', payload: room?.currentPrompt || '' });
-    dispatch({ type: 'SET_PLAYERS', payload: players });
-    dispatch({ type: 'SET_PHASE', payload: room?.phase });
-    dispatch({ type: 'SET_CURRENT_ROUND', payload: room?.currentRound || 1 });
     if (room?.phase) updateSession({ lastPhase: room.phase });
-  }, [roomData, dispatch, updateSession, navigate]);
+  }, [roomData, updateSession, navigate]);
 
-  // Handle phase-based routing
+  // Handle phase-based routing (using Convex query data directly)
   useEffect(() => {
     if (isValidating) {
       return;
     }
-    
-    if (!state.phase) {
+
+    if (!roomData) {
+      return;
+    }
+
+    const room = roomData.room || roomData;
+    const phase = room?.phase;
+
+    if (!phase) {
       return;
     }
 
     const basePath = `/lobby/${gameCode}`;
     let targetPath = basePath;
 
-    switch (state.phase) {
+    switch (phase) {
       case 'lobby':
         targetPath = basePath;
         break;
@@ -88,12 +84,12 @@ export default function GameRouteGuard() {
         break;
     }
 
-    
+
     if (location.pathname !== targetPath) {
       navigate(targetPath, { replace: true });
     }
     // Already on correct path, no action needed
-  }, [state.phase, isValidating, gameCode, location.pathname, navigate]);
+  }, [roomData, isValidating, gameCode, location.pathname, navigate]);
 
   // Show loading state while validating
   if (isValidating) {

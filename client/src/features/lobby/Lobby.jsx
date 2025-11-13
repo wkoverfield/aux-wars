@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import PlayerList from "../../components/PlayerList";
 import SettingsModal from "../../components/SettingsModal";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
-import { useGame } from "../../services/GameContext";
+// GameContext removed - using RoomProvider's Convex queries directly
 import { useSession } from "../../hooks/useSession";
 import { useToast } from "../../contexts/ToastContext";
 import logo from "../../assets/aux-wars-logo.svg";
@@ -23,28 +23,29 @@ export default function Lobby() {
   // const socket = useSocket();
   const navigate = useNavigate();
   const { gameCode: routeGameCode } = useParams();
-  const { dispatch } = useGame();
   const { session, createSession, updateSession, clearSession } = useSession();
   const { showToast } = useToast();
-  const [players, setPlayers] = useState([]);
   const [gameCode, setGameCode] = useState(routeGameCode || "");
   const [name, setName] = useState(session?.playerName || "");
   const [isReady, setIsReady] = useState(false);
-  const [isHost, setIsHost] = useState(false);
   const [animateInput, setAnimateInput] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showTakenOverModal, setShowTakenOverModal] = useState(false);
-  const allPlayersReady = players.every((player) => player.isReady);
   // const isConnected = useSocketConnection();
   const playersQuery = useQuery(api.game.rooms.getPlayers, routeGameCode ? { code: routeGameCode } : 'skip');
-  const roomQuery = useQuery(api.game.rooms.getRoomByCode, routeGameCode ? { code: routeGameCode } : 'skip');
+  const roomQuery = useQuery(api.game.rooms.getRoomByCode, routeGameCode ? { code: routeGameCode} : 'skip');
+
+  // Derive from queries - no local state duplication
+  const players = playersQuery || [];
+  const isHost = players.find(p => p.playerId === session?.playerId)?.isHost ?? false;
+  const allPlayersReady = players.every((player) => player.isReady);
   const updatePlayerName = useMutation(api.game.rooms.updatePlayerName);
   const heartbeat = useMutation(api.game.rooms.heartbeat);
   const leaveGame = useMutation(api.game.rooms.leaveGame);
   const startGame = useMutation(api.game.flow.startGame);
   const hasJoinedGame = useRef(false);
 
-  // Join game only once when component mounts
+  // Initialize game code and name once on mount
   useEffect(() => {
     if (!routeGameCode) {
       navigate("/");
@@ -52,26 +53,31 @@ export default function Lobby() {
     }
     setGameCode(routeGameCode);
     setName(session?.playerName || "");
-  }, [routeGameCode, session]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeGameCode]); // Only depend on routeGameCode, not session - prevents resetting name while typing
 
-  // Set up socket event listeners
+  // Update player's name and ready status (debounced to prevent glitchy typing)
+  const updateNameTimeoutRef = useRef(null);
+
   useEffect(() => {
-    if (Array.isArray(playersQuery)) {
-      setPlayers(playersQuery);
+    // Clear existing timeout
+    if (updateNameTimeoutRef.current) {
+      clearTimeout(updateNameTimeoutRef.current);
     }
-  }, [playersQuery]);
 
-  // Update host status when players change
-  useEffect(() => {
-    const me = players.find((p) => p.playerId === session?.playerId);
-    if (me) setIsHost(me.isHost);
-  }, [players, session]);
+    // Only schedule update if we have required data
+    if (!gameCode || !session?.playerId || !session?.connectionId) return;
 
-  // Update player's name and ready status
-  useEffect(() => {
-    const run = async () => {
-      if (!gameCode || !session?.playerId) return;
-      const resp = await updatePlayerName({ code: gameCode, playerId: session.playerId, name, isReady });
+    // Debounce: wait 500ms after user stops typing before calling mutation
+    updateNameTimeoutRef.current = setTimeout(async () => {
+      const resp = await updatePlayerName({
+        code: gameCode,
+        playerId: session.playerId,
+        connectionId: session.connectionId,
+        name,
+        isReady
+      });
+
       // If update failed because player not found (e.g., duplicate ID in another tab), force rejoin flow
       if (resp && resp.code === 'PLAYER_NOT_FOUND') {
         // Clear session so Home will create a fresh playerId on next navigation
@@ -79,22 +85,24 @@ export default function Lobby() {
         navigate('/', { replace: true });
         return;
       }
+      // If connection was taken over, show takeover modal
+      if (resp && resp.code === 'CONNECTION_TAKEN_OVER') {
+        setShowTakenOverModal(true);
+        return;
+      }
       if (session && name !== session.playerName) updateSession({ playerName: name });
+    }, 500); // 500ms delay - smooth typing experience
+
+    // Cleanup timeout on unmount or when dependencies change
+    return () => {
+      if (updateNameTimeoutRef.current) {
+        clearTimeout(updateNameTimeoutRef.current);
+      }
     };
-    run();
-  }, [name, isReady]);
+  }, [name, isReady, gameCode, session?.playerId, session?.connectionId, updatePlayerName, clearSession, navigate, updateSession]);
 
-  // Listen for game settings updates from the server
-  useEffect(() => {
-    const updatedSettings = roomQuery?.room?.settings || roomQuery?.settings;
-    if (updatedSettings) {
-      dispatch({ type: "SET_ROUNDS", payload: updatedSettings.numberOfRounds });
-      dispatch({ type: "SET_ROUND_LENGTH", payload: updatedSettings.roundLength });
-      dispatch({ type: "SET_SELECTED_PROMPTS", payload: updatedSettings.selectedPrompts });
-    }
-  }, [roomQuery]);
-
-  // Phase and prompt updates are driven by Convex queries via GameRouteGuard
+  // Settings updates are handled automatically via Convex reactive queries (roomQuery)
+  // No need to manually sync - components can read directly from roomQuery.room.settings
 
   /**
    * Heartbeat system to detect if connection has been taken over

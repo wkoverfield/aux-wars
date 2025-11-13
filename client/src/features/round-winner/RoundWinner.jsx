@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { useGame } from "../../services/GameContext";
+// GameContext removed - using Convex queries directly
 // import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -13,7 +13,7 @@ import nextIcon from "../../assets/next-icon.svg";
 /**
  * RoundWinner component displays the results of a completed round.
  * Shows the winning song and other submissions, with options to proceed to the next round.
- * 
+ *
  * @returns {JSX.Element} Rendered component
  */
 export default function RoundWinner() {
@@ -22,13 +22,19 @@ export default function RoundWinner() {
   // const socket = useSocket();
   // const isConnected = useSocketConnection();
   const setGameTransition = () => {};
-  const { state, dispatch } = useGame();
-  const roundResultsQuery = useQuery(api.game.flow.getRoundResults, gameCode && state.currentRound ? { code: gameCode, round: state.currentRound } : 'skip');
+  const roomQuery = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
+  const playersQuery = useQuery(api.game.rooms.getPlayers, gameCode ? { code: gameCode } : 'skip');
+  const room = roomQuery?.room || roomQuery;
+  const currentRound = room?.currentRound || 1;
+  const roundResultsQuery = useQuery(api.game.flow.getRoundResults, gameCode && currentRound ? { code: gameCode, round: currentRound } : 'skip');
   const nextRoundMutation = useMutation(api.game.flow.nextRound);
-  const { roundResults, currentPrompt, currentRound, numberOfRounds } = state;
-  const [receivedResults, setReceivedResults] = useState(false);
+  const currentPrompt = room?.currentPrompt || '';
+  const numberOfRounds = room?.settings?.numberOfRounds || 3;
+  const roundResults = roundResultsQuery;
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [loadingResults, setLoadingResults] = useState(true);
+
+  // Derive from query - no local state duplication
+  const loadingResults = !roundResultsQuery;
 
   // Check if this is the final round
   const isFinalRound = currentRound >= numberOfRounds;
@@ -51,33 +57,7 @@ export default function RoundWinner() {
     return () => clearTimeout(timer);
   }, [setGameTransition]);
 
-  // Handle connection state
-  useEffect(() => {}, []);
-
-  // Handle game phase updates
-  useEffect(() => {}, []);
-
-  // Handle round results
-  useEffect(() => {
-    if (roundResultsQuery) {
-      dispatch({ type: "SET_ROUND_RESULTS", payload: roundResultsQuery });
-      setReceivedResults(true);
-      setLoadingResults(false);
-    }
-  }, [roundResultsQuery]);
-
-  // Handle prompt updates
-  useEffect(() => {
-    if (!socket || !isConnected) return;
-
-    const handlePromptUpdated = ({ prompt }) => {
-      dispatch({ type: "SET_PROMPT", payload: prompt });
-      // Navigation will be handled by GameRouteGuard based on phase change
-    };
-
-    socket.on("prompt-updated", handlePromptUpdated);
-    return () => socket.off("prompt-updated", handlePromptUpdated);
-  }, [socket, isConnected, dispatch]);
+  // Socket-based updates removed - using Convex reactive queries instead
 
   /**
    * Handles the transition to the next round or final results
@@ -86,12 +66,15 @@ export default function RoundWinner() {
     if (isTransitioning) return;
     setIsTransitioning(true);
     setGameTransition(true);
-    await nextRoundMutation({ code: gameCode, playerId: state.players.find(p => p.isHost)?.playerId });
+    const hostPlayer = playersQuery?.find(p => p.isHost);
+    await nextRoundMutation({ code: gameCode, playerId: hostPlayer?.playerId });
   };
 
   // Use state to prevent button text flickering
-  const [buttonText, setButtonText] = useState("");
-  
+  const [buttonText, setButtonText] = useState(
+    isFinalRound ? "See Final Results" : "Next Round"
+  );
+
   useEffect(() => {
     if (!isTransitioning) {
       setButtonText(isFinalRound ? "See Final Results" : "Next Round");

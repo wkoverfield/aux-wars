@@ -30,6 +30,7 @@ export const submitSong = mutation({
   args: {
     code: v.string(),
     playerId: v.string(),
+    connectionId: v.string(),
     trackId: v.string(),
     trackDetails: v.object({
       name: v.string(),
@@ -39,42 +40,47 @@ export const submitSong = mutation({
       snippet: v.optional(v.object({ startTime: v.number(), endTime: v.number() })),
     }),
   },
-  handler: async (ctx, { code, playerId, trackId, trackDetails }) => {
+  handler: async (ctx, { code, playerId, connectionId, trackId, trackDetails }) => {
     console.log(`[submitSong] Starting submission for player ${playerId} in room ${code}`);
-    
+
     const room = await getRoom(ctx, code);
     console.log(`[submitSong] Room phase: ${room?.phase}, currentRound: ${room?.currentRound}`);
-    
+
     if (!room || room.phase !== "songSelection") {
       console.log(`[submitSong] Early return - room: ${!!room}, phase: ${room?.phase}`);
       return;
     }
-    // Validate that the submitting player belongs to this room
-    const players = await getPlayers(ctx, code);
-    const isKnownPlayer = players.some((p) => p.playerId === playerId);
-    if (!isKnownPlayer) {
-      console.log(`[submitSong] Rejecting submission: player ${playerId} not in room ${code}. Known players:`, players.map(p => p.playerId));
+
+    // Validate connection (prevents stale tabs from submitting after takeover)
+    const player = await validateConnection(ctx, code, playerId, connectionId);
+    if (!player) {
+      console.log(`[submitSong] Rejecting submission: connection validation failed`);
       return;
     }
 
+    const players = await getPlayers(ctx, code);
+
     // Prevent duplicate submission by the same player in the same round
-    const existingForPlayerThisRound = await ctx.db
-      .query("submissions")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
-      .collect();
-    const alreadySubmitted = existingForPlayerThisRound.find((s) => s.playerId === playerId);
-    if (alreadySubmitted) {
+    // Use player's submittedRounds field for atomic check
+    if (player.submittedRounds?.includes(room.currentRound)) {
       console.log(`[submitSong] Player ${playerId} already submitted for round ${room.currentRound}, skipping insert`);
-    } else {
-      await ctx.db.insert("submissions", {
-        roomCode: code,
-        round: room.currentRound,
-        playerId,
-        trackId,
-        trackDetails,
-        submittedAt: now(),
-      });
+      return; // Already submitted, exit early
     }
+
+    // Mark this round as submitted BEFORE inserting (prevents race condition)
+    await ctx.db.patch(player._id, {
+      submittedRounds: [...(player.submittedRounds || []), room.currentRound]
+    });
+
+    // Now insert the submission
+    await ctx.db.insert("submissions", {
+      roomCode: code,
+      round: room.currentRound,
+      playerId,
+      trackId,
+      trackDetails,
+      submittedAt: now(),
+    });
     
     const subs = await ctx.db
       .query("submissions")
@@ -92,16 +98,37 @@ export const submitSong = mutation({
     
     if (allSubmitted) {
       console.log(`[submitSong] Starting rating phase!`);
-      await startRatingPhaseInternal(ctx, { code });
+      // Use scheduler to avoid direct mutation-to-mutation call
+      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code });
     }
   },
 });
 
 export const submitRating = mutation({
-  args: { code: v.string(), playerId: v.string(), songId: v.id("submissions"), rating: v.number() },
-  handler: async (ctx, { code, playerId, songId, rating }) => {
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string(), songId: v.id("submissions"), rating: v.number() },
+  handler: async (ctx, { code, playerId, connectionId, songId, rating }) => {
     const room = await getRoom(ctx, code);
     if (!room || room.phase !== "rating") return;
+
+    // Validate connection (prevents stale tabs from rating after takeover)
+    const player = await validateConnection(ctx, code, playerId, connectionId);
+    if (!player) {
+      console.log(`[submitRating] Rejecting rating: connection validation failed`);
+      return;
+    }
+
+    // Check if player already rated this song (prevents duplicate ratings)
+    const existingRatings = await ctx.db
+      .query("ratings")
+      .withIndex("by_song", (q) => q.eq("songId", songId))
+      .collect();
+
+    const hasAlreadyVoted = existingRatings.some((r) => r.voterId === playerId);
+    if (hasAlreadyVoted) {
+      console.log(`[submitRating] Player ${playerId} already rated song ${songId}`);
+      return;
+    }
+
     await ctx.db.insert("ratings", {
       roomCode: code,
       round: room.currentRound,
@@ -111,7 +138,8 @@ export const submitRating = mutation({
       submittedAt: now(),
     });
     // After each rating, check if all eligible voters have voted and advance
-    await maybeAdvanceOnAllVotes(ctx, { code });
+    // Use scheduler to avoid direct mutation-to-mutation call
+    await ctx.scheduler.runAfter(0, internal.game.flow.maybeAdvanceOnAllVotes, { code });
   },
 });
 
@@ -136,6 +164,12 @@ export const nextRound = mutation({
       phase: "songSelection",
       lastActivityAt: now(),
     });
+
+    // Clean submittedRounds for all players in new round
+    const players = await getPlayers(ctx, code);
+    await Promise.all(
+      players.map((p) => ctx.db.patch(p._id, { submittedRounds: [] }))
+    );
   },
 });
 
@@ -147,6 +181,25 @@ export const returnToLobby = mutation({
     const host = room.hostPlayerId ? await ctx.db.get(room.hostPlayerId) : null;
     if (!host || host.playerId !== playerId) return;
 
+    // Clean up all game data from previous game
+    const submissions = await ctx.db
+      .query("submissions")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
+      .collect();
+    await Promise.all(submissions.map(s => ctx.db.delete(s._id)));
+
+    const ratings = await ctx.db
+      .query("ratings")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
+      .collect();
+    await Promise.all(ratings.map(r => ctx.db.delete(r._id)));
+
+    const roundResults = await ctx.db
+      .query("roundResults")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
+      .collect();
+    await Promise.all(roundResults.map(rr => ctx.db.delete(rr._id)));
+
     await ctx.db.patch(room._id, {
       phase: "lobby",
       currentRound: 1,
@@ -155,7 +208,7 @@ export const returnToLobby = mutation({
     });
 
     const players = await getPlayers(ctx, code);
-    await Promise.all(players.map((p) => ctx.db.patch(p._id, { isReady: false })));
+    await Promise.all(players.map((p) => ctx.db.patch(p._id, { isReady: false, submittedRounds: [] })));
   },
 });
 
@@ -171,6 +224,18 @@ export const getSubmissionStatus = query({
       .collect();
     const uniqueSubmitters = new Set(subs.map((s) => s.playerId)).size;
     return { submitted: uniqueSubmitters, total: players.length };
+  },
+});
+
+export const getMySubmission = query({
+  args: { code: v.string(), playerId: v.string(), round: v.number() },
+  handler: async (ctx, { code, playerId, round }) => {
+    return await ctx.db
+      .query("submissions")
+      .withIndex("by_player_round", (q) =>
+        q.eq("roomCode", code).eq("playerId", playerId).eq("round", round)
+      )
+      .unique();
   },
 });
 
@@ -204,7 +269,28 @@ export const getCurrentRatingSong = query({
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
       .collect();
     const idx = room.currentRatingIndex ?? 0;
-    return subs[idx] ?? null;
+    const submission = subs[idx];
+    if (!submission) return null;
+
+    // Fetch player information
+    const player = await ctx.db
+      .query("players")
+      .withIndex("by_player", (q) => q.eq("playerId", submission.playerId).eq("roomCode", code))
+      .unique();
+
+    // Transform to match RatingScreen expectations
+    return {
+      songId: submission._id,
+      name: submission.trackDetails.name,
+      artist: submission.trackDetails.artist,
+      albumCover: submission.trackDetails.albumCover,
+      previewUrl: submission.trackDetails.previewUrl,
+      snippet: submission.trackDetails.snippet,
+      player: {
+        id: submission.playerId,
+        name: player?.name || "Unknown Player"
+      }
+    };
   },
 });
 
@@ -215,17 +301,88 @@ export const getRoundResults = query({
       .query("roundResults")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", round))
       .unique();
-    return rr ?? null;
+
+    if (!rr) return null;
+
+    // Enrich results with player names and transform to expected format
+    const songsWithPlayers = await Promise.all(
+      rr.results.map(async (result) => {
+        // Look up player to get their name
+        const player = await ctx.db
+          .query("players")
+          .withIndex("by_player", (q) => q.eq("playerId", result.playerId).eq("roomCode", code))
+          .unique();
+
+        return {
+          ...result,
+          player: {
+            id: result.playerId,
+            name: player?.name || "Unknown Player"
+          }
+        };
+      })
+    );
+
+    // Transform to match client expectations (songs instead of results)
+    return {
+      ...rr,
+      songs: songsWithPlayers,
+      winnerSongId: rr.winnerSongId,
+      round: rr.round,
+      roomCode: rr.roomCode
+    };
   },
 });
 
 export const getAllRoundResults = query({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {
-    return await ctx.db
+    const allResults = await ctx.db
       .query("roundResults")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code))
       .collect();
+
+    // Batch player lookup: collect all unique playerIds first
+    const allPlayerIds = new Set<string>();
+    allResults.forEach(rr => {
+      rr.results.forEach(result => {
+        allPlayerIds.add(result.playerId);
+      });
+    });
+
+    // Single batch query for all players
+    const allPlayers = await ctx.db
+      .query("players")
+      .withIndex("by_room", (q) => q.eq("roomCode", code))
+      .collect();
+
+    // Create Map for O(1) lookup
+    const playerMap = new Map(
+      allPlayers.map(p => [p.playerId, p])
+    );
+
+    // Enrich each round's results with player names and transform to expected format
+    return allResults.map(rr => {
+      const songsWithPlayers = rr.results.map(result => {
+        const player = playerMap.get(result.playerId);
+        return {
+          ...result,
+          player: {
+            id: result.playerId,
+            name: player?.name || "Unknown Player"
+          }
+        };
+      });
+
+      // Transform to match client expectations (songs instead of results)
+      return {
+        ...rr,
+        songs: songsWithPlayers,
+        winnerSongId: rr.winnerSongId,
+        round: rr.round,
+        roomCode: rr.roomCode
+      };
+    });
   },
 });
 
@@ -319,7 +476,8 @@ export const advanceRating = internalMutation({
       .collect();
     const idx = room.currentRatingIndex ?? 0;
     if (idx >= subs.length) {
-      await calculateResultsInternal(ctx, { code });
+      // Use scheduler to avoid direct mutation-to-mutation call
+      await ctx.scheduler.runAfter(0, internal.game.flow.calculateResultsInternal, { code });
       return;
     }
     // Ensure submitter auto-skip (-1) exists for the current song
@@ -380,6 +538,26 @@ async function getRoom(ctx: any, code: string) {
 
 async function getPlayers(ctx: any, code: string) {
   return await ctx.db.query("players").withIndex("by_room", (q: any) => q.eq("roomCode", code)).collect();
+}
+
+async function getPlayer(ctx: any, code: string, playerId: string) {
+  return await ctx.db
+    .query("players")
+    .withIndex("by_player", (q: any) => q.eq("playerId", playerId).eq("roomCode", code))
+    .unique();
+}
+
+async function validateConnection(ctx: any, code: string, playerId: string, connectionId: string) {
+  const player = await getPlayer(ctx, code, playerId);
+  if (!player) {
+    console.log(`[validateConnection] Player ${playerId} not found in room ${code}`);
+    return null;
+  }
+  if (player.connectionId !== connectionId) {
+    console.log(`[validateConnection] Connection mismatch for ${playerId}. Expected: ${player.connectionId}, Got: ${connectionId}`);
+    return null;
+  }
+  return player;
 }
 
 function pickPrompt(prompts: string[]): string {

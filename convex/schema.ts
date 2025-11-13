@@ -34,6 +34,7 @@ export default defineSchema({
     connectedAt: v.optional(v.number()), // When this connection was established
     lastSeenAt: v.number(), // Last heartbeat timestamp
     isActive: v.optional(v.boolean()), // Is this the currently active connection for this playerId?
+    submittedRounds: v.optional(v.array(v.number())), // Tracks which rounds this player has submitted for (prevents race conditions)
   })
     .index("by_room", ["roomCode"])
     .index("by_player", ["playerId", "roomCode"]),

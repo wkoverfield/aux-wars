@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { useGame } from '../services/GameContext';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 
 /**
  * NavigationBlocker component that prevents accidental navigation during active games
@@ -9,8 +10,15 @@ import { useGame } from '../services/GameContext';
 export default function NavigationBlocker() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { state } = useGame();
-  const { phase } = state;
+
+  // Extract gameCode from URL path
+  const gameCodeMatch = location.pathname.match(/\/lobby\/([^/]+)/);
+  const gameCode = gameCodeMatch ? gameCodeMatch[1] : null;
+
+  // Query room data to get current phase
+  const roomQuery = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
+  const room = roomQuery?.room || roomQuery;
+  const phase = room?.phase || '';
 
   useEffect(() => {
     // Only block navigation if we're in an active game (not in lobby)

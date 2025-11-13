@@ -30,6 +30,12 @@ export const hostGame = mutation({
 export const joinGame = mutation({
   args: { code: v.string(), playerId: v.string(), connectionId: v.string(), name: v.string() },
   handler: async (ctx, { code, playerId, connectionId, name }) => {
+    // Validate player name
+    const trimmedName = name.trim();
+    if (!trimmedName || trimmedName.length < 1 || trimmedName.length > 50) {
+      return { success: false, message: "Name must be between 1 and 50 characters" };
+    }
+
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return { success: false, message: "Game code not found" };
 
@@ -39,10 +45,16 @@ export const joinGame = mutation({
       .collect();
 
     const isFirst = players.length === 0;
+
+    // Enforce max 8 players (unless player is rejoining)
     const existing = await ctx.db
       .query("players")
       .withIndex("by_player", (q) => q.eq("playerId", playerId).eq("roomCode", code))
       .unique();
+
+    if (!existing && players.length >= 8) {
+      return { success: false, message: "Room is full (max 8 players)" };
+    }
 
     if (existing) {
       // CONNECTION TAKEOVER: This player is rejoining from another tab/device
@@ -51,7 +63,7 @@ export const joinGame = mutation({
 
       await ctx.db.patch(existing._id, {
         connectionId,           // Update to new connection ID
-        name,                   // Update name in case it changed
+        name: trimmedName,      // Update name in case it changed
         connectedAt: now(),     // Record when this connection was established
         lastSeenAt: now(),      // Update last seen
         isActive: true,         // Mark this connection as active
@@ -73,7 +85,7 @@ export const joinGame = mutation({
         roomCode: code,
         playerId,
         connectionId,
-        name,
+        name: trimmedName,
         isHost: isFirst,
         isReady: false,
         connectedAt: now(),
@@ -193,15 +205,25 @@ export const heartbeat = mutation({
 });
 
 export const updatePlayerName = mutation({
-  args: { code: v.string(), playerId: v.string(), name: v.optional(v.string()), isReady: v.optional(v.boolean()) },
-  handler: async (ctx, { code, playerId, name, isReady }) => {
-    const player = await ctx.db
-      .query("players")
-      .withIndex("by_player", (q) => q.eq("playerId", playerId).eq("roomCode", code))
-      .unique();
-    if (!player) return { code: 'PLAYER_NOT_FOUND' } as const;
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string(), name: v.optional(v.string()), isReady: v.optional(v.boolean()) },
+  handler: async (ctx, { code, playerId, connectionId, name, isReady }) => {
+    // Validate player name if provided
+    if (name !== undefined) {
+      const trimmedName = name.trim();
+      if (!trimmedName || trimmedName.length < 1 || trimmedName.length > 50) {
+        return { code: 'INVALID_NAME', message: 'Name must be between 1 and 50 characters' } as const;
+      }
+    }
+
+    // Validate connection (prevents stale tabs from updating after takeover)
+    const player = await validateConnection(ctx, code, playerId, connectionId);
+    if (!player) {
+      console.log(`[updatePlayerName] Connection validation failed`);
+      return { code: 'CONNECTION_TAKEN_OVER' } as const;
+    }
+
     await ctx.db.patch(player._id, {
-      name: name ?? player.name,
+      name: name ? name.trim() : player.name,
       isReady: typeof isReady === "boolean" ? isReady : player.isReady,
       lastSeenAt: now(),
     });
@@ -214,6 +236,20 @@ export const updatePlayerName = mutation({
 export const updateSettings = mutation({
   args: { code: v.string(), numberOfRounds: v.number(), roundLength: v.number(), selectedPrompts: v.array(v.string()) },
   handler: async (ctx, { code, numberOfRounds, roundLength, selectedPrompts }) => {
+    // Validate settings
+    if (numberOfRounds < 1 || numberOfRounds > 10) {
+      console.log(`[updateSettings] Invalid numberOfRounds: ${numberOfRounds}`);
+      return;
+    }
+    if (roundLength < 15 || roundLength > 300) {
+      console.log(`[updateSettings] Invalid roundLength: ${roundLength}`);
+      return;
+    }
+    if (selectedPrompts.length < 1 || selectedPrompts.length > 50) {
+      console.log(`[updateSettings] Invalid selectedPrompts length: ${selectedPrompts.length}`);
+      return;
+    }
+
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return;
     await ctx.db.patch(room._id, {
@@ -261,14 +297,21 @@ export const getCustomPrompts = query({
 export const addCustomPrompt = mutation({
   args: { code: v.string(), text: v.string(), createdBy: v.string() },
   handler: async (ctx, { code, text, createdBy }) => {
+    // Validate custom prompt length
+    const trimmedText = text.trim();
+    if (!trimmedText || trimmedText.length < 1 || trimmedText.length > 200) {
+      console.log(`[addCustomPrompt] Invalid prompt length: ${trimmedText.length}`);
+      return;
+    }
+
     const existing = await ctx.db
       .query("customPrompts")
-      .withIndex("by_room_text", (q) => q.eq("roomCode", code).eq("text", text))
+      .withIndex("by_room_text", (q) => q.eq("roomCode", code).eq("text", trimmedText))
       .unique();
     if (existing) return;
     await ctx.db.insert("customPrompts", {
       roomCode: code,
-      text,
+      text: trimmedText,
       createdBy,
       createdAt: Date.now(),
     });
@@ -343,6 +386,26 @@ async function deleteRoomAndData(ctx: any, room: any) {
   await ctx.db.delete(room._id);
 
   console.log(`[deleteRoomAndData] Deleted room ${code} and all associated data`);
+}
+
+async function getPlayer(ctx: any, code: string, playerId: string) {
+  return await ctx.db
+    .query("players")
+    .withIndex("by_player", (q: any) => q.eq("playerId", playerId).eq("roomCode", code))
+    .unique();
+}
+
+async function validateConnection(ctx: any, code: string, playerId: string, connectionId: string) {
+  const player = await getPlayer(ctx, code, playerId);
+  if (!player) {
+    console.log(`[validateConnection] Player ${playerId} not found in room ${code}`);
+    return null;
+  }
+  if (player.connectionId !== connectionId) {
+    console.log(`[validateConnection] Connection mismatch for ${playerId}. Expected: ${player.connectionId}, Got: ${connectionId}`);
+    return null;
+  }
+  return player;
 }
 
 const defaultPrompts = [

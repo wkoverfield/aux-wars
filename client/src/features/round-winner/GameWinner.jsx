@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useGame } from '../../services/GameContext';
+// GameContext removed - using Convex queries directly
 // import { useSocket, useSocketConnection, useGameTransition } from '../../services/SocketProvider';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
@@ -12,7 +12,7 @@ import backIcon from '../../assets/back-icon.svg';
 /**
  * GameWinner component displays the final game results showing the winner and all players' stats.
  * Includes animations, navigation controls, and handles game state transitions.
- * 
+ *
  * @returns {JSX.Element} Rendered component
  */
 export default function GameWinner() {
@@ -22,10 +22,10 @@ export default function GameWinner() {
   // const isConnected = useSocketConnection();
   const setGameTransition = () => {};
   const allRoundResultsQuery = useQuery(api.game.flow.getAllRoundResults, gameCode ? { code: gameCode } : 'skip');
+  const playersQuery = useQuery(api.game.rooms.getPlayers, gameCode ? { code: gameCode } : 'skip');
   const returnToLobbyMutation = useMutation(api.game.flow.returnToLobby);
   const { updateSession } = useSession();
-  const { state, dispatch } = useGame();
-  const { allRoundResults: stateAllRoundResults } = state;
+  const stateAllRoundResults = allRoundResultsQuery;
 
   // Handle game transition animation
   useEffect(() => {
@@ -36,8 +36,19 @@ export default function GameWinner() {
     return () => clearTimeout(timer);
   }, [setGameTransition]);
 
-  // Handle disconnection
-  useEffect(() => {}, []);
+  // Show loading state while data is loading
+  if (!allRoundResultsQuery || !playersQuery) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-white text-xl">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-16 h-16 border-4 border-[#1db954] border-t-transparent rounded-full animate-spin"></div>
+            <p>Loading final results...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   /**
    * Builds player statistics from round results including wins, records, and songs.
@@ -103,8 +114,9 @@ export default function GameWinner() {
    */
   const handleReturnToLobby = async () => {
     setGameTransition(true);
-    dispatch({ type: "RESET_GAME" });
-    await returnToLobbyMutation({ code: gameCode, playerId: state.players.find(p => p.isHost)?.playerId });
+    // Game state reset handled by server mutation (returnToLobby)
+    const hostPlayer = playersQuery?.find(p => p.isHost);
+    await returnToLobbyMutation({ code: gameCode, playerId: hostPlayer?.playerId });
     updateSession({ lastPhase: 'lobby' });
     navigate(`/lobby/${gameCode}`, { replace: true });
   };
