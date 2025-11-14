@@ -120,7 +120,7 @@ export const submitRating = mutation({
     }
 
     // Rate limiting: Prevent rapid rating attempts (max 1 per second)
-    const lastAttempt = (player as any).lastRatingAttempt;
+    const lastAttempt = player.lastRatingAttempt;
     if (lastAttempt && now() - lastAttempt < 1000) {
       console.log(`[submitRating] Rate limit: Player ${playerId} attempting too quickly`);
       return;
@@ -129,7 +129,7 @@ export const submitRating = mutation({
     // Update last attempt timestamp
     await ctx.db.patch(player._id, {
       lastRatingAttempt: now()
-    } as any);
+    });
 
     // Check if player already rated this song (prevents duplicate ratings)
     const existingRatings = await ctx.db

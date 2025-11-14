@@ -36,6 +36,7 @@ export default defineSchema({
     isActive: v.optional(v.boolean()), // Is this the currently active connection for this playerId?
     submittedRounds: v.optional(v.array(v.number())), // Tracks which rounds this player has submitted for (prevents race conditions)
     lastSubmissionAttempt: v.optional(v.number()), // Rate limiting: timestamp of last submission attempt
+    lastRatingAttempt: v.optional(v.number()), // Rate limiting: timestamp of last rating attempt
   })
     .index("by_room", ["roomCode"])
     .index("by_player", ["playerId", "roomCode"]),
