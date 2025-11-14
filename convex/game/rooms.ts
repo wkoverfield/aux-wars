@@ -69,8 +69,6 @@ export const joinGame = mutation({
         isActive: true,         // Mark this connection as active
       });
 
-      console.log(`[joinGame] Connection takeover for player ${playerId}: ${oldConnectionId} → ${connectionId}`);
-
       await touchRoom(ctx, room._id);
       return {
         success: true,
@@ -96,8 +94,6 @@ export const joinGame = mutation({
       if (isFirst) {
         await ctx.db.patch(room._id, { hostPlayerId: playerDocId });
       }
-
-      console.log(`[joinGame] New player joined: ${playerId} with connection ${connectionId}`);
 
       await touchRoom(ctx, room._id);
       return {
@@ -164,7 +160,6 @@ export const leaveGame = mutation({
       if (sortedRemaining[0]) {
         await ctx.db.patch(room._id, { hostPlayerId: sortedRemaining[0]._id });
         await ctx.db.patch(sortedRemaining[0]._id, { isHost: true });
-        console.log(`[leaveGame] Host reassigned to ${sortedRemaining[0].playerId}`);
       }
     }
 
@@ -218,7 +213,6 @@ export const updatePlayerName = mutation({
     // Validate connection (prevents stale tabs from updating after takeover)
     const player = await validateConnection(ctx, code, playerId, connectionId);
     if (!player) {
-      console.log(`[updatePlayerName] Connection validation failed`);
       return { code: 'CONNECTION_TAKEN_OVER' } as const;
     }
 
@@ -237,18 +231,9 @@ export const updateSettings = mutation({
   args: { code: v.string(), numberOfRounds: v.number(), roundLength: v.number(), selectedPrompts: v.array(v.string()) },
   handler: async (ctx, { code, numberOfRounds, roundLength, selectedPrompts }) => {
     // Validate settings
-    if (numberOfRounds < 1 || numberOfRounds > 10) {
-      console.log(`[updateSettings] Invalid numberOfRounds: ${numberOfRounds}`);
-      return;
-    }
-    if (roundLength < 15 || roundLength > 300) {
-      console.log(`[updateSettings] Invalid roundLength: ${roundLength}`);
-      return;
-    }
-    if (selectedPrompts.length < 1 || selectedPrompts.length > 50) {
-      console.log(`[updateSettings] Invalid selectedPrompts length: ${selectedPrompts.length}`);
-      return;
-    }
+    if (numberOfRounds < 1 || numberOfRounds > 10) return;
+    if (roundLength < 15 || roundLength > 300) return;
+    if (selectedPrompts.length < 1 || selectedPrompts.length > 50) return;
 
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return;
@@ -299,10 +284,7 @@ export const addCustomPrompt = mutation({
   handler: async (ctx, { code, text, createdBy }) => {
     // Validate custom prompt length
     const trimmedText = text.trim();
-    if (!trimmedText || trimmedText.length < 1 || trimmedText.length > 200) {
-      console.log(`[addCustomPrompt] Invalid prompt length: ${trimmedText.length}`);
-      return;
-    }
+    if (!trimmedText || trimmedText.length < 1 || trimmedText.length > 200) return;
 
     const existing = await ctx.db
       .query("customPrompts")

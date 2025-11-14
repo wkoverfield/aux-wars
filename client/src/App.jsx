@@ -11,6 +11,7 @@ import NavigationBlocker from "./components/NavigationBlocker";
 import ConnectionStatus from "./components/ConnectionStatus";
 import { ToastProvider } from "./contexts/ToastContext";
 import { RoomProvider } from "./services/RoomProvider";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 function RoomProviderOutlet() {
   return (
@@ -28,25 +29,27 @@ function RoomProviderOutlet() {
  */
 export default function App() {
   return (
-    <Router>
-      <ToastProvider>
-        <NavigationBlocker />
-        <ConnectionStatus />
-        <Routes>
-            <Route path="/" element={<AppDisplay />}>
-              <Route index element={<PageTransition><Home /></PageTransition>} />
-              <Route path="/lobby" element={<Navigate to="/" replace />} />
-              <Route path="/lobby/:gameCode" element={<GameRouteGuard />}>
-                <Route element={<RoomProviderOutlet />}>
-                  <Route index element={<PageTransition><Lobby /></PageTransition>} />
-                  <Route path="round" element={<PageTransition><Round /></PageTransition>} />
-                  <Route path="results" element={<PageTransition><RoundWinner /></PageTransition>} />
-                  <Route path="gamewinner" element={<PageTransition><GameWinner /></PageTransition>} />
+    <ErrorBoundary>
+      <Router>
+        <ToastProvider>
+          <NavigationBlocker />
+          <ConnectionStatus />
+          <Routes>
+              <Route path="/" element={<AppDisplay />}>
+                <Route index element={<PageTransition><Home /></PageTransition>} />
+                <Route path="/lobby" element={<Navigate to="/" replace />} />
+                <Route path="/lobby/:gameCode" element={<GameRouteGuard />}>
+                  <Route element={<RoomProviderOutlet />}>
+                    <Route index element={<PageTransition><Lobby /></PageTransition>} />
+                    <Route path="round" element={<PageTransition><Round /></PageTransition>} />
+                    <Route path="results" element={<PageTransition><RoundWinner /></PageTransition>} />
+                    <Route path="gamewinner" element={<PageTransition><GameWinner /></PageTransition>} />
+                  </Route>
                 </Route>
               </Route>
-            </Route>
-        </Routes>
-      </ToastProvider>
-    </Router>
+          </Routes>
+        </ToastProvider>
+      </Router>
+    </ErrorBoundary>
   );
 }
