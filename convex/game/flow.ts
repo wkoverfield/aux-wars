@@ -41,13 +41,9 @@ export const submitSong = mutation({
     }),
   },
   handler: async (ctx, { code, playerId, connectionId, trackId, trackDetails }) => {
-    console.log(`[submitSong] Starting submission for player ${playerId} in room ${code}`);
-
     const room = await getRoom(ctx, code);
-    console.log(`[submitSong] Room phase: ${room?.phase}, currentRound: ${room?.currentRound}`);
 
     if (!room || room.phase !== "songSelection") {
-      console.log(`[submitSong] Early return - room: ${!!room}, phase: ${room?.phase}`);
       return;
     }
 
@@ -59,7 +55,7 @@ export const submitSong = mutation({
     }
 
     // Rate limiting: Prevent rapid submission attempts (max 1 per second)
-    const lastAttempt = (player as any).lastSubmissionAttempt;
+    const lastAttempt = player.lastSubmissionAttempt;
     if (lastAttempt && now() - lastAttempt < 1000) {
       console.log(`[submitSong] Rate limit: Player ${playerId} attempting too quickly`);
       return;
@@ -68,7 +64,7 @@ export const submitSong = mutation({
     // Update last attempt timestamp
     await ctx.db.patch(player._id, {
       lastSubmissionAttempt: now()
-    } as any);
+    });
 
     const players = await getPlayers(ctx, code);
 
@@ -98,18 +94,12 @@ export const submitSong = mutation({
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
       .collect();
-      
-    console.log(`[submitSong] Players: ${players.length}, Submissions: ${subs.length}`);
-    console.log(`[submitSong] Player IDs:`, players.map(p => p.playerId));
-    console.log(`[submitSong] Submission player IDs:`, subs.map(s => s.playerId));
-    
+
     // Robust unique-submitter check
     const submittedPlayerIds = new Set(subs.map((s) => s.playerId));
     const allSubmitted = players.every((p) => submittedPlayerIds.has(p.playerId));
-    console.log(`[submitSong] All submitted: ${allSubmitted}`);
-    
+
     if (allSubmitted) {
-      console.log(`[submitSong] Starting rating phase!`);
       // Use scheduler to avoid direct mutation-to-mutation call
       await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code });
     }
@@ -433,18 +423,11 @@ export const getCurrentRatingStatus = query({
 export const startRatingPhaseInternal = internalMutation({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {
-    console.log(`[startRatingPhaseInternal] Starting rating phase for room ${code}`);
     const room = await getRoom(ctx, code);
-    if (!room) {
-      console.log(`[startRatingPhaseInternal] Room not found for code ${code}`);
-      return;
-    }
-    console.log(`[startRatingPhaseInternal] Updating room phase from ${room.phase} to rating`);
+    if (!room) return;
     await ctx.db.patch(room._id, { phase: "rating", currentRatingIndex: 0, lastActivityAt: now() });
-    console.log(`[startRatingPhaseInternal] Room phase updated, scheduling advanceRating`);
-    // kick off first rating step shortly
+    // Kick off first rating step shortly
     await ctx.scheduler.runAfter(500, internal.game.flow.advanceRating, { code });
-    console.log(`[startRatingPhaseInternal] advanceRating scheduled for 500ms from now`);
   },
 });
 
@@ -474,15 +457,27 @@ export const calculateResultsInternal = internalMutation({
         artist: s.trackDetails.artist,
         albumCover: s.trackDetails.albumCover,
         totalRecords: scores[s._id.id] || 0,
+        submittedAt: s.submittedAt,
         isWinner: false,
       }))
-      .sort((a, b) => b.totalRecords - a.totalRecords);
+      .sort((a, b) => {
+        // Primary sort: by total records (descending)
+        if (b.totalRecords !== a.totalRecords) {
+          return b.totalRecords - a.totalRecords;
+        }
+        // Tiebreaker: earliest submission wins
+        return a.submittedAt - b.submittedAt;
+      });
     if (sorted[0]) sorted[0].isWinner = true;
+
+    // Remove submittedAt before storing (only used for tiebreaker)
+    const results = sorted.map(({ submittedAt, ...rest }) => rest);
+
     await ctx.db.insert("roundResults", {
       roomCode: code,
       round: room.currentRound,
       winnerSongId: sorted[0]?.songId,
-      results: sorted,
+      results,
       calculatedAt: now(),
     });
     await ctx.db.patch(room._id, { phase: "results", lastActivityAt: now(), currentRatingIndex: undefined });

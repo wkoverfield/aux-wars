@@ -35,6 +35,7 @@ export default defineSchema({
     lastSeenAt: v.number(), // Last heartbeat timestamp
     isActive: v.optional(v.boolean()), // Is this the currently active connection for this playerId?
     submittedRounds: v.optional(v.array(v.number())), // Tracks which rounds this player has submitted for (prevents race conditions)
+    lastSubmissionAttempt: v.optional(v.number()), // Rate limiting: timestamp of last submission attempt
   })
     .index("by_room", ["roomCode"])
     .index("by_player", ["playerId", "roomCode"]),
