@@ -5,6 +5,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { useSession } from '../../hooks/useSession';
+import { useHeartbeat } from '../../hooks/useHeartbeat';
 import PlayerResultWithHover from '../../components/PlayerResultWithHover';
 import AnimatedLogo from '../../components/AnimatedLogo';
 import backIcon from '../../assets/back-icon.svg';
@@ -24,8 +25,17 @@ export default function GameWinner() {
   const allRoundResultsQuery = useQuery(api.game.flow.getAllRoundResults, gameCode ? { code: gameCode } : 'skip');
   const playersQuery = useQuery(api.game.rooms.getPlayers, gameCode ? { code: gameCode } : 'skip');
   const returnToLobbyMutation = useMutation(api.game.flow.returnToLobby);
-  const { updateSession } = useSession();
+  const { session, updateSession, clearSession } = useSession();
   const stateAllRoundResults = allRoundResultsQuery;
+
+  // Heartbeat to keep connection alive during final results viewing
+  useHeartbeat(
+    gameCode,
+    session?.playerId,
+    session?.connectionId,
+    null,
+    clearSession
+  );
 
   // Handle game transition animation
   useEffect(() => {

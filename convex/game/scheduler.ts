@@ -36,14 +36,14 @@ export const cleanupStaleRooms = internalMutation({
 });
 
 /**
- * Cleanup inactive players (5 minute timeout)
- * Removes players who haven't sent a heartbeat in 5+ minutes
+ * Cleanup inactive players (10 minute timeout)
+ * Removes players who haven't sent a heartbeat in 10+ minutes
  * Reassigns host if needed, deletes empty rooms
  */
 export const cleanupInactivePlayers = internalMutation({
   args: {},
   handler: async (ctx) => {
-    const TIMEOUT = 5 * 60 * 1000; // 5 minutes
+    const TIMEOUT = 10 * 60 * 1000; // 10 minutes
     const cutoff = now() - TIMEOUT;
 
     const allPlayers = await ctx.db.query("players").collect();

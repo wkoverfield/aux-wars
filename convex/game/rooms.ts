@@ -168,6 +168,56 @@ export const leaveGame = mutation({
   },
 });
 
+export const kickPlayer = mutation({
+  args: {
+    code: v.string(),
+    hostPlayerId: v.string(),
+    targetPlayerId: v.string()
+  },
+  handler: async (ctx, { code, hostPlayerId, targetPlayerId }) => {
+    const room = await getRoomByCodeInternal(ctx, code);
+    if (!room) {
+      return { success: false, message: "Room not found" };
+    }
+
+    // Verify caller is the host
+    const host = await getPlayer(ctx, code, hostPlayerId);
+    if (!host || !host.isHost) {
+      return { success: false, message: "Only the host can kick players" };
+    }
+
+    // Prevent host from kicking themselves
+    if (hostPlayerId === targetPlayerId) {
+      return { success: false, message: "You cannot kick yourself" };
+    }
+
+    // Verify target player exists
+    const target = await getPlayer(ctx, code, targetPlayerId);
+    if (!target) {
+      return { success: false, message: "Player not found" };
+    }
+
+    // Remove the player
+    await ctx.db.delete(target._id);
+
+    // Check remaining players
+    const remaining = await ctx.db
+      .query("players")
+      .withIndex("by_room", (q) => q.eq("roomCode", code))
+      .collect();
+
+    // If room is now empty, delete it
+    if (remaining.length === 0) {
+      console.log(`[kickPlayer] Room ${code} is now empty - deleting`);
+      await deleteRoomAndData(ctx, room);
+      return { success: true, roomDeleted: true };
+    }
+
+    await touchRoom(ctx, room._id);
+    return { success: true, roomDeleted: false };
+  },
+});
+
 export const heartbeat = mutation({
   args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
   handler: async (ctx, { code, playerId, connectionId }) => {

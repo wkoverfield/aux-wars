@@ -13,6 +13,7 @@ import WaitingScreen from "./WaitingScreen";
 import RatingScreen from "./RatingScreen";
 import SnippetSelector from "../../components/SnippetSelector";
 import { useSession } from "../../hooks/useSession";
+import { useHeartbeat } from "../../hooks/useHeartbeat";
 
 /**
  * Round component manages the game round flow including song selection and rating phases.
@@ -33,7 +34,16 @@ export default function Round() {
   const submitSong = useMutation(api.game.flow.submitSong);
   const submitRating = useMutation(api.game.flow.submitRating);
   const { showToast } = useToast();
-  const { session } = useSession();
+  const { session, clearSession } = useSession();
+
+  // Heartbeat to keep connection alive during round
+  useHeartbeat(
+    gameCode,
+    session?.playerId,
+    session?.connectionId,
+    null, // No takeover modal needed during active gameplay
+    clearSession
+  );
 
   // Extract current prompt from room data
   const room = roomQuery?.room || roomQuery;

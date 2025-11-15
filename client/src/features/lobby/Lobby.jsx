@@ -9,6 +9,7 @@ import SettingsModal from "../../components/SettingsModal";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 // GameContext removed - using RoomProvider's Convex queries directly
 import { useSession } from "../../hooks/useSession";
+import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
 import logo from "../../assets/aux-wars-logo.svg";
 import settingsIcon from "../../assets/settings-btn.svg";
@@ -40,8 +41,8 @@ export default function Lobby() {
   const isHost = players.find(p => p.playerId === session?.playerId)?.isHost ?? false;
   const allPlayersReady = players.every((player) => player.isReady);
   const updatePlayerName = useMutation(api.game.rooms.updatePlayerName);
-  const heartbeat = useMutation(api.game.rooms.heartbeat);
   const leaveGame = useMutation(api.game.rooms.leaveGame);
+  const kickPlayer = useMutation(api.game.rooms.kickPlayer);
   const startGame = useMutation(api.game.flow.startGame);
   const hasJoinedGame = useRef(false);
 
@@ -108,40 +109,13 @@ export default function Lobby() {
    * Heartbeat system to detect if connection has been taken over
    * Runs every 5 seconds to check if this tab is still the active connection
    */
-  useEffect(() => {
-    if (!gameCode || !session?.playerId || !session?.connectionId) return;
-
-    const runHeartbeat = async () => {
-      try {
-        const result = await heartbeat({
-          code: gameCode,
-          playerId: session.playerId,
-          connectionId: session.connectionId
-        });
-
-        if (result.status === 'TAKEN_OVER') {
-          // This tab's connection has been replaced by another tab/device
-          console.log('[Heartbeat] Connection taken over - showing modal');
-          setShowTakenOverModal(true);
-        } else if (result.status === 'NOT_FOUND') {
-          // Player no longer exists in room
-          console.log('[Heartbeat] Player not found - redirecting to home');
-          clearSession();
-          navigate('/', { replace: true });
-        }
-      } catch (error) {
-        console.error('[Heartbeat] Error:', error);
-      }
-    };
-
-    // Run immediately on mount
-    runHeartbeat();
-
-    // Then run every 5 seconds
-    const interval = setInterval(runHeartbeat, 5000);
-
-    return () => clearInterval(interval);
-  }, [gameCode, session?.playerId, session?.connectionId, heartbeat, clearSession, navigate]);
+  useHeartbeat(
+    gameCode,
+    session?.playerId,
+    session?.connectionId,
+    () => setShowTakenOverModal(true),
+    clearSession
+  );
 
   /**
    * Clean disconnection when user closes the browser tab or navigates away
@@ -177,9 +151,29 @@ export default function Lobby() {
    */
   const handleLeaveGame = async () => {
     if (!gameCode || !session?.playerId) return;
+
     await leaveGame({ code: gameCode, playerId: session.playerId });
     clearSession();
     navigate("/lobby", { replace: true });
+  };
+
+  /**
+   * Handles kicking a player from the lobby (host only)
+   */
+  const handleKickPlayer = async (targetPlayerId) => {
+    if (!isHost || !session?.playerId || !gameCode) return;
+
+    const result = await kickPlayer({
+      code: gameCode,
+      hostPlayerId: session.playerId,
+      targetPlayerId
+    });
+
+    if (result.success) {
+      showToast("Player removed from lobby", "success");
+    } else {
+      showToast(result.message || "Failed to kick player", "error");
+    }
   };
 
   const pulseAnimation = {
@@ -295,7 +289,12 @@ export default function Lobby() {
               </button>
             </div>
             <div className="flex-1 w-full overflow-y-auto min-h-0">
-              <PlayerList players={players} />
+              <PlayerList
+                players={players}
+                isHost={isHost}
+                currentPlayerId={session?.playerId}
+                onKick={handleKickPlayer}
+              />
             </div>
           </div>
           {isHost && allPlayersReady && players.length > 2 && (

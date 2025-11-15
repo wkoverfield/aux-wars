@@ -76,6 +76,7 @@ export default function Home() {
     const code = joinCode.trim().toUpperCase();
     const playerId = crypto.randomUUID();
     const tempName = `Player ${Math.floor(Math.random() * 100) + 1}`;
+
     try {
       const resp = await joinGame({ code, name: tempName, playerId, connectionId });
       if (resp?.success) {

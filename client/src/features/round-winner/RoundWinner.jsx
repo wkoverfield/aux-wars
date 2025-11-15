@@ -9,6 +9,8 @@ import Song from "../../components/Song";
 import SearchBar from "../../components/SearchBar";
 import recordLogo from "../../components/record-logo.svg";
 import nextIcon from "../../assets/next-icon.svg";
+import { useSession } from "../../hooks/useSession";
+import { useHeartbeat } from "../../hooks/useHeartbeat";
 
 /**
  * RoundWinner component displays the results of a completed round.
@@ -32,6 +34,16 @@ export default function RoundWinner() {
   const numberOfRounds = room?.settings?.numberOfRounds || 3;
   const roundResults = roundResultsQuery;
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const { session, clearSession } = useSession();
+
+  // Heartbeat to keep connection alive during results viewing
+  useHeartbeat(
+    gameCode,
+    session?.playerId,
+    session?.connectionId,
+    null,
+    clearSession
+  );
 
   // Derive from query - no local state duplication
   const loadingResults = !roundResultsQuery;
