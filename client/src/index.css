@@ -189,7 +189,8 @@
   width: 100%;
   max-width: 600px;
   min-width: 280px;
-  height: 56px;
+  min-height: 56px;
+  height: auto;
   background-color: #242424;
   opacity: .85;
   padding: 1rem;

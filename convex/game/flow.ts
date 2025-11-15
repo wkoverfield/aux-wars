@@ -447,7 +447,7 @@ export const calculateResultsInternal = internalMutation({
         .withIndex("by_song", (q) => q.eq("songId", s._id))
         .collect();
       const total = ratings.filter((r) => r.rating > 0).reduce((sum, r) => sum + r.rating, 0);
-      scores[s._id.id] = total;
+      scores[s._id] = total;
     }
     const sorted = subs
       .map((s) => ({
@@ -456,7 +456,7 @@ export const calculateResultsInternal = internalMutation({
         name: s.trackDetails.name,
         artist: s.trackDetails.artist,
         albumCover: s.trackDetails.albumCover,
-        totalRecords: scores[s._id.id] || 0,
+        totalRecords: scores[s._id] || 0,
         submittedAt: s.submittedAt,
         isWinner: false,
       }))
