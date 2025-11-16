@@ -68,10 +68,22 @@ export const submitSong = mutation({
 
     const players = await getPlayers(ctx, code);
 
-    // Prevent duplicate submission by the same player in the same round
-    // Use player's submittedRounds field for atomic check
-    if (player.submittedRounds?.includes(room.currentRound)) {
-      console.log(`[submitSong] Player ${playerId} already submitted for round ${room.currentRound}, skipping insert`);
+    // Prevent duplicate submission - check BOTH submittedRounds AND actual DB submissions
+    // This handles the case where player crashes/rejoins in same round
+    const existingSubmission = await ctx.db
+      .query("submissions")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+      .filter((q) => q.eq(q.field("playerId"), playerId))
+      .first();
+
+    if (existingSubmission) {
+      console.log(`[submitSong] Player ${playerId} already has submission in DB for round ${room.currentRound}`);
+      // Sync submittedRounds with reality in case it got out of sync
+      if (!player.submittedRounds?.includes(room.currentRound)) {
+        await ctx.db.patch(player._id, {
+          submittedRounds: [...(player.submittedRounds || []), room.currentRound]
+        });
+      }
       throw new Error("You have already submitted a song for this round");
     }
 
