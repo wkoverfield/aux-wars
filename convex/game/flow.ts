@@ -44,21 +44,21 @@ export const submitSong = mutation({
     const room = await getRoom(ctx, code);
 
     if (!room || room.phase !== "songSelection") {
-      return;
+      throw new Error("Cannot submit song: game is not in song selection phase");
     }
 
     // Validate connection (prevents stale tabs from submitting after takeover)
     const player = await validateConnection(ctx, code, playerId, connectionId);
     if (!player) {
       console.log(`[submitSong] Rejecting submission: connection validation failed`);
-      return;
+      throw new Error("Connection validation failed. Please refresh the page.");
     }
 
     // Rate limiting: Prevent rapid submission attempts (max 1 per second)
     const lastAttempt = player.lastSubmissionAttempt;
     if (lastAttempt && now() - lastAttempt < 1000) {
       console.log(`[submitSong] Rate limit: Player ${playerId} attempting too quickly`);
-      return;
+      throw new Error("Please wait before submitting again");
     }
 
     // Update last attempt timestamp
@@ -72,7 +72,7 @@ export const submitSong = mutation({
     // Use player's submittedRounds field for atomic check
     if (player.submittedRounds?.includes(room.currentRound)) {
       console.log(`[submitSong] Player ${playerId} already submitted for round ${room.currentRound}, skipping insert`);
-      return; // Already submitted, exit early
+      throw new Error("You have already submitted a song for this round");
     }
 
     // Mark this round as submitted BEFORE inserting (prevents race condition)
@@ -89,7 +89,7 @@ export const submitSong = mutation({
       trackDetails,
       submittedAt: now(),
     });
-    
+
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
@@ -103,6 +103,8 @@ export const submitSong = mutation({
       // Use scheduler to avoid direct mutation-to-mutation call
       await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code });
     }
+
+    return { success: true };
   },
 });
 

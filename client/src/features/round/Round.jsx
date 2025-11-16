@@ -200,7 +200,8 @@ export default function Round() {
         },
       });
     } catch (error) {
-      showToast("Failed to submit song. Please try again.", "error");
+      const errorMessage = error?.message || "Failed to submit song. Please try again.";
+      showToast(errorMessage, "error");
       return;
     }
     setIsSongSelectionView(false);
