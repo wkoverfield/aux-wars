@@ -71,15 +71,18 @@ export default function RoundWinner() {
 
   // Socket-based updates removed - using Convex reactive queries instead
 
+  // Check if current user is the host
+  const currentPlayer = playersQuery?.find(p => p.playerId === session?.playerId);
+  const isHost = currentPlayer?.isHost ?? false;
+
   /**
    * Handles the transition to the next round or final results
    */
   const handleNextRound = async () => {
-    if (isTransitioning) return;
+    if (isTransitioning || !session?.playerId) return;
     setIsTransitioning(true);
     setGameTransition(true);
-    const hostPlayer = playersQuery?.find(p => p.isHost);
-    await nextRoundMutation({ code: gameCode, playerId: hostPlayer?.playerId });
+    await nextRoundMutation({ code: gameCode, playerId: session.playerId });
   };
 
   // Use state to prevent button text flickering
@@ -128,20 +131,22 @@ export default function RoundWinner() {
 
   return (
     <div className="relative flex flex-col h-screen w-full max-w-7xl mx-auto pt-2 pb-6 px-2 md:p-6 bg-transparent items-center overflow-hidden">
-      {/* Navigation button */}
-      <div className="w-full flex flex-row justify-end mb-1 mt-2 md:mb-2 md:mt-4">
-        <button
-          disabled={isTransitioning}
-          className={`flex items-center gap-2 py-1 px-3 md:py-2 md:px-4 rounded-md text-white font-semibold cursor-pointer transition-all bg-[#242424] hover:bg-[#191414] text-sm md:text-base ${
-            isTransitioning ? "opacity-70 cursor-not-allowed" : ""
-          }`}
-          onClick={handleNextRound}
-          style={{ minWidth: "100px" }}
-        >
-          {buttonText}
-          <img src={nextIcon} alt="Arrow Right" className="w-4 h-4 md:w-5 md:h-5 pt-0.5" />
-        </button>
-      </div>
+      {/* Navigation button - only show for host */}
+      {isHost && (
+        <div className="w-full flex flex-row justify-end mb-1 mt-2 md:mb-2 md:mt-4">
+          <button
+            disabled={isTransitioning}
+            className={`flex items-center gap-2 py-1 px-3 md:py-2 md:px-4 rounded-md text-white font-semibold cursor-pointer transition-all bg-[#242424] hover:bg-[#191414] text-sm md:text-base ${
+              isTransitioning ? "opacity-70 cursor-not-allowed" : ""
+            }`}
+            onClick={handleNextRound}
+            style={{ minWidth: "100px" }}
+          >
+            {buttonText}
+            <img src={nextIcon} alt="Arrow Right" className="w-4 h-4 md:w-5 md:h-5 pt-0.5" />
+          </button>
+        </div>
+      )}
 
       {/* Current prompt */}
       <div className="w-full max-w-3xl mx-auto mb-6 md:mb-8 mt-1 md:mt-2 px-2">

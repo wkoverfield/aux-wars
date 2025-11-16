@@ -93,6 +93,7 @@ export const submitSong = mutation({
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+      .order("asc")
       .collect();
 
     // Robust unique-submitter check
@@ -237,6 +238,7 @@ export const getSubmissionStatus = query({
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+      .order("asc")
       .collect();
     const uniqueSubmitters = new Set(subs.map((s) => s.playerId)).size;
     return { submitted: uniqueSubmitters, total: players.length };
@@ -264,6 +266,7 @@ export const getRatingStatus = query({
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+      .order("asc")
       .collect();
     const current = subs[room.currentRatingIndex ?? 0];
     if (!current) return { submitted: 0, total: players.length };
@@ -283,8 +286,13 @@ export const getCurrentRatingSong = query({
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+      .order("asc")
       .collect();
     const idx = room.currentRatingIndex ?? 0;
+
+    // Bounds check to prevent out-of-bounds access
+    if (idx >= subs.length) return null;
+
     const submission = subs[idx];
     if (!submission) return null;
 
@@ -411,6 +419,7 @@ export const getCurrentRatingStatus = query({
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+      .order("asc")
       .collect();
     const current = subs[room.currentRatingIndex ?? 0];
     if (!current) return { submitted: 0, total: players.length };
@@ -494,6 +503,7 @@ export const advanceRating = internalMutation({
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+      .order("asc")
       .collect();
     const idx = room.currentRatingIndex ?? 0;
     if (idx >= subs.length) {

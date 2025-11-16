@@ -28,6 +28,10 @@ export default function GameWinner() {
   const { session, updateSession, clearSession } = useSession();
   const stateAllRoundResults = allRoundResultsQuery;
 
+  // Check if current user is the host
+  const currentPlayer = playersQuery?.find(p => p.playerId === session?.playerId);
+  const isHost = currentPlayer?.isHost ?? false;
+
   // Heartbeat to keep connection alive during final results viewing
   useHeartbeat(
     gameCode,
@@ -123,26 +127,28 @@ export default function GameWinner() {
    * Emits a return-to-lobby event to the server and navigates back to the lobby.
    */
   const handleReturnToLobby = async () => {
+    if (!session?.playerId) return;
     setGameTransition(true);
     // Game state reset handled by server mutation (returnToLobby)
-    const hostPlayer = playersQuery?.find(p => p.isHost);
-    await returnToLobbyMutation({ code: gameCode, playerId: hostPlayer?.playerId });
+    await returnToLobbyMutation({ code: gameCode, playerId: session.playerId });
     updateSession({ lastPhase: 'lobby' });
     navigate(`/lobby/${gameCode}`, { replace: true });
   };
 
   return (
     <div className="relative flex flex-col h-screen w-full max-w-7xl mx-auto pt-2 pb-6 px-2 md:p-6 bg-transparent items-center overflow-hidden">
-      {/* Navigation controls */}
-      <div className="w-full flex flex-row justify-start mb-1 mt-2 md:mb-2 md:mt-4">
-        <button
-          className="flex items-center gap-2 py-1 px-3 md:py-2 md:px-4 rounded-md text-white font-semibold cursor-pointer transition-all bg-[#242424] hover:bg-[#191414] text-sm md:text-base"
-          onClick={handleReturnToLobby}
-        >
-          <img src={backIcon} alt="Back" className="w-4 h-4 md:w-5 md:h-5 pt-0.5" />
-          <span>Exit</span>
-        </button>
-      </div>
+      {/* Navigation controls - only show for host */}
+      {isHost && (
+        <div className="w-full flex flex-row justify-start mb-1 mt-2 md:mb-2 md:mt-4">
+          <button
+            className="flex items-center gap-2 py-1 px-3 md:py-2 md:px-4 rounded-md text-white font-semibold cursor-pointer transition-all bg-[#242424] hover:bg-[#191414] text-sm md:text-base"
+            onClick={handleReturnToLobby}
+          >
+            <img src={backIcon} alt="Back" className="w-4 h-4 md:w-5 md:h-5 pt-0.5" />
+            <span>Exit</span>
+          </button>
+        </div>
+      )}
 
       {/* Logo section - smaller on mobile */}
       <div className="flex justify-center w-full mb-2 md:mb-4">
