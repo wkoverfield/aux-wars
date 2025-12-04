@@ -34,13 +34,20 @@ export default function Round() {
   const submitSong = useMutation(api.game.flow.submitSong);
   const submitRating = useMutation(api.game.flow.submitRating);
   const { showToast } = useToast();
-  const { session, clearSession } = useSession();
+  const { session, clearSession, connectionId, updateSession } = useSession();
+
+  // Ensure session always has connectionId (handles back button navigation)
+  useEffect(() => {
+    if (session && !session.connectionId && connectionId) {
+      updateSession({ connectionId });
+    }
+  }, [session, connectionId, updateSession]);
 
   // Heartbeat to keep connection alive during round
   useHeartbeat(
     gameCode,
     session?.playerId,
-    session?.connectionId,
+    session?.connectionId || connectionId,
     null, // No takeover modal needed during active gameplay
     clearSession
   );
@@ -189,7 +196,7 @@ export default function Round() {
       await submitSong({
         code: gameCode,
         playerId: session?.playerId,
-        connectionId: session?.connectionId,
+        connectionId: session?.connectionId || connectionId,
         trackId: trackWithSnippet.id,
         trackDetails: {
           name: trackWithSnippet.name,
@@ -219,7 +226,7 @@ export default function Round() {
       await submitRating({
         code: gameCode,
         playerId: session?.playerId,
-        connectionId: session?.connectionId,
+        connectionId: session?.connectionId || connectionId,
         songId,
         rating
       });
