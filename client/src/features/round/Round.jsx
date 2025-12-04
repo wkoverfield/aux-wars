@@ -192,11 +192,24 @@ export default function Round() {
    * @param {Object} trackWithSnippet - Track object with snippet times
    */
   const handleConfirmSongWithSnippet = async (trackWithSnippet) => {
+    // Validate required session data
+    if (!session?.playerId) {
+      showToast("Session expired. Please refresh the page.", "error");
+      navigate("/");
+      return;
+    }
+
+    const finalConnectionId = session?.connectionId || connectionId;
+    if (!finalConnectionId) {
+      showToast("Connection error. Please refresh the page.", "error");
+      return;
+    }
+
     try {
       await submitSong({
         code: gameCode,
-        playerId: session?.playerId,
-        connectionId: session?.connectionId || connectionId,
+        playerId: session.playerId,
+        connectionId: finalConnectionId,
         trackId: trackWithSnippet.id,
         trackDetails: {
           name: trackWithSnippet.name,
@@ -222,11 +235,24 @@ export default function Round() {
    * @param {number} rating - The rating value
    */
   const handleSubmitRating = async (songId, rating) => {
+    // Validate required session data
+    if (!session?.playerId) {
+      showToast("Session expired. Please refresh the page.", "error");
+      navigate("/");
+      return;
+    }
+
+    const finalConnectionId = session?.connectionId || connectionId;
+    if (!finalConnectionId) {
+      showToast("Connection error. Please refresh the page.", "error");
+      return;
+    }
+
     try {
       await submitRating({
         code: gameCode,
-        playerId: session?.playerId,
-        connectionId: session?.connectionId || connectionId,
+        playerId: session.playerId,
+        connectionId: finalConnectionId,
         songId,
         rating
       });

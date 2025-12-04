@@ -23,16 +23,18 @@ export default function Home() {
   const hostGame = useMutation(api.game.rooms.hostGame);
   const joinGame = useMutation(api.game.rooms.joinGame);
   const navigate = useNavigate();
-  const { connectionId, clearSession, createSession } = useSession();
+  const { connectionId, clearSession, createSession, session, isSessionValid } = useSession();
   const { showToast } = useToast();
   const [joinCode, setJoinCode] = useState("");
   const [isHosting, setIsHosting] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
 
-  // Clear session when landing on home page
+  // Clear expired sessions on mount
   useEffect(() => {
-    clearSession();
-  }, [clearSession]);
+    if (session && !isSessionValid()) {
+      clearSession();
+    }
+  }, [session, isSessionValid, clearSession]);
 
   /**
    * Handles hosting a new game.
@@ -43,6 +45,8 @@ export default function Home() {
   const handleHostGame = async () => {
     if (isHosting) return;
     setIsHosting(true);
+    // Clear any existing session when starting a new game
+    clearSession();
     try {
       const { code } = await hostGame();
       const playerId = crypto.randomUUID();
@@ -74,6 +78,19 @@ export default function Home() {
     }
 
     const code = joinCode.trim().toUpperCase();
+    
+    // Check if user is trying to rejoin a game they're already in
+    if (session?.gameCode === code && session?.playerId && isSessionValid()) {
+      // They're rejoining their current game - navigate directly
+      navigate(`/lobby/${code}`);
+      return;
+    }
+    
+    // Save current session for potential recovery
+    const previousSession = session;
+    
+    // Clear any existing session when joining a NEW game
+    clearSession();
     const playerId = crypto.randomUUID();
     const tempName = `Player ${Math.floor(Math.random() * 100) + 1}`;
 
@@ -83,10 +100,16 @@ export default function Home() {
         createSession({ gameCode: code, playerId, playerName: tempName, lastPhase: 'lobby' });
         navigate(`/lobby/${code}`);
       } else {
+        // Show error - user can try again or start fresh
         showToast(resp?.message || "Failed to join game.", "error");
+        // Note: We don't restore previousSession here because:
+        // 1. If they were trying to join a different game, restoring would be wrong
+        // 2. If join failed, they should start fresh anyway
+        // 3. They can always navigate back if they had a valid session
       }
     } catch (e) {
       showToast("Failed to join game.", "error");
+      // Same reasoning - let them start fresh on error
     }
   };
 
