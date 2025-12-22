@@ -49,7 +49,9 @@ export const cleanupInactivePlayers = internalMutation({
     const allPlayers = await ctx.db.query("players").collect();
     const stalePlayers = allPlayers.filter((p) => p.lastSeenAt < cutoff);
 
-    console.log(`[cleanupInactivePlayers] Found ${stalePlayers.length} inactive players`);
+    if (stalePlayers.length > 0) {
+      console.log(`[cleanupInactivePlayers] Found ${stalePlayers.length} inactive players`);
+    }
 
     // Group stale players by room to efficiently handle room cleanup
     const playersByRoom = new Map<string, typeof stalePlayers>();

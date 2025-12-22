@@ -5,7 +5,7 @@ const crons = cronJobs();
 
 crons.interval(
   "cleanup-inactive-players",
-  { minutes: 1 },  // Run every minute to quickly remove inactive players
+  { minutes: 5 },  // Run every 5 minutes (2x within 10-min timeout is sufficient)
   internal.game.scheduler.cleanupInactivePlayers
 );
 
