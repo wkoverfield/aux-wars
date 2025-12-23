@@ -312,6 +312,7 @@ export default function Lobby() {
         onClose={() => setShowModal(false)}
         gameCode={gameCode}
         isHost={isHost}
+        playerId={session?.playerId}
       />
       <SessionTakenOverModal
         show={showTakenOverModal}

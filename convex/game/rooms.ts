@@ -278,8 +278,8 @@ export const updatePlayerName = mutation({
 });
 
 export const updateSettings = mutation({
-  args: { code: v.string(), numberOfRounds: v.number(), roundLength: v.number(), selectedPrompts: v.array(v.string()) },
-  handler: async (ctx, { code, numberOfRounds, roundLength, selectedPrompts }) => {
+  args: { code: v.string(), playerId: v.string(), numberOfRounds: v.number(), roundLength: v.number(), selectedPrompts: v.array(v.string()) },
+  handler: async (ctx, { code, playerId, numberOfRounds, roundLength, selectedPrompts }) => {
     // Validate settings
     if (numberOfRounds < 1 || numberOfRounds > 10) return;
     if (roundLength < 15 || roundLength > 300) return;
@@ -287,6 +287,11 @@ export const updateSettings = mutation({
 
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return;
+
+    // Only host can change settings
+    const player = await getPlayer(ctx, code, playerId);
+    if (!player || !player.isHost) return;
+
     await ctx.db.patch(room._id, {
       settings: { numberOfRounds, roundLength, selectedPrompts },
       lastActivityAt: now(),
@@ -351,8 +356,12 @@ export const addCustomPrompt = mutation({
 });
 
 export const removeCustomPrompt = mutation({
-  args: { code: v.string(), text: v.string() },
-  handler: async (ctx, { code, text }) => {
+  args: { code: v.string(), text: v.string(), playerId: v.string() },
+  handler: async (ctx, { code, text, playerId }) => {
+    // Only host can remove custom prompts
+    const player = await getPlayer(ctx, code, playerId);
+    if (!player || !player.isHost) return;
+
     const existing = await ctx.db
       .query("customPrompts")
       .withIndex("by_room_text", (q) => q.eq("roomCode", code).eq("text", text))

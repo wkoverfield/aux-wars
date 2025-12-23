@@ -19,7 +19,7 @@ import { getSavedSettings } from "../hooks/useSettingsPersistence";
  * @param {string} props.gameCode - Current game code
  * @returns {JSX.Element|null} Rendered component or null if not visible
  */
-export default function SettingsModal({ showModal, onClose, gameCode, isHost = false }) {
+export default function SettingsModal({ showModal, onClose, gameCode, isHost = false, playerId }) {
   const roomQuery = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
   // const socket = useSocket();
   const updateSettingsMutation = useMutation(api.game.rooms.updateSettings);
@@ -126,7 +126,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
     const promptToRemove = roomCustomPrompts[index];
     if (!promptToRemove) return;
     try {
-      await removeCustomPromptMutation({ code: gameCode, text: promptToRemove });
+      await removeCustomPromptMutation({ code: gameCode, text: promptToRemove, playerId });
       setSelectedPrompts((prev) => prev.filter((p) => p !== promptToRemove));
     } catch (_e) {
       showToast("Failed to remove prompt", "error");
@@ -154,10 +154,11 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
       selectedPrompts
     }));
 
-    // Update settings in Convex and wait for completion
+    // Update settings in Convex and wait for completion (host only)
     try {
       await updateSettingsMutation({
         code: gameCode,
+        playerId,
         numberOfRounds: rounds,
         roundLength: 30,
         selectedPrompts
