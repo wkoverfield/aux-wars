@@ -9,6 +9,7 @@
  */
 
 import type * as crons from "../crons.js";
+import type * as feedback from "../feedback.js";
 import type * as game_flow from "../game/flow.js";
 import type * as game_rooms from "../game/rooms.js";
 import type * as game_scheduler from "../game/scheduler.js";
@@ -31,6 +32,7 @@ import type {
  */
 declare const fullApi: ApiFromModules<{
   crons: typeof crons;
+  feedback: typeof feedback;
   "game/flow": typeof game_flow;
   "game/rooms": typeof game_rooms;
   "game/scheduler": typeof game_scheduler;

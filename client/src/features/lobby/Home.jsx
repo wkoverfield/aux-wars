@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import AnimatedLogo from "../../components/AnimatedLogo";
 import HomeBtn from "../../components/HomeBtn";
 import HowToPlayModal from "../../components/HowToPlayModal";
+import FeedbackModal from "../../components/FeedbackModal";
 import DevBtn from "../../components/DevBtn";
 import { useNavigate } from "react-router-dom";
 // import { useSocket, useSocketConnection } from "../../services/SocketProvider";
@@ -28,6 +29,7 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState("");
   const [isHosting, setIsHosting] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
 
   // Clear expired sessions on mount
   useEffect(() => {
@@ -156,12 +158,21 @@ export default function Home() {
 
       {/* How to Play button and dev credits */}
       <div className="flex flex-col items-center gap-4 pb-6">
-        <button
-          onClick={() => setShowHowToPlay(true)}
-          className="text-sm md:text-base text-white hover:underline transition-colors"
-        >
-          How to play
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowHowToPlay(true)}
+            className="text-sm md:text-base text-white hover:underline transition-colors"
+          >
+            How to play
+          </button>
+          <span className="text-gray-500">•</span>
+          <button
+            onClick={() => setShowFeedback(true)}
+            className="text-sm md:text-base text-white hover:underline transition-colors"
+          >
+            Feedback
+          </button>
+        </div>
         <div className="dev-links flex items-center gap-3 flex-wrap justify-center">
           <a
             href="https://github.com/woverfield/aux-wars"
@@ -189,9 +200,13 @@ export default function Home() {
         </div>
       </div>
 
-      <HowToPlayModal 
+      <HowToPlayModal
         showModal={showHowToPlay}
         onClose={() => setShowHowToPlay(false)}
+      />
+      <FeedbackModal
+        showModal={showFeedback}
+        onClose={() => setShowFeedback(false)}
       />
     </div>
   );
