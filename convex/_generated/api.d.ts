@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as analytics from "../analytics.js";
 import type * as crons from "../crons.js";
 import type * as feedback from "../feedback.js";
 import type * as game_flow from "../game/flow.js";
@@ -31,6 +32,7 @@ import type {
  * ```
  */
 declare const fullApi: ApiFromModules<{
+  analytics: typeof analytics;
   crons: typeof crons;
   feedback: typeof feedback;
   "game/flow": typeof game_flow;
