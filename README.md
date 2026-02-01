@@ -68,6 +68,12 @@ open `localhost:5173`
 
 using vercel for frontend and railway for backend. set your environment variables and update cors settings to match your domains.
 
+## analytics
+
+usage tracking added february 2026. events tracked: game creation, player joins/leaves, game starts, song submissions, ratings, and completions.
+
+**baseline (feb 2025 - feb 2026):** ~2,000 visitors, 204 games played.
+
 ## future ideas
 
 - tournament mode
