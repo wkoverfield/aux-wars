@@ -15,6 +15,13 @@ crons.interval(
   internal.game.scheduler.cleanupStaleRooms
 );
 
+crons.daily(
+  "cleanup-old-analytics",
+  { hourUTC: 4, minuteUTC: 0 },  // Run daily at 4am UTC
+  internal.analytics.cleanupOldEvents,
+  { retentionDays: 90 }
+);
+
 export default crons;
 
 

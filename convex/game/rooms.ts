@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
+import { internal } from "../_generated/api";
 
 function now() {
   return Date.now();
@@ -23,6 +24,13 @@ export const hostGame = mutation({
       createdAt: now(),
       lastActivityAt: now(),
     });
+
+    // Track game creation
+    await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+      eventType: "game_created",
+      metadata: { roomCode: code },
+    });
+
     return { code };
   },
 });
@@ -95,6 +103,12 @@ export const joinGame = mutation({
         await ctx.db.patch(room._id, { hostPlayerId: playerDocId });
       }
 
+      // Track player joined
+      await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+        eventType: "player_joined",
+        metadata: { roomCode: code, playerId },
+      });
+
       await touchRoom(ctx, room._id);
       return {
         success: true,
@@ -139,7 +153,15 @@ export const leaveGame = mutation({
       .collect();
 
     const leaving = players.find((p) => p.playerId === playerId);
-    if (leaving) await ctx.db.delete(leaving._id);
+    if (leaving) {
+      await ctx.db.delete(leaving._id);
+
+      // Track player left
+      await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+        eventType: "player_left",
+        metadata: { roomCode: code, playerId },
+      });
+    }
 
     // Check remaining players
     const remaining = await ctx.db

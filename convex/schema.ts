@@ -110,6 +110,21 @@ export default defineSchema({
   })
     .index("by_upvotes", ["upvotes"])
     .index("by_status", ["status"]),
+
+  analyticsEvents: defineTable({
+    eventType: v.string(),
+    timestamp: v.number(),
+    metadata: v.optional(v.object({
+      roomCode: v.optional(v.string()),
+      playerId: v.optional(v.string()),
+      playerCount: v.optional(v.number()),
+      roundNumber: v.optional(v.number()),
+      totalRounds: v.optional(v.number()),
+    })),
+  })
+    .index("by_type", ["eventType"])
+    .index("by_timestamp", ["timestamp"])
+    .index("by_type_and_timestamp", ["eventType", "timestamp"]),
 });
 
 

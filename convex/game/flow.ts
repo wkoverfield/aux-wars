@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { internalMutation, mutation, query } from "../_generated/server";
+// Note: internal.analytics.trackEvent is used for fire-and-forget analytics tracking
 
 function now() { return Date.now(); }
 
@@ -22,6 +23,16 @@ export const startGame = mutation({
       currentRound: 1,
       currentPrompt: chosenPrompt,
       lastActivityAt: now(),
+    });
+
+    // Track game started
+    await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+      eventType: "game_started",
+      metadata: {
+        roomCode: code,
+        playerCount: players.length,
+        totalRounds: room.settings.numberOfRounds,
+      },
     });
   },
 });
@@ -102,6 +113,12 @@ export const submitSong = mutation({
       submittedAt: now(),
     });
 
+    // Track song submitted
+    await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+      eventType: "song_submitted",
+      metadata: { roomCode: code, roundNumber: room.currentRound },
+    });
+
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
@@ -166,6 +183,13 @@ export const submitRating = mutation({
       rating,
       submittedAt: now(),
     });
+
+    // Track rating submitted
+    await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+      eventType: "rating_submitted",
+      metadata: { roomCode: code, roundNumber: room.currentRound },
+    });
+
     // After each rating, check if all eligible voters have voted and advance
     // Use scheduler to avoid direct mutation-to-mutation call
     await ctx.scheduler.runAfter(0, internal.game.flow.maybeAdvanceOnAllVotes, { code });
@@ -504,6 +528,20 @@ export const calculateResultsInternal = internalMutation({
       calculatedAt: now(),
     });
     await ctx.db.patch(room._id, { phase: "results", lastActivityAt: now(), currentRatingIndex: undefined });
+
+    // Track game completed when final round is done
+    const isLastRound = room.currentRound >= room.settings.numberOfRounds;
+    if (isLastRound) {
+      const players = await getPlayers(ctx, code);
+      await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+        eventType: "game_completed",
+        metadata: {
+          roomCode: code,
+          playerCount: players.length,
+          totalRounds: room.settings.numberOfRounds,
+        },
+      });
+    }
   },
 });
 
