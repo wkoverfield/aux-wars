@@ -37,6 +37,8 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
   const [roundLength, setRoundLength] = useState(roomSettings?.roundLength || 60); // Song selection time limit
   const [snippetDuration, setSnippetDuration] = useState(roomSettings?.snippetDuration || 30); // Audio playback duration
   const [selectedPrompts, setSelectedPrompts] = useState(roomSettings?.selectedPrompts || []);
+  const [enablePromptVoting, setEnablePromptVoting] = useState(roomSettings?.enablePromptVoting !== false); // default true
+  const [anonymousMode, setAnonymousMode] = useState(roomSettings?.anonymousMode ?? false); // default false
   // Shared custom prompts, reactive per room
   const roomCustomPrompts = useQuery(
     api.game.rooms.getCustomPrompts,
@@ -63,6 +65,8 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
       setRoundLength(roomSettings.roundLength ?? 60);
       setSnippetDuration(roomSettings.snippetDuration ?? 30);
       setSelectedPrompts(roomSettings.selectedPrompts);
+      setEnablePromptVoting(roomSettings.enablePromptVoting !== false);
+      setAnonymousMode(roomSettings.anonymousMode || false);
     }
 
     // Merge custom prompts into selection
@@ -157,7 +161,9 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
       numberOfRounds: rounds,
       roundLength,
       snippetDuration,
-      selectedPrompts
+      selectedPrompts,
+      enablePromptVoting,
+      anonymousMode
     }));
 
     // Update settings in Convex and wait for completion (host only)
@@ -168,7 +174,9 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
         numberOfRounds: rounds,
         roundLength,
         snippetDuration,
-        selectedPrompts
+        selectedPrompts,
+        enablePromptVoting,
+        anonymousMode
       });
       onClose(); // Only close after successful update
     } catch (error) {
@@ -291,6 +299,41 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
                   {label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Game Mode Toggles */}
+          <div className="mb-6 space-y-4">
+            <label className="text-sm font-semibold text-white block mb-2">
+              Game Modes
+            </label>
+
+            {/* Prompt Voting Toggle */}
+            <div
+              className="flex items-center justify-between p-3 bg-[#242424] rounded-md cursor-pointer hover:bg-[#333] transition-colors"
+              onClick={() => setEnablePromptVoting(!enablePromptVoting)}
+            >
+              <div>
+                <p className="text-white font-medium">Prompt Voting</p>
+                <p className="text-xs text-gray-400">Let players vote to skip prompts</p>
+              </div>
+              <div className={`w-12 h-6 rounded-full p-1 transition-colors ${enablePromptVoting ? 'bg-green-600' : 'bg-gray-600'}`}>
+                <div className={`w-4 h-4 rounded-full bg-white transition-transform ${enablePromptVoting ? 'translate-x-6' : 'translate-x-0'}`} />
+              </div>
+            </div>
+
+            {/* Anonymous Mode Toggle */}
+            <div
+              className="flex items-center justify-between p-3 bg-[#242424] rounded-md cursor-pointer hover:bg-[#333] transition-colors"
+              onClick={() => setAnonymousMode(!anonymousMode)}
+            >
+              <div>
+                <p className="text-white font-medium">Anonymous Mode</p>
+                <p className="text-xs text-gray-400">Hide who submitted songs during rating</p>
+              </div>
+              <div className={`w-12 h-6 rounded-full p-1 transition-colors ${anonymousMode ? 'bg-green-600' : 'bg-gray-600'}`}>
+                <div className={`w-4 h-4 rounded-full bg-white transition-transform ${anonymousMode ? 'translate-x-6' : 'translate-x-0'}`} />
+              </div>
             </div>
           </div>
 

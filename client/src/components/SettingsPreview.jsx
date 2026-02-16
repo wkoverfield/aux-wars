@@ -12,7 +12,7 @@ import settingsIcon from "../assets/settings-btn.svg";
  * @returns {JSX.Element} Rendered component
  */
 export default function SettingsPreview({ settings, isHost, onEdit }) {
-  const { numberOfRounds, roundLength, snippetDuration } = settings || {};
+  const { numberOfRounds, roundLength, snippetDuration, enablePromptVoting, anonymousMode } = settings || {};
 
   // Format compact display
   const formatTime = (seconds) => {
@@ -24,6 +24,8 @@ export default function SettingsPreview({ settings, isHost, onEdit }) {
   const rounds = numberOfRounds || 3;
   const snippet = formatTime(snippetDuration ?? 30);
   const selection = formatTime(roundLength ?? 60);
+  const showVoting = enablePromptVoting !== false; // default true
+  const showAnon = anonymousMode === true; // default false
 
   return (
     <button
@@ -31,8 +33,10 @@ export default function SettingsPreview({ settings, isHost, onEdit }) {
       className="flex items-center gap-2 text-gray-400 hover:text-gray-300 transition-colors"
       title={isHost ? "Edit settings" : "View settings"}
     >
-      <span className="text-xs">
+      <span className="text-xs flex items-center gap-1">
         {rounds} rds · {snippet} · {selection}
+        {showVoting && <span title="Prompt voting enabled">🗳️</span>}
+        {showAnon && <span title="Anonymous mode">🎭</span>}
       </span>
       <img src={settingsIcon} alt="Settings" className="w-5 h-5" />
     </button>

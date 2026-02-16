@@ -18,15 +18,46 @@ export const startGame = mutation({
     if (!allReady) return;
 
     const chosenPrompt = pickPrompt(room.settings.selectedPrompts, []);
-    await ctx.db.patch(room._id, {
-      phase: "promptVoting",
-      currentRound: 1,
-      currentPrompt: chosenPrompt,
-      usedPrompts: [chosenPrompt],
-      promptVotingStartedAt: now(),
-      skipVotes: [],
-      lastActivityAt: now(),
-    });
+    const enablePromptVoting = room.settings.enablePromptVoting !== false; // default true
+
+    if (enablePromptVoting) {
+      // Go to prompt voting phase
+      await ctx.db.patch(room._id, {
+        phase: "promptVoting",
+        currentRound: 1,
+        currentPrompt: chosenPrompt,
+        usedPrompts: [chosenPrompt],
+        promptVotingStartedAt: now(),
+        skipVotes: [],
+        lastActivityAt: now(),
+      });
+
+      // Schedule prompt voting timeout (15 seconds)
+      await ctx.scheduler.runAfter(
+        15_000,
+        internal.game.flow.endPromptVoting,
+        { code, round: 1 }
+      );
+    } else {
+      // Skip prompt voting, go directly to song selection
+      await ctx.db.patch(room._id, {
+        phase: "songSelection",
+        currentRound: 1,
+        currentPrompt: chosenPrompt,
+        usedPrompts: [chosenPrompt],
+        selectionStartedAt: now(),
+        lastActivityAt: now(),
+      });
+
+      // Schedule round timeout if roundLength is set
+      if (room.settings.roundLength > 0) {
+        await ctx.scheduler.runAfter(
+          room.settings.roundLength * 1000,
+          internal.game.flow.endSelectionPhase,
+          { code, round: 1 }
+        );
+      }
+    }
 
     // Track game started
     await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
@@ -37,13 +68,6 @@ export const startGame = mutation({
         totalRounds: room.settings.numberOfRounds,
       },
     });
-
-    // Schedule prompt voting timeout (15 seconds)
-    await ctx.scheduler.runAfter(
-      15_000,
-      internal.game.flow.endPromptVoting,
-      { code, round: 1 }
-    );
   },
 });
 
@@ -222,15 +246,7 @@ export const nextRound = mutation({
 
     const newRound = room.currentRound + 1;
     const chosenPrompt = pickPrompt(room.settings.selectedPrompts, room.usedPrompts || []);
-    await ctx.db.patch(room._id, {
-      currentRound: newRound,
-      currentPrompt: chosenPrompt,
-      usedPrompts: [...(room.usedPrompts || []), chosenPrompt],
-      phase: "promptVoting",
-      promptVotingStartedAt: now(),
-      skipVotes: [],
-      lastActivityAt: now(),
-    });
+    const enablePromptVoting = room.settings.enablePromptVoting !== false; // default true
 
     // Clean submittedRounds for all players in new round
     const players = await getPlayers(ctx, code);
@@ -238,12 +254,44 @@ export const nextRound = mutation({
       players.map((p) => ctx.db.patch(p._id, { submittedRounds: [] }))
     );
 
-    // Schedule prompt voting timeout (15 seconds)
-    await ctx.scheduler.runAfter(
-      15_000,
-      internal.game.flow.endPromptVoting,
-      { code, round: newRound }
-    );
+    if (enablePromptVoting) {
+      // Go to prompt voting phase
+      await ctx.db.patch(room._id, {
+        currentRound: newRound,
+        currentPrompt: chosenPrompt,
+        usedPrompts: [...(room.usedPrompts || []), chosenPrompt],
+        phase: "promptVoting",
+        promptVotingStartedAt: now(),
+        skipVotes: [],
+        lastActivityAt: now(),
+      });
+
+      // Schedule prompt voting timeout (15 seconds)
+      await ctx.scheduler.runAfter(
+        15_000,
+        internal.game.flow.endPromptVoting,
+        { code, round: newRound }
+      );
+    } else {
+      // Skip prompt voting, go directly to song selection
+      await ctx.db.patch(room._id, {
+        currentRound: newRound,
+        currentPrompt: chosenPrompt,
+        usedPrompts: [...(room.usedPrompts || []), chosenPrompt],
+        phase: "songSelection",
+        selectionStartedAt: now(),
+        lastActivityAt: now(),
+      });
+
+      // Schedule round timeout if roundLength is set
+      if (room.settings.roundLength > 0) {
+        await ctx.scheduler.runAfter(
+          room.settings.roundLength * 1000,
+          internal.game.flow.endSelectionPhase,
+          { code, round: newRound }
+        );
+      }
+    }
   },
 });
 

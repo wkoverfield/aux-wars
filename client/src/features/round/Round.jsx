@@ -333,6 +333,7 @@ export default function Round() {
             onSubmitRating={handleSubmitRating}
             currentIndex={ratingIndex}
             totalSongs={totalSongs}
+            anonymousMode={room?.settings?.anonymousMode}
           />
         );
       }

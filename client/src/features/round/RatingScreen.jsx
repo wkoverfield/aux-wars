@@ -7,13 +7,14 @@ import { useToast } from '../../contexts/ToastContext';
 /**
  * RatingScreen component provides an interface for rating songs during the game.
  * Includes song playback, album art display, and a 5-star rating system.
- * 
+ *
  * @param {Object} props - Component props
  * @param {string} props.currentPrompt - The current game prompt
  * @param {Object} props.songToRate - The song object to be rated
  * @param {Function} props.onSubmitRating - Callback when rating is submitted
  * @param {number} props.currentIndex - Current song index in the rating sequence
  * @param {number} props.totalSongs - Total number of songs to rate
+ * @param {boolean} props.anonymousMode - Whether to hide who submitted the song
  * @returns {JSX.Element} Rendered component
  */
 const RatingScreen = ({
@@ -21,7 +22,8 @@ const RatingScreen = ({
   songToRate,
   onSubmitRating,
   currentIndex,
-  totalSongs
+  totalSongs,
+  anonymousMode = false
 }) => {
   const [selectedRating, setSelectedRating] = useState(-1);
   const [snippetProgress, setSnippetProgress] = useState(0); // 0-1 progress within snippet
@@ -168,7 +170,7 @@ const RatingScreen = ({
             {songToRate.artist}
           </p>
           <p className="text-xs text-gray-400 mt-1 text-center">
-            Submitted by: {songToRate.player?.name || 'Unknown Player'}
+            Submitted by: {anonymousMode ? '???' : (songToRate.player?.name || 'Unknown Player')}
           </p>
         </div>
 

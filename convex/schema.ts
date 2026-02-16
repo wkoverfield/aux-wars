@@ -21,6 +21,8 @@ export default defineSchema({
       roundLength: v.number(),
       snippetDuration: v.number(), // 0 = full song, else seconds for playback
       selectedPrompts: v.array(v.string()),
+      enablePromptVoting: v.optional(v.boolean()), // default true - let players vote to skip prompts
+      anonymousMode: v.optional(v.boolean()), // default false - hide submitter names during rating
     }),
     usedPrompts: v.optional(v.array(v.string())), // Tracks prompts used this game to avoid repeats
     selectionStartedAt: v.optional(v.number()), // Timestamp when song selection phase started

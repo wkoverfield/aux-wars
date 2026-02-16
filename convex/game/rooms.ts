@@ -307,9 +307,11 @@ export const updateSettings = mutation({
     numberOfRounds: v.number(),
     roundLength: v.number(), // 0 = no limit, else seconds for song selection
     snippetDuration: v.number(), // 0 = full song, else seconds for playback
-    selectedPrompts: v.array(v.string())
+    selectedPrompts: v.array(v.string()),
+    enablePromptVoting: v.optional(v.boolean()), // default true - let players vote to skip prompts
+    anonymousMode: v.optional(v.boolean()), // default false - hide submitter names during rating
   },
-  handler: async (ctx, { code, playerId, numberOfRounds, roundLength, snippetDuration, selectedPrompts }) => {
+  handler: async (ctx, { code, playerId, numberOfRounds, roundLength, snippetDuration, selectedPrompts, enablePromptVoting, anonymousMode }) => {
     // Validate settings
     if (numberOfRounds < 1 || numberOfRounds > 10) return;
     // roundLength: 0 = no limit, or 15-300 seconds
@@ -327,7 +329,14 @@ export const updateSettings = mutation({
     if (!player || !player.isHost) return;
 
     await ctx.db.patch(room._id, {
-      settings: { numberOfRounds, roundLength, snippetDuration, selectedPrompts },
+      settings: {
+        numberOfRounds,
+        roundLength,
+        snippetDuration,
+        selectedPrompts,
+        enablePromptVoting: enablePromptVoting ?? true,
+        anonymousMode: anonymousMode ?? false,
+      },
       lastActivityAt: now(),
     });
   },
