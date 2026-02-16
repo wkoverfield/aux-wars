@@ -20,7 +20,7 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/convex/, '')
       },
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:3002',
         changeOrigin: true
       }
     }

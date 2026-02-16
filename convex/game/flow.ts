@@ -17,11 +17,14 @@ export const startGame = mutation({
     const allReady = players.every((p) => p.isReady);
     if (!allReady) return;
 
-    const chosenPrompt = pickPrompt(room.settings.selectedPrompts);
+    const chosenPrompt = pickPrompt(room.settings.selectedPrompts, []);
     await ctx.db.patch(room._id, {
-      phase: "songSelection",
+      phase: "promptVoting",
       currentRound: 1,
       currentPrompt: chosenPrompt,
+      usedPrompts: [chosenPrompt],
+      promptVotingStartedAt: now(),
+      skipVotes: [],
       lastActivityAt: now(),
     });
 
@@ -34,6 +37,13 @@ export const startGame = mutation({
         totalRounds: room.settings.numberOfRounds,
       },
     });
+
+    // Schedule prompt voting timeout (15 seconds)
+    await ctx.scheduler.runAfter(
+      15_000,
+      internal.game.flow.endPromptVoting,
+      { code, round: 1 }
+    );
   },
 });
 
@@ -210,11 +220,15 @@ export const nextRound = mutation({
       return;
     }
 
-    const chosenPrompt = pickPrompt(room.settings.selectedPrompts);
+    const newRound = room.currentRound + 1;
+    const chosenPrompt = pickPrompt(room.settings.selectedPrompts, room.usedPrompts || []);
     await ctx.db.patch(room._id, {
-      currentRound: room.currentRound + 1,
+      currentRound: newRound,
       currentPrompt: chosenPrompt,
-      phase: "songSelection",
+      usedPrompts: [...(room.usedPrompts || []), chosenPrompt],
+      phase: "promptVoting",
+      promptVotingStartedAt: now(),
+      skipVotes: [],
       lastActivityAt: now(),
     });
 
@@ -222,6 +236,13 @@ export const nextRound = mutation({
     const players = await getPlayers(ctx, code);
     await Promise.all(
       players.map((p) => ctx.db.patch(p._id, { submittedRounds: [] }))
+    );
+
+    // Schedule prompt voting timeout (15 seconds)
+    await ctx.scheduler.runAfter(
+      15_000,
+      internal.game.flow.endPromptVoting,
+      { code, round: newRound }
     );
   },
 });
@@ -257,11 +278,128 @@ export const returnToLobby = mutation({
       phase: "lobby",
       currentRound: 1,
       currentPrompt: undefined,
+      usedPrompts: [],
+      selectionStartedAt: undefined,
+      promptVotingStartedAt: undefined,
+      skipVotes: [],
       lastActivityAt: now(),
     });
 
     const players = await getPlayers(ctx, code);
     await Promise.all(players.map((p) => ctx.db.patch(p._id, { isReady: false, submittedRounds: [] })));
+  },
+});
+
+// ==================== PROMPT VOTING ====================
+
+export const voteSkipPrompt = mutation({
+  args: { code: v.string(), playerId: v.string() },
+  handler: async (ctx, { code, playerId }) => {
+    const room = await getRoom(ctx, code);
+    if (!room || room.phase !== "promptVoting") return { success: false };
+
+    const players = await getPlayers(ctx, code);
+    const player = players.find((p) => p.playerId === playerId);
+    if (!player) return { success: false };
+
+    // Check if player already voted
+    const currentVotes = room.skipVotes || [];
+    if (currentVotes.includes(playerId)) return { success: false };
+
+    // Add vote
+    const newVotes = [...currentVotes, playerId];
+    const majorityNeeded = Math.floor(players.length / 2) + 1;
+
+    // Check if majority reached
+    if (newVotes.length >= majorityNeeded) {
+      // Pick a new prompt (excluding the current one)
+      const usedPrompts = [...(room.usedPrompts || [])];
+      const newPrompt = pickPrompt(room.settings.selectedPrompts, usedPrompts);
+
+      // Update room with new prompt and reset votes
+      await ctx.db.patch(room._id, {
+        currentPrompt: newPrompt,
+        usedPrompts: [...usedPrompts, newPrompt],
+        skipVotes: [],
+        promptVotingStartedAt: now(), // Reset timer
+        lastActivityAt: now(),
+      });
+
+      // Reschedule the prompt voting timeout
+      await ctx.scheduler.runAfter(
+        15_000,
+        internal.game.flow.endPromptVoting,
+        { code, round: room.currentRound }
+      );
+
+      return { success: true, skipped: true, newPrompt };
+    } else {
+      // Just add the vote
+      await ctx.db.patch(room._id, {
+        skipVotes: newVotes,
+        lastActivityAt: now(),
+      });
+
+      return { success: true, skipped: false, votes: newVotes.length, needed: majorityNeeded };
+    }
+  },
+});
+
+export const getPromptVotingStatus = query({
+  args: { code: v.string() },
+  handler: async (ctx, { code }) => {
+    const room = await getRoom(ctx, code);
+    if (!room || room.phase !== "promptVoting") {
+      return null;
+    }
+
+    const players = await getPlayers(ctx, code);
+    const skipVotes = room.skipVotes || [];
+    const majorityNeeded = Math.floor(players.length / 2) + 1;
+    const timeRemaining = room.promptVotingStartedAt
+      ? Math.max(0, 15 - (now() - room.promptVotingStartedAt) / 1000)
+      : 0;
+
+    return {
+      currentPrompt: room.currentPrompt,
+      skipVotes: skipVotes.length,
+      totalPlayers: players.length,
+      majorityNeeded,
+      timeRemaining: Math.ceil(timeRemaining),
+      voters: skipVotes, // List of player IDs who voted
+    };
+  },
+});
+
+export const endPromptVoting = internalMutation({
+  args: { code: v.string(), round: v.number() },
+  handler: async (ctx, { code, round }) => {
+    const room = await getRoom(ctx, code);
+    if (!room) return;
+
+    // Check if we're still in prompt voting for this round
+    if (room.phase !== "promptVoting" || room.currentRound !== round) {
+      console.log(`[endPromptVoting] Skipping - phase: ${room.phase}, currentRound: ${room.currentRound}, expected: ${round}`);
+      return;
+    }
+
+    // Transition to song selection
+    await ctx.db.patch(room._id, {
+      phase: "songSelection",
+      selectionStartedAt: now(),
+      promptVotingStartedAt: undefined,
+      skipVotes: [],
+      lastActivityAt: now(),
+    });
+
+    // Schedule selection timeout if roundLength is set
+    if (room.settings.roundLength > 0) {
+      await ctx.scheduler.runAfter(
+        room.settings.roundLength * 1000,
+        internal.game.flow.endSelectionPhase,
+        { code, round }
+      );
+    }
   },
 });
 
@@ -467,6 +605,54 @@ export const getCurrentRatingStatus = query({
   },
 });
 
+export const endSelectionPhase = internalMutation({
+  args: { code: v.string(), round: v.number() },
+  handler: async (ctx, { code, round }) => {
+    const room = await getRoom(ctx, code);
+    if (!room) return;
+
+    // Check if we're still in song selection for this round
+    if (room.phase !== "songSelection" || room.currentRound !== round) {
+      console.log(`[endSelectionPhase] Skipping - phase: ${room.phase}, currentRound: ${room.currentRound}, expected: ${round}`);
+      return;
+    }
+
+    // Check if all players have submitted
+    const players = await getPlayers(ctx, code);
+    const subs = await ctx.db
+      .query("submissions")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", round))
+      .collect();
+
+    const submittedPlayerIds = new Set(subs.map((s) => s.playerId));
+    const allSubmitted = players.every((p) => submittedPlayerIds.has(p.playerId));
+
+    if (allSubmitted) {
+      // All submitted - normal transition
+      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code });
+    } else {
+      // Some players didn't submit - force transition anyway
+      console.log(`[endSelectionPhase] Time up! ${submittedPlayerIds.size}/${players.length} submitted. Advancing anyway.`);
+
+      // If at least one player submitted, proceed to rating
+      if (subs.length > 0) {
+        await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code });
+      } else {
+        // No submissions at all - skip to results with no winner
+        console.log(`[endSelectionPhase] No submissions for round ${round}. Skipping to results.`);
+        await ctx.db.insert("roundResults", {
+          roomCode: code,
+          round,
+          winnerSongId: undefined,
+          results: [],
+          calculatedAt: now(),
+        });
+        await ctx.db.patch(room._id, { phase: "results", lastActivityAt: now() });
+      }
+    }
+  },
+});
+
 export const startRatingPhaseInternal = internalMutation({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {
@@ -641,8 +827,10 @@ async function validateConnection(ctx: any, code: string, playerId: string, conn
   return player;
 }
 
-function pickPrompt(prompts: string[]): string {
-  return prompts[Math.floor(Math.random() * prompts.length)];
+function pickPrompt(prompts: string[], usedPrompts: string[] = []): string {
+  const available = prompts.filter(p => !usedPrompts.includes(p));
+  const pool = available.length > 0 ? available : prompts; // Reset if all used
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 

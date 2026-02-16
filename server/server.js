@@ -25,11 +25,18 @@ const corsOriginFunction = (origin, callback) => {
     "https://aux-wars.com",
     "https://www.aux-wars.com",
     "http://localhost:5173",
-    "http://localhost:5174"
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174"
   ];
 
-  // Allow requests with no origin (like mobile apps or curl requests)
+  // Allow requests with no origin (like mobile apps, curl, or proxied requests)
   if (!origin) return callback(null, true);
+
+  // In development, allow any localhost origin
+  if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+    return callback(null, true);
+  }
 
   if (allowedOrigins.includes(origin)) {
     callback(null, true);

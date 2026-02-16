@@ -34,6 +34,8 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
   // For hosts creating new games, use saved settings. For joining players, use room state.
   const savedSettings = isHost ? getSavedSettings() : null;
   const [rounds, setRounds] = useState(roomSettings?.numberOfRounds || 3);
+  const [roundLength, setRoundLength] = useState(roomSettings?.roundLength || 60); // Song selection time limit
+  const [snippetDuration, setSnippetDuration] = useState(roomSettings?.snippetDuration || 30); // Audio playback duration
   const [selectedPrompts, setSelectedPrompts] = useState(roomSettings?.selectedPrompts || []);
   // Shared custom prompts, reactive per room
   const roomCustomPrompts = useQuery(
@@ -58,6 +60,8 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
     // Always load from database (single source of truth)
     if (roomSettings) {
       setRounds(roomSettings.numberOfRounds);
+      setRoundLength(roomSettings.roundLength ?? 60);
+      setSnippetDuration(roomSettings.snippetDuration ?? 30);
       setSelectedPrompts(roomSettings.selectedPrompts);
     }
 
@@ -151,6 +155,8 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
     // Save settings to localStorage for future games
     localStorage.setItem('aux-wars-settings', JSON.stringify({
       numberOfRounds: rounds,
+      roundLength,
+      snippetDuration,
       selectedPrompts
     }));
 
@@ -160,7 +166,8 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
         code: gameCode,
         playerId,
         numberOfRounds: rounds,
-        roundLength: 30,
+        roundLength,
+        snippetDuration,
         selectedPrompts
       });
       onClose(); // Only close after successful update
@@ -224,7 +231,69 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
               onChange={(e) => setRounds(parseInt(e.target.value) || 1)}
             />
           </div>
-          
+
+          {/* Song Selection Time */}
+          <div className="mb-6">
+            <label className="text-sm font-semibold text-white block mb-2">
+              Song Selection Time
+            </label>
+            <p className="text-xs text-gray-400 mb-3">How long players have to pick their song</p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: 30, label: "30s" },
+                { value: 60, label: "60s" },
+                { value: 90, label: "90s" },
+                { value: 120, label: "2 min" },
+                { value: 180, label: "3 min" },
+                { value: 0, label: "No Limit" },
+              ].map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setRoundLength(value)}
+                  className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                    roundLength === value
+                      ? "bg-green-600 text-black"
+                      : "bg-[#242424] text-white hover:bg-[#333]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Snippet Duration */}
+          <div className="mb-6">
+            <label className="text-sm font-semibold text-white block mb-2">
+              Snippet Duration
+            </label>
+            <p className="text-xs text-gray-400 mb-3">How long the audio clip plays during voting</p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: 15, label: "15s" },
+                { value: 30, label: "30s" },
+                { value: 45, label: "45s" },
+                { value: 60, label: "60s" },
+                { value: 90, label: "90s" },
+                { value: 0, label: "Full Song" },
+              ].map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setSnippetDuration(value)}
+                  className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                    snippetDuration === value
+                      ? "bg-green-600 text-black"
+                      : "bg-[#242424] text-white hover:bg-[#333]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Prompt selection */}
           <div>
             <div className="flex justify-between items-baseline mb-4">

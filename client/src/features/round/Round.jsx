@@ -12,6 +12,7 @@ import PromptModal from "./PromptModal";
 import WaitingScreen from "./WaitingScreen";
 import RatingScreen from "./RatingScreen";
 import SnippetSelector from "../../components/SnippetSelector";
+import PromptVoting from "./PromptVoting";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 
@@ -92,6 +93,39 @@ export default function Round() {
   const ratingIndex = room?.currentRatingIndex ?? 0;
   const totalSongs = submissionStatus?.total || 0;
   const hasSongSubmitted = mySubmission !== null && mySubmission !== undefined;
+
+  // Selection timer logic
+  const roundLength = room?.settings?.roundLength || 0; // 0 = no limit
+  const selectionStartedAt = room?.selectionStartedAt;
+  const [timeRemaining, setTimeRemaining] = useState(null);
+
+  // Update timer every second during song selection phase
+  useEffect(() => {
+    // Don't show timer during prompt voting (it has its own timer)
+    const isPromptVoting = room?.phase === "promptVoting";
+    if (!selectionStartedAt || roundLength === 0 || hasSongSubmitted || isRatingPhase || isPromptVoting) {
+      setTimeRemaining(null);
+      return;
+    }
+
+    const updateTimer = () => {
+      const elapsed = (Date.now() - selectionStartedAt) / 1000;
+      const remaining = Math.max(0, roundLength - elapsed);
+      setTimeRemaining(Math.ceil(remaining));
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [selectionStartedAt, roundLength, hasSongSubmitted, isRatingPhase, room?.phase]);
+
+  // Format timer display
+  const formatTimer = (seconds) => {
+    if (seconds === null) return null;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Effects
   // =======
@@ -268,7 +302,15 @@ export default function Round() {
 
   // Always render; connectivity is managed by Convex client
 
+  // Check if we're in prompt voting phase
+  const isPromptVotingPhase = room?.phase === "promptVoting";
+
   const renderContent = () => {
+    // Handle prompt voting phase first
+    if (isPromptVotingPhase) {
+      return <PromptVoting gameCode={gameCode} />;
+    }
+
     if (isRatingPhase) {
       // Check if this is the player's own song - never show rating UI for own song
       const isOwnSong = songToRate?.player?.id === session?.playerId;
@@ -327,8 +369,26 @@ export default function Round() {
     }
   };
 
+  // Selection timer component
+  const SelectionTimer = () => {
+    if (timeRemaining === null || hasSongSubmitted || isRatingPhase) return null;
+
+    const isLow = timeRemaining <= 10;
+
+    return (
+      <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full font-bold text-lg ${
+        isLow
+          ? 'bg-red-600 text-white animate-pulse'
+          : 'bg-[#242424] text-white'
+      }`}>
+        ⏱ {formatTimer(timeRemaining)}
+      </div>
+    );
+  };
+
   return (
     <>
+      <SelectionTimer />
       <div className={`round-start flex flex-col items-center justify-center text-white p-4 min-h-screen ${showSnippetSelector ? 'blur-sm' : ''}`}>
         {renderContent()}
 
@@ -343,6 +403,7 @@ export default function Round() {
       {showSnippetSelector && selectedTrack && (
         <SnippetSelector
           track={selectedTrack}
+          snippetDuration={room?.settings?.snippetDuration ?? 30}
           onConfirm={handleConfirmSongWithSnippet}
           onCancel={() => {
             setShowSnippetSelector(false);

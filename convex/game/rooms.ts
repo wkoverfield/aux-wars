@@ -18,7 +18,8 @@ export const hostGame = mutation({
       hostPlayerId: undefined,
       settings: {
         numberOfRounds: 3,
-        roundLength: 30,
+        roundLength: 60, // Song selection time limit (seconds), 0 = no limit
+        snippetDuration: 30, // Audio playback duration, 0 = full song
         selectedPrompts: defaultPrompts,
       },
       createdAt: now(),
@@ -300,11 +301,22 @@ export const updatePlayerName = mutation({
 });
 
 export const updateSettings = mutation({
-  args: { code: v.string(), playerId: v.string(), numberOfRounds: v.number(), roundLength: v.number(), selectedPrompts: v.array(v.string()) },
-  handler: async (ctx, { code, playerId, numberOfRounds, roundLength, selectedPrompts }) => {
+  args: {
+    code: v.string(),
+    playerId: v.string(),
+    numberOfRounds: v.number(),
+    roundLength: v.number(), // 0 = no limit, else seconds for song selection
+    snippetDuration: v.number(), // 0 = full song, else seconds for playback
+    selectedPrompts: v.array(v.string())
+  },
+  handler: async (ctx, { code, playerId, numberOfRounds, roundLength, snippetDuration, selectedPrompts }) => {
     // Validate settings
     if (numberOfRounds < 1 || numberOfRounds > 10) return;
-    if (roundLength < 15 || roundLength > 300) return;
+    // roundLength: 0 = no limit, or 15-300 seconds
+    if (roundLength !== 0 && (roundLength < 15 || roundLength > 300)) return;
+    // snippetDuration: 0 = full song, or 15/30/45/60/90 seconds
+    const validSnippetDurations = [0, 15, 30, 45, 60, 90];
+    if (!validSnippetDurations.includes(snippetDuration)) return;
     if (selectedPrompts.length < 1 || selectedPrompts.length > 50) return;
 
     const room = await getRoomByCodeInternal(ctx, code);
@@ -315,7 +327,7 @@ export const updateSettings = mutation({
     if (!player || !player.isHost) return;
 
     await ctx.db.patch(room._id, {
-      settings: { numberOfRounds, roundLength, selectedPrompts },
+      settings: { numberOfRounds, roundLength, snippetDuration, selectedPrompts },
       lastActivityAt: now(),
     });
   },

@@ -6,8 +6,10 @@ import { motion } from 'framer-motion';
  * SnippetSelector component allows users to select a portion of a song to showcase
  * Provides visual timeline controls and preview functionality
  */
-export default function SnippetSelector({ track, onConfirm, onCancel }) {
-  const SNIPPET_DURATION = 30; // Fixed 30-second snippet
+export default function SnippetSelector({ track, snippetDuration = 30, onConfirm, onCancel }) {
+  // 0 = full song, otherwise use the provided duration
+  const SNIPPET_DURATION = snippetDuration ?? 30;
+  const isFullSong = snippetDuration === 0;
   const [startTime, setStartTime] = useState(30); // Default to 30 seconds
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -222,14 +224,29 @@ export default function SnippetSelector({ track, onConfirm, onCancel }) {
 
   // Confirm selection
   const handleConfirm = () => {
-    onConfirm({
-      ...track,
-      snippet: {
-        startTime,
-        endTime
-      }
-    });
+    if (isFullSong) {
+      // Full song - no snippet needed
+      onConfirm({
+        ...track,
+        snippet: null
+      });
+    } else {
+      onConfirm({
+        ...track,
+        snippet: {
+          startTime,
+          endTime
+        }
+      });
+    }
   };
+
+  // If full song mode, auto-confirm immediately
+  useEffect(() => {
+    if (isFullSong && track) {
+      onConfirm({ ...track, snippet: null });
+    }
+  }, [isFullSong, track, onConfirm]);
 
   return (
     <div className="snippet-modal z-50 fixed inset-0 flex items-center justify-center p-4">
@@ -265,13 +282,13 @@ export default function SnippetSelector({ track, onConfirm, onCancel }) {
         <div className="mb-6">
           <div className="flex justify-between text-sm text-gray-400 mb-4">
             <span>{formatTime(startTime)}</span>
-            <span className="text-green-400 font-semibold">30 second snippet</span>
+            <span className="text-green-400 font-semibold">{SNIPPET_DURATION} second snippet</span>
             <span>{formatTime(endTime)}</span>
           </div>
 
           {/* Instructions */}
           <div className="mb-4 text-center">
-            <p className="text-sm text-gray-400">Click or drag on the waveform to select your 30-second snippet</p>
+            <p className="text-sm text-gray-400">Click or drag on the waveform to select your {SNIPPET_DURATION}-second snippet</p>
           </div>
 
           {/* Interactive waveform timeline */}

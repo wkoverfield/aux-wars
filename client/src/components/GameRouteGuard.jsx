@@ -69,6 +69,7 @@ export default function GameRouteGuard() {
       case 'lobby':
         targetPath = basePath;
         break;
+      case 'promptVoting':
       case 'songSelection':
       case 'roundStart':
         targetPath = `${basePath}/round`;

@@ -5,7 +5,7 @@
  */
 import { server } from "./server.js";
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 // Start server with error handling
 server.listen(PORT, '0.0.0.0', () => {

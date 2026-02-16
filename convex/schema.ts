@@ -6,6 +6,7 @@ export default defineSchema({
     code: v.string(),
     phase: v.union(
       v.literal("lobby"),
+      v.literal("promptVoting"), // NEW: Brief phase to optionally skip prompt
       v.literal("songSelection"),
       v.literal("rating"),
       v.literal("results"),
@@ -18,8 +19,13 @@ export default defineSchema({
     settings: v.object({
       numberOfRounds: v.number(),
       roundLength: v.number(),
+      snippetDuration: v.number(), // 0 = full song, else seconds for playback
       selectedPrompts: v.array(v.string()),
     }),
+    usedPrompts: v.optional(v.array(v.string())), // Tracks prompts used this game to avoid repeats
+    selectionStartedAt: v.optional(v.number()), // Timestamp when song selection phase started
+    promptVotingStartedAt: v.optional(v.number()), // Timestamp when prompt voting started
+    skipVotes: v.optional(v.array(v.string())), // Player IDs who voted to skip current prompt
     createdAt: v.number(),
     lastActivityAt: v.number(),
   }).index("by_code", ["code"]),

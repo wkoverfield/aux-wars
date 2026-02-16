@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import record from '../../assets/record.svg';
 import SearchBar from '../../components/SearchBar';
-import YouTubePlayer from '../../components/YouTubePlayer';
+import { YouTubePlayerWithRef } from '../../components/YouTubePlayer';
 import { useToast } from '../../contexts/ToastContext';
 
 /**
@@ -16,16 +16,19 @@ import { useToast } from '../../contexts/ToastContext';
  * @param {number} props.totalSongs - Total number of songs to rate
  * @returns {JSX.Element} Rendered component
  */
-const RatingScreen = ({ 
+const RatingScreen = ({
   currentPrompt,
-  songToRate, 
-  onSubmitRating, 
-  currentIndex, 
-  totalSongs 
+  songToRate,
+  onSubmitRating,
+  currentIndex,
+  totalSongs
 }) => {
   const [selectedRating, setSelectedRating] = useState(-1);
+  const [snippetProgress, setSnippetProgress] = useState(0); // 0-1 progress within snippet
   const { showToast } = useToast();
-  
+  const playerRef = useRef(null);
+  const lastValidTimeRef = useRef(null); // Track last valid position for restore
+
   // Extract YouTube video ID from preview URL
   const getYouTubeVideoId = (url) => {
     if (!url) return null;
@@ -38,6 +41,53 @@ const RatingScreen = ({
   // Extract snippet times if available
   const startTime = songToRate?.snippet?.startTime || 0;
   const endTime = songToRate?.snippet?.endTime || 0;
+
+  // Snippet duration for display
+  const snippetDuration = endTime - startTime;
+  const hasSnippet = songToRate?.snippet && endTime > 0;
+
+  // Format time as M:SS
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Monitor playback position, enforce snippet bounds, and update progress
+  useEffect(() => {
+    // Skip if no snippet (full song mode) or no valid end time
+    if (!hasSnippet) return;
+
+    // Initialize last valid time to start
+    lastValidTimeRef.current = startTime;
+
+    const interval = setInterval(() => {
+      if (playerRef.current?.getCurrentTime) {
+        const currentTime = playerRef.current.getCurrentTime();
+
+        // Check if within valid bounds
+        const isWithinBounds = currentTime >= startTime - 0.5 && currentTime <= endTime + 0.5;
+
+        if (isWithinBounds) {
+          // Update progress and save this as last valid position
+          const progress = Math.max(0, Math.min(1, (currentTime - startTime) / snippetDuration));
+          setSnippetProgress(progress);
+          lastValidTimeRef.current = currentTime;
+        } else {
+          // Outside bounds - restore to last valid position (or start if near end)
+          const restoreTime = currentTime > endTime
+            ? startTime // If past end, loop to start (natural behavior)
+            : lastValidTimeRef.current || startTime; // If before start, go back to where they were
+
+          playerRef.current.seekTo(restoreTime);
+          const progress = Math.max(0, Math.min(1, (restoreTime - startTime) / snippetDuration));
+          setSnippetProgress(progress);
+        }
+      }
+    }, 200); // Faster updates for smoother progress bar
+
+    return () => clearInterval(interval);
+  }, [startTime, endTime, snippetDuration, hasSnippet]);
 
   /**
    * Handles clicking a rating record
@@ -77,14 +127,37 @@ const RatingScreen = ({
 
         {/* YouTube Player */}
         {videoId && (
-          <div className="mb-4 sm:mb-6 w-full max-w-md flex justify-center" style={{ height: '260px' }}>
-            <YouTubePlayer
+          <div className="mb-2 w-full max-w-md flex justify-center" style={{ height: '260px' }}>
+            <YouTubePlayerWithRef
+              ref={playerRef}
               videoId={videoId}
               autoplay={false}
               startTime={startTime}
               endTime={endTime}
-              loop={true}
             />
+          </div>
+        )}
+
+        {/* Snippet Progress Indicator */}
+        {hasSnippet && (
+          <div className="w-full max-w-md mb-4 px-2">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-400 min-w-[40px]">
+                {formatTime(snippetProgress * snippetDuration)}
+              </span>
+              <div className="flex-1 h-1.5 bg-[#333] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[#1db954] rounded-full transition-all duration-200"
+                  style={{ width: `${snippetProgress * 100}%` }}
+                />
+              </div>
+              <span className="text-xs text-gray-400 min-w-[40px] text-right">
+                {formatTime(snippetDuration)}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 text-center mt-1">
+              Snippet: {formatTime(startTime)} - {formatTime(endTime)}
+            </p>
           </div>
         )}
 

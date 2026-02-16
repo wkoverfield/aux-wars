@@ -6,13 +6,13 @@ import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import PlayerList from "../../components/PlayerList";
 import SettingsModal from "../../components/SettingsModal";
+import SettingsPreview from "../../components/SettingsPreview";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 // GameContext removed - using RoomProvider's Convex queries directly
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
 import logo from "../../assets/aux-wars-logo.svg";
-import settingsIcon from "../../assets/settings-btn.svg";
 
 /**
  * Lobby component manages the game lobby where players can join, set their names,
@@ -38,6 +38,7 @@ export default function Lobby() {
 
   // Derive from queries - no local state duplication
   const players = playersQuery || [];
+  const room = roomQuery?.room || roomQuery;
   const isHost = players.find(p => p.playerId === session?.playerId)?.isHost ?? false;
   const allPlayersReady = players.every((player) => player.isReady);
   const updatePlayerName = useMutation(api.game.rooms.updatePlayerName);
@@ -283,10 +284,12 @@ export default function Lobby() {
               </div>
             </div>
             <div className="flex w-full items-center justify-between">
-              <p className="text-center text-2xl">Players</p>
-              <button onClick={() => setShowModal(true)}>
-                <img src={settingsIcon} alt="Settings" className="min-w-6" />
-              </button>
+              <p className="text-2xl">Players</p>
+              <SettingsPreview
+                settings={room?.settings}
+                isHost={isHost}
+                onEdit={() => setShowModal(true)}
+              />
             </div>
             <div className="flex-1 w-full overflow-y-auto min-h-0">
               <PlayerList
