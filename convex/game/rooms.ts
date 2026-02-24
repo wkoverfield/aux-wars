@@ -21,6 +21,8 @@ export const hostGame = mutation({
         roundLength: 60, // Song selection time limit (seconds), 0 = no limit
         snippetDuration: 30, // Audio playback duration, 0 = full song
         selectedPrompts: defaultPrompts,
+        enablePromptVoting: true, // Let players vote to skip prompts
+        anonymousMode: false, // Hide submitter names during rating
       },
       createdAt: now(),
       lastActivityAt: now(),

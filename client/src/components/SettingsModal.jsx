@@ -145,6 +145,12 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
    * Applies the current settings to the game
    */
   const applySettings = async () => {
+    // Validate session first
+    if (!playerId) {
+      showToast("Session expired. Please refresh the page.", "error");
+      return;
+    }
+
     // Validate settings
     if (selectedPrompts.length < 5) {
       showToast("Please select at least 5 prompts", "warning");
@@ -180,6 +186,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
       });
       onClose(); // Only close after successful update
     } catch (error) {
+      console.error("Settings update failed:", error);
       showToast("Failed to update settings. Please try again.", "error");
     }
   };
@@ -374,9 +381,17 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
         {/* Fixed action buttons */}
         <div className="p-6 pt-4 border-t border-gray-700 bg-[#1a1a1a]">
           <div className="flex flex-col gap-3">
+            {(selectedPrompts.length < 5 || selectedPrompts.length > 20) && (
+              <p className="text-sm text-yellow-500 text-center">
+                {selectedPrompts.length < 5
+                  ? `Select at least 5 prompts (${selectedPrompts.length} selected)`
+                  : `Maximum 20 prompts allowed (${selectedPrompts.length} selected)`
+                }
+              </p>
+            )}
             <button
               onClick={applySettings}
-              className="w-full py-3 green-btn rounded-md text-black font-semibold transition-all hover:scale-[1.02]"
+              className="w-full py-3 green-btn rounded-md text-black font-semibold transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
               disabled={selectedPrompts.length < 5 || selectedPrompts.length > 20}
             >
               Apply Settings

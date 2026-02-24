@@ -148,6 +148,22 @@ export default function Lobby() {
   }, [gameCode, session?.playerId, leaveGame]);
 
   /**
+   * Verify player still exists in room on mount/refresh
+   * Catches expired sessions BEFORE user tries to interact
+   */
+  useEffect(() => {
+    // Wait for players query to load and session to exist
+    if (!session?.playerId || players.length === 0) return;
+
+    const playerExists = players.some(p => p.playerId === session.playerId);
+    if (!playerExists) {
+      showToast("Your session has expired. Please rejoin the lobby.", "warning");
+      clearSession();
+      navigate("/", { replace: true });
+    }
+  }, [players, session?.playerId, clearSession, navigate, showToast]);
+
+  /**
    * Handles leaving the game and returning to home
    */
   const handleLeaveGame = async () => {
