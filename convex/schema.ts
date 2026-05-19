@@ -45,6 +45,7 @@ export default defineSchema({
     submittedRounds: v.optional(v.array(v.number())), // Tracks which rounds this player has submitted for (prevents race conditions)
     lastSubmissionAttempt: v.optional(v.number()), // Rate limiting: timestamp of last submission attempt
     lastRatingAttempt: v.optional(v.number()), // Rate limiting: timestamp of last rating attempt
+    lastVoteSkipAttempt: v.optional(v.number()), // Rate limiting: timestamp of last vote skip attempt
   })
     .index("by_room", ["roomCode"])
     .index("by_player", ["playerId", "roomCode"]),

@@ -315,20 +315,35 @@ export const updateSettings = mutation({
   },
   handler: async (ctx, { code, playerId, numberOfRounds, roundLength, snippetDuration, selectedPrompts, enablePromptVoting, anonymousMode }) => {
     // Validate settings
-    if (numberOfRounds < 1 || numberOfRounds > 10) return;
+    if (numberOfRounds < 1 || numberOfRounds > 10) {
+      throw new Error("Number of rounds must be between 1 and 10");
+    }
     // roundLength: 0 = no limit, or 15-300 seconds
-    if (roundLength !== 0 && (roundLength < 15 || roundLength > 300)) return;
+    if (roundLength !== 0 && (roundLength < 15 || roundLength > 300)) {
+      throw new Error("Round length must be 0 (no limit) or between 15-300 seconds");
+    }
     // snippetDuration: 0 = full song, or 15/30/45/60/90 seconds
     const validSnippetDurations = [0, 15, 30, 45, 60, 90];
-    if (!validSnippetDurations.includes(snippetDuration)) return;
-    if (selectedPrompts.length < 1 || selectedPrompts.length > 50) return;
+    if (!validSnippetDurations.includes(snippetDuration)) {
+      throw new Error("Invalid snippet duration");
+    }
+    if (selectedPrompts.length < 1 || selectedPrompts.length > 50) {
+      throw new Error("Must have between 1 and 50 prompts selected");
+    }
 
     const room = await getRoomByCodeInternal(ctx, code);
-    if (!room) return;
+    if (!room) {
+      throw new Error("Room not found");
+    }
 
     // Only host can change settings
     const player = await getPlayer(ctx, code, playerId);
-    if (!player || !player.isHost) return;
+    if (!player) {
+      throw new Error("Player not found");
+    }
+    if (!player.isHost) {
+      throw new Error("Only the host can update settings");
+    }
 
     await ctx.db.patch(room._id, {
       settings: {
@@ -384,13 +399,40 @@ export const addCustomPrompt = mutation({
   handler: async (ctx, { code, text, createdBy }) => {
     // Validate custom prompt length
     const trimmedText = text.trim();
-    if (!trimmedText || trimmedText.length < 1 || trimmedText.length > 200) return;
+    if (!trimmedText || trimmedText.length < 1 || trimmedText.length > 200) {
+      throw new Error("Prompt must be between 1 and 200 characters");
+    }
 
+    // Rate limiting: max 50 custom prompts per room
+    const allPrompts = await ctx.db
+      .query("customPrompts")
+      .withIndex("by_room", (q) => q.eq("roomCode", code))
+      .collect();
+    if (allPrompts.length >= 50) {
+      throw new Error("Maximum custom prompts reached (50)");
+    }
+
+    // Rate limiting: max 10 prompts per player per room
+    const playerPrompts = allPrompts.filter(p => p.createdBy === createdBy);
+    if (playerPrompts.length >= 10) {
+      throw new Error("You can only add up to 10 custom prompts");
+    }
+
+    // Rate limiting: 2 second cooldown per player
+    const recentPrompt = playerPrompts.find(p => Date.now() - p.createdAt < 2000);
+    if (recentPrompt) {
+      throw new Error("Please wait before adding another prompt");
+    }
+
+    // Check for duplicate
     const existing = await ctx.db
       .query("customPrompts")
       .withIndex("by_room_text", (q) => q.eq("roomCode", code).eq("text", trimmedText))
       .unique();
-    if (existing) return;
+    if (existing) {
+      throw new Error("This prompt already exists");
+    }
+
     await ctx.db.insert("customPrompts", {
       roomCode: code,
       text: trimmedText,
@@ -405,13 +447,20 @@ export const removeCustomPrompt = mutation({
   handler: async (ctx, { code, text, playerId }) => {
     // Only host can remove custom prompts
     const player = await getPlayer(ctx, code, playerId);
-    if (!player || !player.isHost) return;
+    if (!player) {
+      throw new Error("Player not found");
+    }
+    if (!player.isHost) {
+      throw new Error("Only the host can remove prompts");
+    }
 
     const existing = await ctx.db
       .query("customPrompts")
       .withIndex("by_room_text", (q) => q.eq("roomCode", code).eq("text", text))
       .unique();
-    if (existing) await ctx.db.delete(existing._id);
+    if (existing) {
+      await ctx.db.delete(existing._id);
+    }
   },
 });
 

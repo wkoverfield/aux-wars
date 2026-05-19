@@ -69,13 +69,14 @@ export default function PromptVoting({ gameCode }) {
   }, [votingStatus?.currentPrompt, displayedPrompt]);
 
   const handleVoteSkip = async () => {
-    if (!session?.playerId || hasVoted || isVoting) return;
+    if (!session?.playerId || !session?.connectionId || hasVoted || isVoting) return;
 
     setIsVoting(true);
     try {
       await voteSkipMutation({
         code: gameCode,
         playerId: session.playerId,
+        connectionId: session.connectionId,
       });
       setHasVoted(true);
     } catch (error) {

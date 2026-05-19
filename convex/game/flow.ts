@@ -341,14 +341,31 @@ export const returnToLobby = mutation({
 // ==================== PROMPT VOTING ====================
 
 export const voteSkipPrompt = mutation({
-  args: { code: v.string(), playerId: v.string() },
-  handler: async (ctx, { code, playerId }) => {
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoom(ctx, code);
     if (!room || room.phase !== "promptVoting") return { success: false };
 
     const players = await getPlayers(ctx, code);
     const player = players.find((p) => p.playerId === playerId);
     if (!player) return { success: false };
+
+    // Validate connection to prevent multi-tab vote manipulation
+    if (player.connectionId !== connectionId) {
+      return { success: false, message: "Invalid connection" };
+    }
+
+    // Rate limiting: Prevent rapid vote attempts (max 1 per 2 seconds)
+    const lastAttempt = player.lastVoteSkipAttempt;
+    if (lastAttempt && now() - lastAttempt < 2000) {
+      console.log(`[voteSkipPrompt] Rate limit: Player ${playerId} attempting too quickly`);
+      return { success: false, message: "Please wait before voting again" };
+    }
+
+    // Update last attempt timestamp
+    await ctx.db.patch(player._id, {
+      lastVoteSkipAttempt: now()
+    });
 
     // Check if player already voted
     const currentVotes = room.skipVotes || [];
