@@ -84,6 +84,23 @@ export const upvoteFeedback = mutation({
 });
 
 /**
+ * Update feedback status (admin only - no auth check for now)
+ */
+export const updateStatus = mutation({
+  args: {
+    feedbackId: v.id("feedback"),
+    status: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (!["pending", "planned", "completed", "declined"].includes(args.status)) {
+      throw new Error("Invalid status");
+    }
+    await ctx.db.patch(args.feedbackId, { status: args.status });
+    return { success: true };
+  },
+});
+
+/**
  * Remove upvote (toggle)
  */
 export const removeUpvote = mutation({

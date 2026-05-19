@@ -271,8 +271,14 @@ export default function FeedbackModal({ showModal, onClose }) {
                                   {typeConfig.label}
                                 </span>
                                 {item.status !== 'pending' && (
-                                  <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-600 text-gray-300">
-                                    {item.status}
+                                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                                    item.status === 'completed'
+                                      ? 'bg-green-600 text-white'
+                                      : item.status === 'planned'
+                                      ? 'bg-purple-600 text-white'
+                                      : 'bg-gray-600 text-gray-300'
+                                  }`}>
+                                    {item.status === 'completed' ? '✓ shipped' : item.status}
                                   </span>
                                 )}
                               </div>

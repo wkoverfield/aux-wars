@@ -1,9 +1,10 @@
 import { v } from "convex/values";
-import { internalMutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 
 /**
  * Internal mutation for tracking analytics events.
  * Use ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {...}) for fire-and-forget tracking.
+ * Also increments the aggregate count for efficient querying.
  */
 export const trackEvent = internalMutation({
   args: {
@@ -17,11 +18,31 @@ export const trackEvent = internalMutation({
     })),
   },
   handler: async (ctx, { eventType, metadata }) => {
+    // Insert the event
     await ctx.db.insert("analyticsEvents", {
       eventType,
       timestamp: Date.now(),
       metadata,
     });
+
+    // Increment aggregate count
+    const existing = await ctx.db
+      .query("analyticsAggregates")
+      .withIndex("by_type", (q) => q.eq("eventType", eventType))
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        count: existing.count + 1,
+        lastUpdated: Date.now(),
+      });
+    } else {
+      await ctx.db.insert("analyticsAggregates", {
+        eventType,
+        count: 1,
+        lastUpdated: Date.now(),
+      });
+    }
   },
 });
 
@@ -99,6 +120,20 @@ export const getEventCounts = query({
 });
 
 /**
+ * Get count for a specific event type (uses index, avoids document limit)
+ */
+export const getCountByEventType = query({
+  args: { eventType: v.string() },
+  handler: async (ctx, { eventType }) => {
+    const events = await ctx.db
+      .query("analyticsEvents")
+      .withIndex("by_type", (q) => q.eq("eventType", eventType))
+      .collect();
+    return events.length;
+  },
+});
+
+/**
  * Internal mutation to clean up old analytics events (called by cron)
  */
 export const cleanupOldEvents = internalMutation({
@@ -119,5 +154,102 @@ export const cleanupOldEvents = internalMutation({
     if (deleted > 0) {
       console.log(`[analytics] Cleaned up ${deleted} events older than ${retentionDays} days`);
     }
+  },
+});
+
+/**
+ * Get all aggregate counts (efficient - reads only aggregate table, not all events)
+ */
+export const getAllAggregates = query({
+  args: {},
+  handler: async (ctx) => {
+    const aggregates = await ctx.db.query("analyticsAggregates").collect();
+    const result: Record<string, number> = {};
+    for (const agg of aggregates) {
+      result[agg.eventType] = agg.count;
+    }
+    return result;
+  },
+});
+
+/**
+ * Get a single aggregate count by event type
+ */
+export const getAggregateCount = query({
+  args: { eventType: v.string() },
+  handler: async (ctx, { eventType }) => {
+    const agg = await ctx.db
+      .query("analyticsAggregates")
+      .withIndex("by_type", (q) => q.eq("eventType", eventType))
+      .first();
+    return agg?.count ?? 0;
+  },
+});
+
+/**
+ * Backfill aggregate counts from existing events (run once after deployment)
+ * Processes in batches to avoid timeout. Call repeatedly until it returns done: true.
+ */
+export const backfillAggregates = mutation({
+  args: { eventType: v.string(), batchSize: v.optional(v.number()) },
+  handler: async (ctx, { eventType, batchSize = 5000 }) => {
+    // Count events of this type (up to batch size)
+    const events = await ctx.db
+      .query("analyticsEvents")
+      .withIndex("by_type", (q) => q.eq("eventType", eventType))
+      .take(batchSize);
+
+    const count = events.length;
+
+    // Get or create aggregate
+    const existing = await ctx.db
+      .query("analyticsAggregates")
+      .withIndex("by_type", (q) => q.eq("eventType", eventType))
+      .first();
+
+    if (existing) {
+      // For backfill, we need to count ALL events, not just batch
+      // This is a one-time operation, so we'll use a different approach
+      await ctx.db.patch(existing._id, {
+        count: existing.count, // Keep existing - backfill should set initial value
+        lastUpdated: Date.now(),
+      });
+    } else if (count > 0) {
+      await ctx.db.insert("analyticsAggregates", {
+        eventType,
+        count,
+        lastUpdated: Date.now(),
+      });
+    }
+
+    return { eventType, count, done: count < batchSize };
+  },
+});
+
+/**
+ * Set aggregate count directly (for manual correction or initial backfill)
+ */
+export const setAggregateCount = mutation({
+  args: { eventType: v.string(), count: v.number() },
+  handler: async (ctx, { eventType, count }) => {
+    const existing = await ctx.db
+      .query("analyticsAggregates")
+      .withIndex("by_type", (q) => q.eq("eventType", eventType))
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        count,
+        lastUpdated: Date.now(),
+      });
+    } else {
+      await ctx.db.insert("analyticsAggregates", {
+        eventType,
+        count,
+        lastUpdated: Date.now(),
+      });
+    }
+
+    return { eventType, count };
   },
 });

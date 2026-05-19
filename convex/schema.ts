@@ -134,6 +134,13 @@ export default defineSchema({
     .index("by_type", ["eventType"])
     .index("by_timestamp", ["timestamp"])
     .index("by_type_and_timestamp", ["eventType", "timestamp"]),
+
+  // Aggregated analytics counts (avoids scanning all events)
+  analyticsAggregates: defineTable({
+    eventType: v.string(),
+    count: v.number(),
+    lastUpdated: v.number(),
+  }).index("by_type", ["eventType"]),
 });
 
 

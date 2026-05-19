@@ -2,87 +2,57 @@
 
 settle music taste arguments with your friends
 
-**play at [aux-wars.com](https://aux-wars.com)**
+**[play now at aux-wars.com](https://aux-wars.com)**
 
-## what it is
+![Landing Page](screenshots/landing.png)
 
-party game where you pick songs for weird prompts and rate each other's choices. whoever gets the most points wins.
+## how it works
 
-prompts are stuff like "this song could start a mosh pit" or "a song that makes you wanna text your ex"
+1. **host a game** - create a room and share the code with friends
+2. **get a prompt** - something like "song that makes you wanna text your ex"
+3. **pick a song** - search youtube for the perfect track
+4. **rate each other** - listen to everyone's picks and vote 1-5
+5. **crown the winner** - best average rating wins the round
 
-## why it exists
+## screenshots
 
-got tired of fighting over the aux with my friends. now we can just prove who the real ball-knower is.
+### lobby
+![Lobby](screenshots/lobby-enter-name.png)
 
-features:
+### game settings
+![Settings](screenshots/settings.png)
+
+### how to play
+![How to Play](screenshots/how-to-play.png)
+
+<!-- TODO: add gameplay screenshots
+### song selection
+![Song Selection](screenshots/song-selection.png)
+
+### rating
+![Rating](screenshots/rating.png)
+
+### results
+![Results](screenshots/results.png)
+-->
+
+## features
 
 - works on phones
 - no signups or logins
 - uses youtube so most songs are available
-- real-time voting
-- custom prompts if you want
+- real-time multiplayer
+- custom prompts
+- configurable round timers and snippet lengths
 
-## tech stuff
+## stats
 
-- react + vite
-- socket.io for real-time
-- node/express backend
-- youtube integration
-- tailwind css
-- deployed on vercel + railway
+**900+ games played** with 40,000+ song ratings
 
-## run it locally
+## tech
 
-clone and install:
+react, convex, youtube api, tailwind
 
-```bash
-git clone https://github.com/woverfield/aux-wars.git
-cd aux-wars
-npm run install-all
-```
+---
 
-create `.env` files:
-
-**client/.env**:
-
-```
-VITE_SERVER_URL=http://localhost:3001
-```
-
-**server/.env**:
-
-```
-CLIENT_ORIGIN=http://localhost:5173
-PORT=3001
-```
-
-start it:
-
-```bash
-npm start
-```
-
-open `localhost:5173`
-
-## deployment
-
-using vercel for frontend and railway for backend. set your environment variables and update cors settings to match your domains.
-
-## analytics
-
-usage tracking added february 2026. events tracked: game creation, player joins/leaves, game starts, song submissions, ratings, and completions.
-
-**baseline (feb 2025 - feb 2026):** ~2,000 visitors, 204 games played.
-
-## future ideas
-
-- tournament mode
-- public lobbies
-- stats tracking
-- theme nights
-
-## credits
-
-built during late night coding sessions
-
-shoutout to my friends for beta testing and submitting terrible songs
+built by [wilson overfield](https://github.com/woverfield)
