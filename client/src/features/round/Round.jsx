@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 // GameContext removed - using Convex queries directly
 // import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
@@ -77,12 +77,19 @@ export default function Round() {
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState(null);
   const [showSnippetSelector, setShowSnippetSelector] = useState(false);
+  // Track song selected in search results but not yet confirmed (for auto-submit)
+  const [pendingTrack, setPendingTrack] = useState(null);
 
   // Optimistic UI flag for rating phase (prevent double-submission during query update window)
   const [hasRatingSubmitted, setHasRatingSubmitted] = useState(false);
 
   // Transition State
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Ref for SnippetSelector to get current selection on auto-submit
+  const snippetSelectorRef = useRef(null);
+  // Guard to prevent multiple auto-submits during timer countdown
+  const hasAutoSubmittedRef = useRef(false);
 
   // Derive from queries - no local state duplication
   const isRatingPhase = currentRatingSong !== null && currentRatingSong !== undefined;
@@ -130,6 +137,60 @@ export default function Round() {
   // Effects
   // =======
 
+  // Auto-submit on timer expiry when user has a song selected (any screen)
+  useEffect(() => {
+    // Trigger at 2 seconds to give buffer for network latency before server timeout
+    // Guard prevents multiple submissions as timer ticks from 2 → 1 → 0
+    // Check both selectedTrack (in snippet selector) and pendingTrack (clicked in search results)
+    const trackToSubmit = selectedTrack || pendingTrack;
+
+    if (timeRemaining !== null && timeRemaining <= 2 && timeRemaining > 0 &&
+        trackToSubmit && !hasAutoSubmittedRef.current) {
+      hasAutoSubmittedRef.current = true;
+
+      // If in snippet selector, get user's chosen time; otherwise use defaults
+      if (showSnippetSelector && selectedTrack) {
+        const currentSelection = snippetSelectorRef.current?.getCurrentSelection?.();
+        if (currentSelection) {
+          handleConfirmSongWithSnippet(currentSelection);
+        } else {
+          // Fallback if ref not available
+          const snippetDuration = room?.settings?.snippetDuration ?? 30;
+          const defaultSelection = {
+            ...selectedTrack,
+            snippet: snippetDuration === 0 ? null : { startTime: 30, endTime: 30 + snippetDuration }
+          };
+          handleConfirmSongWithSnippet(defaultSelection);
+        }
+      } else {
+        // Not in snippet selector OR only have pendingTrack - use default snippet times
+        const snippetDuration = room?.settings?.snippetDuration ?? 30;
+        const defaultSelection = {
+          ...trackToSubmit,
+          snippet: snippetDuration === 0 ? null : { startTime: 30, endTime: 30 + snippetDuration }
+        };
+        handleConfirmSongWithSnippet(defaultSelection);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeRemaining, showSnippetSelector, selectedTrack, pendingTrack]);
+
+  // Reset auto-submit guard when selection is cleared (allows future auto-submits in next round)
+  useEffect(() => {
+    if (!selectedTrack && !pendingTrack) {
+      hasAutoSubmittedRef.current = false;
+    }
+  }, [selectedTrack, pendingTrack]);
+
+  // Clean up selection state when phase changes to rating (handles edge cases where auto-submit fails)
+  // Note: State setters are stable and don't need deps
+  useEffect(() => {
+    if (isRatingPhase) {
+      setShowSnippetSelector(false);
+      setSelectedTrack(null);
+      setPendingTrack(null);
+    }
+  }, [isRatingPhase]);
 
   // Phase-driven navigation handled by GameRouteGuard
 
@@ -312,28 +373,31 @@ export default function Round() {
     }
 
     if (isRatingPhase) {
-      // Check if this is the player's own song - never show rating UI for own song
+      // Check if this is the player's own song
       const isOwnSong = songToRate?.player?.id === session?.playerId;
 
-      if (hasRatingSubmitted || isOwnSong) {
+      // Show WaitingScreen only if already rated someone else's song
+      if (hasRatingSubmitted && !isOwnSong) {
         return (
           <WaitingScreen
             completedCount={ratingSubmittedCount}
             totalCount={totalPlayers}
-            message={isOwnSong
-              ? "This is your song! Waiting for others to rate..."
-              : "Waiting for other players to rate this song..."}
+            message="Waiting for other players to rate this song..."
           />
         );
       } else if (songToRate) {
+        // Show RatingScreen for both voting and spectating (own song)
+        // spectatorMode shows the video/audio but hides voting UI
         return (
           <RatingScreen
             currentPrompt={currentPrompt}
             songToRate={songToRate}
             onSubmitRating={handleSubmitRating}
+            onAutoSubmit={handleSubmitRating}
             currentIndex={ratingIndex}
             totalSongs={totalSongs}
             anonymousMode={room?.settings?.anonymousMode}
+            spectatorMode={isOwnSong}
           />
         );
       }
@@ -355,6 +419,7 @@ export default function Round() {
             searchError={searchError}
             isSearching={isSearching}
             onSelectSong={handleSelectSong}
+            onSelectionChange={setPendingTrack}
             onShowPrompt={() => setShowPromptModal(true)}
             showPromptModal={showPromptModal}
           />
@@ -403,6 +468,7 @@ export default function Round() {
 
       {showSnippetSelector && selectedTrack && (
         <SnippetSelector
+          ref={snippetSelectorRef}
           track={selectedTrack}
           snippetDuration={room?.settings?.snippetDuration ?? 30}
           onConfirm={handleConfirmSongWithSnippet}

@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useImperativeHandle } from 'react';
 import { YouTubePlayerWithRef } from './YouTubePlayer';
 import { motion } from 'framer-motion';
 
 /**
  * SnippetSelector component allows users to select a portion of a song to showcase
  * Provides visual timeline controls and preview functionality
+ *
+ * @param {Object} ref - React 19 ref prop for exposing getCurrentSelection() to parent
  */
-export default function SnippetSelector({ track, snippetDuration = 30, onConfirm, onCancel }) {
+export default function SnippetSelector({ ref, track, snippetDuration = 30, onConfirm, onCancel }) {
   // 0 = full song, otherwise use the provided duration
   const SNIPPET_DURATION = snippetDuration ?? 30;
   const isFullSong = snippetDuration === 0;
@@ -40,6 +42,14 @@ export default function SnippetSelector({ track, snippetDuration = 30, onConfirm
 
   // Calculate end time based on start time
   const endTime = Math.min(startTime + SNIPPET_DURATION, duration);
+
+  // Expose getCurrentSelection method to parent for auto-submit on timer expiry
+  useImperativeHandle(ref, () => ({
+    getCurrentSelection: () => ({
+      ...track,
+      snippet: isFullSong ? null : { startTime, endTime }
+    })
+  }), [track, isFullSong, startTime, endTime]);
 
   // Keyboard controls
   useEffect(() => {

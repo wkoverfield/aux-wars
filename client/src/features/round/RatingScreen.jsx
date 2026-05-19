@@ -7,6 +7,7 @@ import { useToast } from '../../contexts/ToastContext';
 /**
  * RatingScreen component provides an interface for rating songs during the game.
  * Includes song playback, album art display, and a 5-star rating system.
+ * In spectator mode, shows the video/audio but hides voting controls (for own song).
  *
  * @param {Object} props - Component props
  * @param {string} props.currentPrompt - The current game prompt
@@ -15,6 +16,8 @@ import { useToast } from '../../contexts/ToastContext';
  * @param {number} props.currentIndex - Current song index in the rating sequence
  * @param {number} props.totalSongs - Total number of songs to rate
  * @param {boolean} props.anonymousMode - Whether to hide who submitted the song
+ * @param {boolean} props.spectatorMode - If true, show video but hide rating UI (for viewing own song)
+ * @param {Function} props.onAutoSubmit - Optional callback for auto-submit on timeout (called with rating)
  * @returns {JSX.Element} Rendered component
  */
 const RatingScreen = ({
@@ -23,9 +26,12 @@ const RatingScreen = ({
   onSubmitRating,
   currentIndex,
   totalSongs,
-  anonymousMode = false
+  anonymousMode = false,
+  spectatorMode = false,
+  onAutoSubmit
 }) => {
   const [selectedRating, setSelectedRating] = useState(-1);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
   const [snippetProgress, setSnippetProgress] = useState(0); // 0-1 progress within snippet
   const { showToast } = useToast();
   const playerRef = useRef(null);
@@ -105,12 +111,48 @@ const RatingScreen = ({
    */
   const handleSubmit = () => {
     if (selectedRating >= 0) {
+      setHasSubmitted(true);
       // Add 1 to the index to get rating from 1-5 instead of 0-4
       onSubmitRating(songToRate.songId, selectedRating + 1);
     } else {
       showToast("Please select a rating before submitting", "warning");
     }
   };
+
+  // Track previous song state for auto-submit on song change
+  const prevSongRef = useRef({ songId: null, rating: -1, submitted: false });
+  // Ref for onAutoSubmit to avoid dependency issues (prevents premature cleanup triggers)
+  const onAutoSubmitRef = useRef(onAutoSubmit);
+  onAutoSubmitRef.current = onAutoSubmit;
+
+  // Update the ref whenever state changes (so we have latest values when song changes)
+  useEffect(() => {
+    prevSongRef.current = {
+      songId: songToRate?.songId,
+      rating: selectedRating,
+      submitted: hasSubmitted
+    };
+  }, [songToRate?.songId, selectedRating, hasSubmitted]);
+
+  // Auto-submit pending rating when song changes (server timeout advances to next song)
+  useEffect(() => {
+    return () => {
+      // Cleanup runs when songId changes or component unmounts
+      // Check if we had a pending rating for the previous song
+      const prev = prevSongRef.current;
+      const autoSubmit = onAutoSubmitRef.current;
+      if (prev.songId && prev.rating >= 0 && !prev.submitted && autoSubmit) {
+        // Auto-submit the pending rating for the previous song
+        autoSubmit(prev.songId, prev.rating + 1); // +1 to convert 0-4 to 1-5
+      }
+    };
+  }, [songToRate?.songId]); // Only depend on songId - use refs for callback
+
+  // Reset state when song changes
+  useEffect(() => {
+    setSelectedRating(-1);
+    setHasSubmitted(false);
+  }, [songToRate?.songId]);
 
   return (
     <div className="flex flex-col items-center w-full min-h-screen box-border px-2 pt-4 pb-24 sm:pt-8 sm:pb-32 bg-transparent">
@@ -174,33 +216,46 @@ const RatingScreen = ({
           </p>
         </div>
 
-        {/* Rating system */}
-        <div className="flex flex-row justify-center items-center mb-8">
-          {[...Array(5)].map((_, index) => (
-            <img
-              key={index}
-              src={record}
-              alt={`rate this song ${index + 1} records`}
-              className={`w-[48px] sm:w-[56px] m-2 sm:m-2.5 cursor-pointer transition-all duration-300 hover:scale-110 ${
-                index <= selectedRating ? "opacity-100" : "opacity-50"
-              }`}
-              onClick={() => handleRatingClick(index)}
-            />
-          ))}
+        {/* Rating system - hidden in spectator mode */}
+        {!spectatorMode && (
+          <div className="flex flex-row justify-center items-center mb-8">
+            {[...Array(5)].map((_, index) => (
+              <img
+                key={index}
+                src={record}
+                alt={`rate this song ${index + 1} records`}
+                className={`w-[48px] sm:w-[56px] m-2 sm:m-2.5 cursor-pointer transition-all duration-300 hover:scale-110 ${
+                  index <= selectedRating ? "opacity-100" : "opacity-50"
+                }`}
+                onClick={() => handleRatingClick(index)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Spectator message - shown when viewing own song */}
+        {spectatorMode && (
+          <div className="text-center mb-8">
+            <p className="text-xl text-green-400 font-semibold">This is your song!</p>
+            <p className="text-gray-400">Waiting for others to rate...</p>
+          </div>
+        )}
+      </div>
+
+      {/* Submit button fixed at the bottom - hidden in spectator mode */}
+      {!spectatorMode && (
+        <div className="fixed left-0 right-0 bottom-0 flex justify-center pb-4 bg-gradient-to-t from-black/80 to-transparent z-20">
+          <button
+            className={`bg-[#68d570] text-black font-bold w-full max-w-xs h-[52px] rounded-full cursor-pointer transition-all hover:scale-105 hover:bg-[#7de884] ${
+              selectedRating < 0 ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            onClick={handleSubmit}
+            disabled={selectedRating < 0}
+          >
+            Submit
+          </button>
         </div>
-      </div>
-      {/* Submit button fixed at the bottom */}
-      <div className="fixed left-0 right-0 bottom-0 flex justify-center pb-4 bg-gradient-to-t from-black/80 to-transparent z-20">
-        <button 
-          className={`bg-[#68d570] text-black font-bold w-full max-w-xs h-[52px] rounded-full cursor-pointer transition-all hover:scale-105 hover:bg-[#7de884] ${
-            selectedRating < 0 ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-          onClick={handleSubmit}
-          disabled={selectedRating < 0}
-        >
-          Submit
-        </button>
-      </div>
+      )}
     </div>
   );
 };

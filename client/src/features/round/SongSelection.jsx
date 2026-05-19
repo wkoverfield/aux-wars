@@ -13,20 +13,22 @@ import SongList from "../../components/SongList";
  * @param {Array} props.searchResults - List of search results
  * @param {string|null} props.searchError - Error message to display
  * @param {boolean} props.isSearching - Whether a search is currently in progress
- * @param {Function} props.onSelectSong - Callback when a song is selected
+ * @param {Function} props.onSelectSong - Callback when a song is confirmed (opens snippet selector)
+ * @param {Function} props.onSelectionChange - Callback when selection changes (for auto-submit on timer expiry)
  * @param {Function} props.onShowPrompt - Callback to show the prompt modal
  * @param {boolean} props.showPromptModal - Whether the prompt modal is visible
  * @returns {JSX.Element} Rendered component
  */
-export default function SongSelection({ 
-  searchTerm, 
-  onSearchChange, 
-  searchResults, 
+export default function SongSelection({
+  searchTerm,
+  onSearchChange,
+  searchResults,
   searchError,
   isSearching,
-  onSelectSong, 
+  onSelectSong,
+  onSelectionChange,
   onShowPrompt,
-  showPromptModal 
+  showPromptModal
 }) {
   const [selectedTrack, setSelectedTrack] = useState(null);
 
@@ -36,6 +38,8 @@ export default function SongSelection({
    */
   const handleSelectTrack = (track) => {
     setSelectedTrack(track);
+    // Notify parent of selection change for auto-submit on timer expiry
+    onSelectionChange?.(track);
   };
 
   /**
