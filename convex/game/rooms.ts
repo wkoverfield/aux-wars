@@ -78,6 +78,10 @@ export const joinGame = mutation({
         connectedAt: now(),     // Record when this connection was established
         lastSeenAt: now(),      // Update last seen
         isActive: true,         // Mark this connection as active
+        // Clear rate limit timestamps to prevent bypass via refresh
+        lastSubmissionAttempt: undefined,
+        lastRatingAttempt: undefined,
+        lastVoteSkipAttempt: undefined,
       });
 
       await touchRoom(ctx, room._id);

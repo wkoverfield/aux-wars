@@ -23,6 +23,7 @@ export default function SnippetSelector({ ref, track, snippetDuration = 30, onCo
   const intervalRef = useRef(null);
   const waveformRef = useRef(null);
   const updateTimerRef = useRef(null);
+  const hasAutoConfirmedRef = useRef(false); // Guard against repeated auto-confirm calls
 
   // Extract video ID from preview URL
   const getVideoId = (url) => {
@@ -251,9 +252,10 @@ export default function SnippetSelector({ ref, track, snippetDuration = 30, onCo
     }
   };
 
-  // If full song mode, auto-confirm immediately
+  // If full song mode, auto-confirm immediately (with guard to prevent repeated calls)
   useEffect(() => {
-    if (isFullSong && track) {
+    if (isFullSong && track && !hasAutoConfirmedRef.current) {
+      hasAutoConfirmedRef.current = true;
       onConfirm({ ...track, snippet: null });
     }
   }, [isFullSong, track, onConfirm]);

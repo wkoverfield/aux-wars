@@ -79,6 +79,8 @@ export default function Round() {
   const [showSnippetSelector, setShowSnippetSelector] = useState(false);
   // Track song selected in search results but not yet confirmed (for auto-submit)
   const [pendingTrack, setPendingTrack] = useState(null);
+  // Lock selection when timer enters danger zone to prevent race conditions
+  const [selectionLocked, setSelectionLocked] = useState(false);
 
   // Optimistic UI flag for rating phase (prevent double-submission during query update window)
   const [hasRatingSubmitted, setHasRatingSubmitted] = useState(false);
@@ -181,6 +183,17 @@ export default function Round() {
       hasAutoSubmittedRef.current = false;
     }
   }, [selectedTrack, pendingTrack]);
+
+  // Lock selection when timer enters danger zone (prevents race condition on rapid clicks)
+  useEffect(() => {
+    if (timeRemaining !== null && timeRemaining <= 3 && !selectionLocked && (selectedTrack || pendingTrack)) {
+      setSelectionLocked(true);
+    }
+    // Reset lock when timer resets or phase changes
+    if (timeRemaining === null || timeRemaining > 3) {
+      setSelectionLocked(false);
+    }
+  }, [timeRemaining, selectionLocked, selectedTrack, pendingTrack]);
 
   // Clean up selection state when phase changes to rating (handles edge cases where auto-submit fails)
   // Note: State setters are stable and don't need deps
@@ -419,7 +432,7 @@ export default function Round() {
             searchError={searchError}
             isSearching={isSearching}
             onSelectSong={handleSelectSong}
-            onSelectionChange={setPendingTrack}
+            onSelectionChange={selectionLocked ? undefined : setPendingTrack}
             onShowPrompt={() => setShowPromptModal(true)}
             showPromptModal={showPromptModal}
           />
