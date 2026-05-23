@@ -133,6 +133,11 @@ export default function Home() {
         </div>
       </div>
 
+      {/* SEO text - visible to Google */}
+      <p className="text-gray-500 text-sm text-center max-w-sm px-4 -mt-4 mb-2">
+        Free online music party game. Pick songs for creative prompts, rate your friends' picks, crown the winner. No download, no login.
+      </p>
+
       {/* Bottom section with action buttons */}
       <div className="home-btns flex flex-col items-center gap-6 mb-10 w-full h-full max-w-xs justify-between">
         {false && (

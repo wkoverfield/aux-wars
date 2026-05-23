@@ -1,0 +1,89 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic:
+      - generic:
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+    - generic:
+      - generic:
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+    - generic:
+      - generic:
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+        - generic:
+          - img "album-cover"
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - img "Aux Wars Logo" [ref=e9]
+      - textbox "Enter Code" [ref=e11]
+    - generic [ref=e12]:
+      - button "Join game" [ref=e13]:
+        - generic [ref=e14]: Join game
+      - button "Host game" [ref=e15]:
+        - generic [ref=e16]: Host game
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - button "How to play" [ref=e19]
+        - generic [ref=e20]: •
+        - button "Feedback" [ref=e21]
+      - generic [ref=e22]:
+        - link "Star on GitHub" [ref=e23] [cursor=pointer]:
+          - /url: https://github.com/woverfield/aux-wars
+          - img [ref=e24]
+          - paragraph [ref=e26]: Star on GitHub
+        - link "Support" [ref=e27] [cursor=pointer]:
+          - /url: https://buymeacoffee.com/wkoverfield
+          - img [ref=e28]
+          - paragraph [ref=e30]: Support
+        - link "Wilson Overfield" [ref=e31] [cursor=pointer]:
+          - /url: https://github.com/woverfield
+          - img [ref=e32]
+          - paragraph [ref=e34]: Wilson Overfield

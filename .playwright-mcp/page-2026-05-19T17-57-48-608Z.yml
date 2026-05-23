@@ -1,0 +1,59 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - img "album-cover" [ref=e8]
+      - img "album-cover" [ref=e10]
+      - img "album-cover" [ref=e12]
+      - img "album-cover" [ref=e14]
+      - img "album-cover" [ref=e16]
+      - img "album-cover" [ref=e18]
+      - img "album-cover" [ref=e20]
+      - img "album-cover" [ref=e22]
+      - img "album-cover" [ref=e24]
+    - generic [ref=e26]:
+      - img "album-cover" [ref=e28]
+      - img "album-cover" [ref=e30]
+      - img "album-cover" [ref=e32]
+      - img "album-cover" [ref=e34]
+      - img "album-cover" [ref=e36]
+      - img "album-cover" [ref=e38]
+      - img "album-cover" [ref=e40]
+      - img "album-cover" [ref=e42]
+      - img "album-cover" [ref=e44]
+    - generic [ref=e46]:
+      - img "album-cover" [ref=e48]
+      - img "album-cover" [ref=e50]
+      - img "album-cover" [ref=e52]
+      - img "album-cover" [ref=e54]
+      - img "album-cover" [ref=e56]
+      - img "album-cover" [ref=e58]
+      - img "album-cover" [ref=e60]
+      - img "album-cover" [ref=e62]
+      - img "album-cover" [ref=e64]
+  - generic [ref=e67]:
+    - generic [ref=e68]:
+      - img "Aux Wars Logo" [ref=e69]
+      - textbox "Enter Code" [ref=e71]
+    - generic [ref=e72]:
+      - button "Join game" [ref=e73]:
+        - generic [ref=e74]: Join game
+      - button "Host game" [ref=e75]:
+        - generic [ref=e76]: Host game
+    - generic [ref=e77]:
+      - generic [ref=e78]:
+        - button "How to play" [ref=e79]
+        - generic [ref=e80]: •
+        - button "Feedback" [ref=e81]
+      - generic [ref=e82]:
+        - link "Star on GitHub" [ref=e83] [cursor=pointer]:
+          - /url: https://github.com/woverfield/aux-wars
+          - img [ref=e84]
+          - paragraph [ref=e86]: Star on GitHub
+        - link "Support" [ref=e87] [cursor=pointer]:
+          - /url: https://buymeacoffee.com/wkoverfield
+          - img [ref=e88]
+          - paragraph [ref=e90]: Support
+        - link "Wilson Overfield" [ref=e91] [cursor=pointer]:
+          - /url: https://github.com/woverfield
+          - img [ref=e92]
+          - paragraph [ref=e94]: Wilson Overfield
