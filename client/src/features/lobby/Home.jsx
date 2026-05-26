@@ -119,9 +119,12 @@ export default function Home() {
 
   return (
     <div className="home h-svh flex flex-col items-center relative z-20">
-      {/* Top section with logo and join code input */}
+      {/* Top section with logo, tagline, and join code input */}
       <div className="home-top flex flex-col items-center my-10">
         <AnimatedLogo />
+        <p className="text-white/60 text-sm md:text-base italic text-center px-6 -mt-2 mb-6">
+          settle music taste arguments with your friends
+        </p>
         <div className="home-join flex flex-col items-center gap-8 w-full max-w-xs">
           <input
             type="text"
@@ -133,9 +136,10 @@ export default function Home() {
         </div>
       </div>
 
-      {/* SEO text - visible to Google */}
-      <p className="text-gray-500 text-sm text-center max-w-sm px-4 -mt-4 mb-2">
-        Free online music party game. Pick songs for creative prompts, rate your friends' picks, crown the winner. No download, no login.
+      {/* SEO content - indexed by Google, hidden from view */}
+      <h1 className="sr-only">Aux Wars — Free Online Music Party Game with Friends</h1>
+      <p className="sr-only">
+        Free online music party game. Pick songs for creative prompts, rate your friends' picks, crown the winner. No download, no login required. Play with 3-8 friends on any device.
       </p>
 
       {/* Bottom section with action buttons */}
