@@ -282,8 +282,8 @@ export default function Lobby() {
                   <p className="text-2xl">{gameCode}</p>
                 </div>
                 <div className="lobby-container rounded-md lobby-count flex flex-col gap-2">
-                  <p className="text-xs font-normal">Players</p>
-                  <p className="text-2xl">{players.length}/8</p>
+                  <p className="text-xs font-normal">{room?.settings?.hostPro ? 'Players · Pro' : 'Players'}</p>
+                  <p className="text-2xl">{players.length}/{room?.settings?.hostPro ? 50 : 8}</p>
                 </div>
               </div>
               <div className="flex flex-col items-center gap-5">
