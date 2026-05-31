@@ -5,6 +5,7 @@ import HowToPlayModal from "../../components/HowToPlayModal";
 import FeedbackModal from "../../components/FeedbackModal";
 import DevBtn from "../../components/DevBtn";
 import GitHubStarButton from "../../components/GitHubStarButton";
+import AdSlot from "../../components/AdSlot";
 import { useNavigate } from "react-router-dom";
 // import { useSocket, useSocketConnection } from "../../services/SocketProvider";
 import { useMutation } from "convex/react";
@@ -198,6 +199,7 @@ export default function Home() {
           </a>
           <DevBtn />
         </div>
+        <AdSlot slot="home" className="max-w-xs" />
       </div>
 
       <HowToPlayModal

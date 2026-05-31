@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import PlayerList from "../../components/PlayerList";
 import SettingsModal from "../../components/SettingsModal";
 import SettingsPreview from "../../components/SettingsPreview";
+import AdSlot from "../../components/AdSlot";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 // GameContext removed - using RoomProvider's Convex queries directly
 import { useSession } from "../../hooks/useSession";
@@ -322,6 +323,8 @@ export default function Lobby() {
                 currentPlayerId={session?.playerId}
                 onKick={handleKickPlayer}
               />
+              {/* Ad-safe: lobby is a waiting surface; scrolls with the list, ad-free in pro rooms */}
+              <AdSlot slot="lobby" />
             </div>
           </div>
           {isHost && allPlayersReady && players.length > 2 && (

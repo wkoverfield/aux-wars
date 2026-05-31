@@ -23,6 +23,7 @@ export default defineSchema({
       selectedPrompts: v.array(v.string()),
       enablePromptVoting: v.optional(v.boolean()), // default true - let players vote to skip prompts
       anonymousMode: v.optional(v.boolean()), // default false - hide submitter names during rating
+      hostPro: v.optional(v.boolean()), // host purchased the pro pack: ad-free room + raised player cap
     }),
     usedPrompts: v.optional(v.array(v.string())), // Tracks prompts used this game to avoid repeats
     selectionStartedAt: v.optional(v.number()), // Timestamp when song selection phase started

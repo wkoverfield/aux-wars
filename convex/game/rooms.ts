@@ -6,6 +6,11 @@ function now() {
   return Date.now();
 }
 
+// Player caps: free rooms are capped at 8; rooms hosted with the pro pack get a
+// much higher cap (effectively unlimited for a party, while protecting the backend).
+const FREE_PLAYER_CAP = 8;
+const PRO_PLAYER_CAP = 50;
+
 export const hostGame = mutation({
   args: {},
   handler: async (ctx) => {
@@ -57,14 +62,15 @@ export const joinGame = mutation({
 
     const isFirst = players.length === 0;
 
-    // Enforce max 8 players (unless player is rejoining)
+    // Enforce player cap (unless player is rejoining). Pro rooms get a raised cap.
     const existing = await ctx.db
       .query("players")
       .withIndex("by_player", (q) => q.eq("playerId", playerId).eq("roomCode", code))
       .unique();
 
-    if (!existing && players.length >= 8) {
-      return { success: false, message: "Room is full (max 8 players)" };
+    const playerCap = room.settings?.hostPro ? PRO_PLAYER_CAP : FREE_PLAYER_CAP;
+    if (!existing && players.length >= playerCap) {
+      return { success: false, message: `Room is full (max ${playerCap} players)` };
     }
 
     if (existing) {

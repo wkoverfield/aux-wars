@@ -9,6 +9,8 @@ import GameWinner from "./features/round-winner/GameWinner";
 import GameRouteGuard from "./components/GameRouteGuard";
 import NavigationBlocker from "./components/NavigationBlocker";
 import ConnectionStatus from "./components/ConnectionStatus";
+import CookieConsent from "./components/CookieConsent";
+import PrivacyPolicy from "./features/legal/PrivacyPolicy";
 import { ToastProvider } from "./contexts/ToastContext";
 import { RoomProvider } from "./services/RoomProvider";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -34,9 +36,11 @@ export default function App() {
         <ToastProvider>
           <NavigationBlocker />
           <ConnectionStatus />
+          <CookieConsent />
           <Routes>
               <Route path="/" element={<AppDisplay />}>
                 <Route index element={<PageTransition><Home /></PageTransition>} />
+                <Route path="privacy" element={<PageTransition><PrivacyPolicy /></PageTransition>} />
                 <Route path="/lobby" element={<Navigate to="/" replace />} />
                 <Route path="/lobby/:gameCode" element={<GameRouteGuard />}>
                   <Route element={<RoomProviderOutlet />}>
