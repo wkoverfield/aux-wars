@@ -307,7 +307,9 @@ export default function Round() {
           artist: trackWithSnippet.artists[0].name,
           albumCover: trackWithSnippet.album.images[0].url,
           previewUrl: trackWithSnippet.preview_url,
-          snippet: trackWithSnippet.snippet,
+          // Preview clips have no sub-window, so snippet is omitted (the
+          // validator is v.optional — it accepts undefined, not null).
+          ...(trackWithSnippet.snippet ? { snippet: trackWithSnippet.snippet } : {}),
         },
       });
     } catch (error) {
