@@ -8,10 +8,11 @@ import GitHubStarButton from "../../components/GitHubStarButton";
 import AdSlot from "../../components/AdSlot";
 import { useNavigate } from "react-router-dom";
 // import { useSocket, useSocketConnection } from "../../services/SocketProvider";
-import { useMutation } from "convex/react";
+import { useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useSession } from "../../hooks/useSession";
 import { useToast } from "../../contexts/ToastContext";
+import { getProToken, useIsPro } from "../../services/pro";
 
 /**
  * Home component serves as the landing page for the game.
@@ -25,11 +26,14 @@ export default function Home() {
   // const isConnected = useSocketConnection();
   const hostGame = useMutation(api.game.rooms.hostGame);
   const joinGame = useMutation(api.game.rooms.joinGame);
+  const createCheckout = useAction(api.stripe.createCheckoutSession);
   const navigate = useNavigate();
   const { connectionId, clearSession, createSession, session, isSessionValid } = useSession();
   const { showToast } = useToast();
+  const isPro = useIsPro();
   const [joinCode, setJoinCode] = useState("");
   const [isHosting, setIsHosting] = useState(false);
+  const [goingPro, setGoingPro] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
 
@@ -52,7 +56,7 @@ export default function Home() {
     // Clear any existing session when starting a new game
     clearSession();
     try {
-      const { code } = await hostGame();
+      const { code } = await hostGame({ proToken: getProToken() || undefined });
       const playerId = crypto.randomUUID();
       const tempName = "Host";
       const joinResp = await joinGame({ code, name: tempName, playerId, connectionId });
@@ -66,6 +70,25 @@ export default function Home() {
       showToast("Failed to host game", "error");
     } finally {
       setIsHosting(false);
+    }
+  };
+
+  /**
+   * Starts Stripe Checkout for the Pro pack, then redirects to the hosted page.
+   */
+  const handleGoPro = async () => {
+    if (goingPro) return;
+    setGoingPro(true);
+    try {
+      const { url } = await createCheckout({ origin: window.location.origin });
+      if (url) {
+        window.location.href = url;
+      } else {
+        throw new Error("No checkout URL");
+      }
+    } catch (e) {
+      showToast("Couldn't start checkout. Please try again.", "error");
+      setGoingPro(false);
     }
   };
 
@@ -169,6 +192,17 @@ export default function Home() {
 
       {/* How to Play button and dev credits */}
       <div className="flex flex-col items-center gap-4 pb-6">
+        {isPro ? (
+          <span className="text-xs text-[#68d570] font-semibold">★ Pro unlocked — your games are ad-free</span>
+        ) : (
+          <button
+            onClick={handleGoPro}
+            disabled={goingPro}
+            className="text-sm text-[#68d570] hover:underline disabled:opacity-60"
+          >
+            {goingPro ? "Opening checkout…" : "Go Pro — ad-free + bigger rooms ($5)"}
+          </button>
+        )}
         <div className="flex items-center gap-4">
           <button
             onClick={() => setShowHowToPlay(true)}

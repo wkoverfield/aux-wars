@@ -142,6 +142,19 @@ export default defineSchema({
     count: v.number(),
     lastUpdated: v.number(),
   }).index("by_type", ["eventType"]),
+
+  // Pro pack purchases. A proToken is issued after a verified Stripe payment and
+  // stored on the buyer's device; hosting with it flags the room as hostPro
+  // (ad-free + raised player cap).
+  entitlements: defineTable({
+    proToken: v.string(),
+    stripeSessionId: v.string(),
+    email: v.optional(v.string()),
+    active: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_token", ["proToken"])
+    .index("by_session", ["stripeSessionId"]),
 });
 
 

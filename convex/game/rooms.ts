@@ -12,9 +12,20 @@ const FREE_PLAYER_CAP = 8;
 const PRO_PLAYER_CAP = 50;
 
 export const hostGame = mutation({
-  args: {},
-  handler: async (ctx) => {
+  args: { proToken: v.optional(v.string()) },
+  handler: async (ctx, { proToken }) => {
     const code = await generateUniqueCode(ctx);
+
+    // Pro pack: validate the buyer's token and flag the room (ad-free + raised cap).
+    let hostPro = false;
+    if (proToken) {
+      const entitlement = await ctx.db
+        .query("entitlements")
+        .withIndex("by_token", (q) => q.eq("proToken", proToken))
+        .first();
+      hostPro = Boolean(entitlement?.active);
+    }
+
     await ctx.db.insert("rooms", {
       code,
       phase: "lobby",
@@ -28,6 +39,7 @@ export const hostGame = mutation({
         selectedPrompts: defaultPrompts,
         enablePromptVoting: true, // Let players vote to skip prompts
         anonymousMode: false, // Hide submitter names during rating
+        hostPro, // Pro pack: ad-free room + raised player cap
       },
       createdAt: now(),
       lastActivityAt: now(),
