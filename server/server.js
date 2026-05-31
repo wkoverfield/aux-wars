@@ -104,8 +104,8 @@ async function handleSearch(req, res) {
       }),
     ]);
 
-    // Merge: iTunes first (broader coverage in testing), then Deezer extras.
-    const tracks = mergeTracks(itunesResults, deezerResults).slice(0, SEARCH_LIMIT);
+    // Merge + relevance-rank across both sources, then cap.
+    const tracks = mergeTracks(itunesResults, deezerResults, term).slice(0, SEARCH_LIMIT);
 
     res.json({ tracks });
   } catch (error) {
@@ -198,10 +198,12 @@ function mapDeezerTrack(item) {
 }
 
 /**
- * Merge two result lists, de-duplicating by normalized "name|artist".
- * Primary list wins on conflicts.
+ * Merge two result lists, de-duplicating by normalized "name|artist", then
+ * relevance-rank against the query so the best match from EITHER source floats
+ * to the top — instead of dumping all of source A before any of source B
+ * (which buried exact matches past the result cap).
  */
-function mergeTracks(primary, secondary) {
+function mergeTracks(primary, secondary, query = '') {
   const seen = new Set();
   const merged = [];
   for (const track of [...primary, ...secondary]) {
@@ -211,7 +213,32 @@ function mergeTracks(primary, secondary) {
     seen.add(key);
     merged.push(track);
   }
-  return merged;
+
+  const tokens = query.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
+  const score = (track) => {
+    const name = (track.name || '').toLowerCase();
+    const artist = (track.artists?.[0]?.name || '').toLowerCase();
+    let covered = 0; // distinct query words found anywhere (the main signal)
+    let artistHits = 0; // mild tiebreak toward artist matches
+    for (const tok of tokens) {
+      const inName = name.includes(tok);
+      const inArtist = artist.includes(tok);
+      if (inName || inArtist) covered += 1;
+      if (inArtist) artistHits += 1;
+    }
+    let s = covered * 2 + artistHits;
+    // Deprioritize obvious non-original variants when better matches exist.
+    if (/instrumental|karaoke|tribute|\bcover\b|made famous|originally performed/i.test(name)) {
+      s -= 3;
+    }
+    return s;
+  };
+
+  // Stable sort: equal scores keep their original (source) order.
+  return merged
+    .map((track, i) => ({ track, i, s: score(track) }))
+    .sort((a, b) => b.s - a.s || a.i - b.i)
+    .map((x) => x.track);
 }
 
 function dedupeKey(track) {
