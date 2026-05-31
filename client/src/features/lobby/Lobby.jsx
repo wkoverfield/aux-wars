@@ -12,6 +12,7 @@ import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
+import { getPackIdsForPrompts } from "../../data/promptCategories";
 import logo from "../../assets/aux-wars-logo.svg";
 
 /**
@@ -45,6 +46,7 @@ export default function Lobby() {
   const leaveGame = useMutation(api.game.rooms.leaveGame);
   const kickPlayer = useMutation(api.game.rooms.kickPlayer);
   const startGame = useMutation(api.game.flow.startGame);
+  const logPromptPacksUsed = useMutation(api.analytics.logPromptPacksUsed);
   const hasJoinedGame = useRef(false);
 
   // Initialize game code and name once on mount
@@ -228,6 +230,12 @@ export default function Lobby() {
     }
     if (!session?.playerId) return;
     await startGame({ code: gameCode, playerId: session.playerId });
+
+    // Track which prompt packs were used (fire-and-forget; never block game start)
+    const packIds = getPackIdsForPrompts(room?.settings?.selectedPrompts || []);
+    if (packIds.length > 0) {
+      logPromptPacksUsed({ packIds }).catch(() => {});
+    }
   };
 
   return (

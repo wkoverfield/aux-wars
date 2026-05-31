@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 
 /**
  * Internal mutation for tracking analytics events.
@@ -251,5 +252,27 @@ export const setAggregateCount = mutation({
     }
 
     return { eventType, count };
+  },
+});
+
+/**
+ * Records which prompt packs were used when a game starts (host calls this once
+ * per game). Each pack becomes its own event type ("prompt_pack_used:<id>") so
+ * per-pack usage shows up directly in getAllAggregates — used later to decide
+ * which themes are popular enough to offer as premium packs.
+ */
+export const logPromptPacksUsed = mutation({
+  args: { packIds: v.array(v.string()) },
+  handler: async (ctx, { packIds }) => {
+    const seen = new Set<string>();
+    for (const raw of packIds) {
+      const packId = String(raw).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
+      if (!packId || seen.has(packId)) continue;
+      seen.add(packId);
+      await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+        eventType: `prompt_pack_used:${packId}`,
+      });
+    }
+    return { tracked: Array.from(seen) };
   },
 });

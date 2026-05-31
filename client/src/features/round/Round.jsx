@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 // import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { searchTracks, getCachedResults } from "../../services/serverYoutubeApi";
+import { searchTracks, getCachedResults } from "../../services/musicSearch";
 import { useToast } from "../../contexts/ToastContext";
 import RoundStart from "./RoundStart";
 import SongSelection from "./SongSelection";
@@ -150,28 +150,12 @@ export default function Round() {
         trackToSubmit && !hasAutoSubmittedRef.current) {
       hasAutoSubmittedRef.current = true;
 
-      // If in snippet selector, get user's chosen time; otherwise use defaults
+      // Preview clips are the whole snippet, so snippet is always null.
       if (showSnippetSelector && selectedTrack) {
         const currentSelection = snippetSelectorRef.current?.getCurrentSelection?.();
-        if (currentSelection) {
-          handleConfirmSongWithSnippet(currentSelection);
-        } else {
-          // Fallback if ref not available
-          const snippetDuration = room?.settings?.snippetDuration ?? 30;
-          const defaultSelection = {
-            ...selectedTrack,
-            snippet: snippetDuration === 0 ? null : { startTime: 30, endTime: 30 + snippetDuration }
-          };
-          handleConfirmSongWithSnippet(defaultSelection);
-        }
+        handleConfirmSongWithSnippet(currentSelection || { ...selectedTrack, snippet: null });
       } else {
-        // Not in snippet selector OR only have pendingTrack - use default snippet times
-        const snippetDuration = room?.settings?.snippetDuration ?? 30;
-        const defaultSelection = {
-          ...trackToSubmit,
-          snippet: snippetDuration === 0 ? null : { startTime: 30, endTime: 30 + snippetDuration }
-        };
-        handleConfirmSongWithSnippet(defaultSelection);
+        handleConfirmSongWithSnippet({ ...trackToSubmit, snippet: null });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -235,9 +219,8 @@ export default function Round() {
   // Phase changes handled by GameRouteGuard
 
   /**
-   * Handles YouTube track search with caching and debouncing via Express server
-   * NOTE: Uses Express endpoint instead of Convex Action because youtube-search-api
-   * is incompatible with Convex's Node.js runtime (package resolves as undefined)
+   * Handles music track search with caching and debouncing via Express server.
+   * The Express proxy queries iTunes + Deezer and returns 30s preview clips.
    */
   useEffect(() => {
     if (!searchTerm.trim()) {
@@ -483,7 +466,6 @@ export default function Round() {
         <SnippetSelector
           ref={snippetSelectorRef}
           track={selectedTrack}
-          snippetDuration={room?.settings?.snippetDuration ?? 30}
           onConfirm={handleConfirmSongWithSnippet}
           onCancel={() => {
             setShowSnippetSelector(false);
