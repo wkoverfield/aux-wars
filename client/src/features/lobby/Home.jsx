@@ -134,9 +134,9 @@ export default function Home() {
       <section className="w-full flex flex-col items-center px-4 pt-3">
         <div className="home-top flex flex-col items-center mt-2 mb-6">
           <AnimatedLogo />
-          <p className="text-white/60 text-sm md:text-base italic text-center px-6 -mt-2 mb-6">
+          {/* <p className="text-white/60 text-sm md:text-base italic text-center px-6 -mt-2 mb-6">
             settle music taste arguments with your friends
-          </p>
+          </p> */}
           <div className="home-join flex flex-col items-center gap-8 w-full max-w-xs">
             <input
               type="text"
@@ -246,7 +246,7 @@ export default function Home() {
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 mr-1">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 01-.923 1.785A5.969 5.969 0 006 21c1.282 0 2.47-.402 3.445-1.087.81.22 1.668.337 2.555.337z" />
           </svg>
-          <p className="text-xs">Feedback</p>
+          <p className="text-xs">Leave Feedback</p>
         </button>
       </footer>
 
