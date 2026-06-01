@@ -13,6 +13,7 @@ import { api } from "../../../../convex/_generated/api";
 import { useSession } from "../../hooks/useSession";
 import { useToast } from "../../contexts/ToastContext";
 import { getProToken, useIsPro } from "../../services/pro";
+import { adsConfigured } from "../../services/ads";
 
 /**
  * Home component serves as the landing page for the game.
@@ -48,7 +49,9 @@ export default function Home() {
   // Pro funnel: count non-Pro visitors who saw the offer (viewed -> checkout -> purchased),
   // and a retention signal: is this a new or returning device?
   useEffect(() => {
-    if (!isPro) logEvent({ eventType: "pro_cta_viewed" });
+    // Pro CTA only shows once ads are live (otherwise "ad-free" is meaningless) —
+    // so only count the view when the offer is actually visible.
+    if (adsConfigured() && !isPro) logEvent({ eventType: "pro_cta_viewed" });
     try {
       const seen = localStorage.getItem("aux-wars-seen");
       logEvent({ eventType: "session_start", metadata: { label: seen ? "returning" : "new" } });
@@ -206,7 +209,7 @@ export default function Home() {
 
       {/* How to Play button and dev credits */}
       <div className="flex flex-col items-center gap-4 pb-6">
-        {isPro ? (
+        {adsConfigured() && (isPro ? (
           <span className="text-xs text-[#68d570] font-semibold">★ Pro unlocked — your games are ad-free</span>
         ) : (
           <div className="flex flex-col items-center gap-1">
@@ -224,7 +227,7 @@ export default function Home() {
               Already Pro? Restore
             </button>
           </div>
-        )}
+        ))}
         <div className="flex items-center gap-4">
           <button
             onClick={() => setShowHowToPlay(true)}

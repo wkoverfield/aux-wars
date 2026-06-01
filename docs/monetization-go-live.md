@@ -37,8 +37,11 @@ the switches below). This doc is the paint-by-numbers finish line.
 
 ### 3. Turn on ads (when AdSense approves)
 - [ ] Apply to AdSense with `aux-wars.com` (the `/privacy` page is live for this)
-- [ ] On approval: set `VITE_ADSENSE_CLIENT=ca-pub-…` in Vercel prod → redeploy. Ads light up; cookie
-      banner appears automatically.
+- [ ] On approval: set `VITE_ADSENSE_CLIENT=ca-pub-…` in Vercel prod → redeploy. This single switch
+      reveals everything monetization at once: ads light up, the cookie banner appears, **and the Pro
+      CTA ("Go Pro — ad-free + bigger rooms" + Restore) becomes visible.** Before this, the Pro CTA is
+      hidden on purpose — "ad-free" only makes sense once there are ads to remove, so we don't show
+      the offer (or charge) until ads are live. The Stripe backend stays fully built/ready meanwhile.
 
 ## After launch — watch, don't guess
 A week of real data answers the open questions (query `convex/analytics.ts`):
