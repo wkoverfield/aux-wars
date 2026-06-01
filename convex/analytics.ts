@@ -193,6 +193,97 @@ export const getAllAggregates = query({
   },
 });
 
+// Bounds how many recent events the analysis queries below scan (keeps reads safe
+// for high-volume events like vote_listen; a recent sample is plenty for stats).
+const STATS_SAMPLE_CAP = 10000;
+
+/**
+ * Median/avg time (seconds) players listen before voting — answers "how long do
+ * people actually listen?" and sets the right rating clip length.
+ */
+export const getListenTimeStats = query({
+  args: { days: v.optional(v.number()) },
+  handler: async (ctx, { days = 30 }) => {
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const events = await ctx.db
+      .query("analyticsEvents")
+      .withIndex("by_type_and_timestamp", (q) =>
+        q.eq("eventType", "vote_listen").gte("timestamp", cutoff)
+      )
+      .order("desc")
+      .take(STATS_SAMPLE_CAP);
+    const values = events
+      .map((e) => e.metadata?.value)
+      .filter((v): v is number => typeof v === "number")
+      .sort((a, b) => a - b);
+    if (values.length === 0) return { count: 0, sampledLastNDays: days };
+    const sum = values.reduce((a, b) => a + b, 0);
+    const pct = (p: number) => values[Math.min(values.length - 1, Math.floor(p * values.length))];
+    const toSec = (ms: number) => Math.round(ms / 100) / 10; // ms -> seconds, 1 decimal
+    return {
+      count: values.length,
+      avgSec: toSec(sum / values.length),
+      medianSec: toSec(pct(0.5)),
+      p25Sec: toSec(pct(0.25)),
+      p75Sec: toSec(pct(0.75)),
+      maxSec: toSec(values[values.length - 1]),
+      sampledLastNDays: days,
+    };
+  },
+});
+
+/**
+ * Searches our iTunes/Deezer sources couldn't fill, most frequent first.
+ * The catalog-gap finder (the churn worry made measurable).
+ */
+export const getTopMissingSearches = query({
+  args: { days: v.optional(v.number()), limit: v.optional(v.number()) },
+  handler: async (ctx, { days = 30, limit = 30 }) => {
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const events = await ctx.db
+      .query("analyticsEvents")
+      .withIndex("by_type_and_timestamp", (q) =>
+        q.eq("eventType", "search_no_results").gte("timestamp", cutoff)
+      )
+      .order("desc")
+      .take(STATS_SAMPLE_CAP);
+    const counts: Record<string, number> = {};
+    for (const e of events) {
+      const label = e.metadata?.label;
+      if (label) counts[label] = (counts[label] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([query, count]) => ({ query, count }));
+  },
+});
+
+/**
+ * Where unfinished games die, broken down by phase — turns the 53% completion
+ * "mystery" into "X% in rating, Y% in songSelection, ..." so you know if there's
+ * a real, fixable bottleneck vs. benign drop-off.
+ */
+export const getAbandonmentByPhase = query({
+  args: { days: v.optional(v.number()) },
+  handler: async (ctx, { days = 30 }) => {
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const events = await ctx.db
+      .query("analyticsEvents")
+      .withIndex("by_type_and_timestamp", (q) =>
+        q.eq("eventType", "game_abandoned").gte("timestamp", cutoff)
+      )
+      .order("desc")
+      .take(STATS_SAMPLE_CAP);
+    const byPhase: Record<string, number> = {};
+    for (const e of events) {
+      const phase = e.metadata?.phase || "unknown";
+      byPhase[phase] = (byPhase[phase] || 0) + 1;
+    }
+    return { total: events.length, byPhase, sampledLastNDays: days };
+  },
+});
+
 /**
  * Get a single aggregate count by event type
  */
