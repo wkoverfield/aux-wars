@@ -7,16 +7,21 @@ import { internal } from "./_generated/api";
  * Use ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {...}) for fire-and-forget tracking.
  * Also increments the aggregate count for efficient querying.
  */
+const eventMetadata = v.optional(v.object({
+  roomCode: v.optional(v.string()),
+  playerId: v.optional(v.string()),
+  playerCount: v.optional(v.number()),
+  roundNumber: v.optional(v.number()),
+  totalRounds: v.optional(v.number()),
+  value: v.optional(v.number()),
+  label: v.optional(v.string()),
+  phase: v.optional(v.string()),
+}));
+
 export const trackEvent = internalMutation({
   args: {
     eventType: v.string(),
-    metadata: v.optional(v.object({
-      roomCode: v.optional(v.string()),
-      playerId: v.optional(v.string()),
-      playerCount: v.optional(v.number()),
-      roundNumber: v.optional(v.number()),
-      totalRounds: v.optional(v.number()),
-    })),
+    metadata: eventMetadata,
   },
   handler: async (ctx, { eventType, metadata }) => {
     // Insert the event
@@ -44,6 +49,21 @@ export const trackEvent = internalMutation({
         lastUpdated: Date.now(),
       });
     }
+  },
+});
+
+/**
+ * Public, fire-and-forget event logger for client-side analytics
+ * (pro funnel, search-no-results, listen time, returning device, etc.).
+ * Schedules the internal trackEvent so the client never touches internals.
+ */
+export const logEvent = mutation({
+  args: {
+    eventType: v.string(),
+    metadata: eventMetadata,
+  },
+  handler: async (ctx, { eventType, metadata }) => {
+    await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, { eventType, metadata });
   },
 });
 

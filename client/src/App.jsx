@@ -12,6 +12,7 @@ import ConnectionStatus from "./components/ConnectionStatus";
 import CookieConsent from "./components/CookieConsent";
 import PrivacyPolicy from "./features/legal/PrivacyPolicy";
 import ProSuccess from "./features/legal/ProSuccess";
+import ProRestore from "./features/legal/ProRestore";
 import { ToastProvider } from "./contexts/ToastContext";
 import { RoomProvider } from "./services/RoomProvider";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -43,6 +44,7 @@ export default function App() {
                 <Route index element={<PageTransition><Home /></PageTransition>} />
                 <Route path="privacy" element={<PageTransition><PrivacyPolicy /></PageTransition>} />
                 <Route path="pro/success" element={<PageTransition><ProSuccess /></PageTransition>} />
+                <Route path="pro/restore" element={<PageTransition><ProRestore /></PageTransition>} />
                 <Route path="/lobby" element={<Navigate to="/" replace />} />
                 <Route path="/lobby/:gameCode" element={<GameRouteGuard />}>
                   <Route element={<RoomProviderOutlet />}>

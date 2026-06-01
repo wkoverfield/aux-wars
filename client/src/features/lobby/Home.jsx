@@ -27,6 +27,7 @@ export default function Home() {
   const hostGame = useMutation(api.game.rooms.hostGame);
   const joinGame = useMutation(api.game.rooms.joinGame);
   const createCheckout = useAction(api.stripe.createCheckoutSession);
+  const logEvent = useMutation(api.analytics.logEvent);
   const navigate = useNavigate();
   const { connectionId, clearSession, createSession, session, isSessionValid } = useSession();
   const { showToast } = useToast();
@@ -43,6 +44,12 @@ export default function Home() {
       clearSession();
     }
   }, [session, isSessionValid, clearSession]);
+
+  // Pro funnel: count non-Pro visitors who saw the offer (viewed -> checkout -> purchased)
+  useEffect(() => {
+    if (!isPro) logEvent({ eventType: "pro_cta_viewed" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Handles hosting a new game.
@@ -79,6 +86,7 @@ export default function Home() {
   const handleGoPro = async () => {
     if (goingPro) return;
     setGoingPro(true);
+    logEvent({ eventType: "pro_checkout_started" });
     try {
       const { url } = await createCheckout({ origin: window.location.origin });
       if (url) {
@@ -195,13 +203,21 @@ export default function Home() {
         {isPro ? (
           <span className="text-xs text-[#68d570] font-semibold">★ Pro unlocked — your games are ad-free</span>
         ) : (
-          <button
-            onClick={handleGoPro}
-            disabled={goingPro}
-            className="text-sm text-[#68d570] hover:underline disabled:opacity-60"
-          >
-            {goingPro ? "Opening checkout…" : "Go Pro — ad-free + bigger rooms ($5)"}
-          </button>
+          <div className="flex flex-col items-center gap-1">
+            <button
+              onClick={handleGoPro}
+              disabled={goingPro}
+              className="text-sm text-[#68d570] hover:underline disabled:opacity-60"
+            >
+              {goingPro ? "Opening checkout…" : "Go Pro — ad-free + bigger rooms ($5)"}
+            </button>
+            <button
+              onClick={() => navigate('/pro/restore')}
+              className="text-xs text-gray-400 hover:underline"
+            >
+              Already Pro? Restore
+            </button>
+          </div>
         )}
         <div className="flex items-center gap-4">
           <button

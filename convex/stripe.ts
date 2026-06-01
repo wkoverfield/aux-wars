@@ -83,6 +83,12 @@ export const verifyCheckout = action({
       stripeSessionId: sessionId,
       email: session.customer_details?.email ?? undefined,
     });
+    // Reliable server-side purchase event (fires once per session thanks to the
+    // idempotency check above — whether triggered by the redirect or the webhook).
+    await ctx.runMutation(internal.analytics.trackEvent, {
+      eventType: "pro_purchased",
+      metadata: { value: typeof session.amount_total === "number" ? session.amount_total : undefined },
+    });
     return { proToken };
   },
 });
@@ -107,9 +113,51 @@ export const recordEntitlement = internalMutation({
     await ctx.db.insert("entitlements", {
       proToken,
       stripeSessionId,
-      email,
+      email: email?.toLowerCase(),
       active: true,
       createdAt: Date.now(),
     });
+  },
+});
+
+export const getEntitlementByEmail = internalQuery({
+  args: { email: v.string() },
+  handler: async (ctx, { email }) => {
+    return await ctx.db
+      .query("entitlements")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .first();
+  },
+});
+
+export const getEntitlementByToken = internalQuery({
+  args: { proToken: v.string() },
+  handler: async (ctx, { proToken }) => {
+    return await ctx.db
+      .query("entitlements")
+      .withIndex("by_token", (q) => q.eq("proToken", proToken))
+      .first();
+  },
+});
+
+/** Restore Pro on a new device using the email used at checkout. */
+export const restoreByEmail = action({
+  args: { email: v.string() },
+  handler: async (ctx, { email }): Promise<{ proToken: string | null }> => {
+    const ent = await ctx.runQuery(internal.stripe.getEntitlementByEmail, {
+      email: email.trim().toLowerCase(),
+    });
+    return { proToken: ent?.active ? ent.proToken : null };
+  },
+});
+
+/** Validate a Pro code (the token) so it can be re-attached on another device. */
+export const validateProToken = action({
+  args: { proToken: v.string() },
+  handler: async (ctx, { proToken }): Promise<{ valid: boolean }> => {
+    const ent = await ctx.runQuery(internal.stripe.getEntitlementByToken, {
+      proToken: proToken.trim(),
+    });
+    return { valid: Boolean(ent?.active) };
   },
 });

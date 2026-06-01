@@ -6,11 +6,13 @@ import { setProToken } from '../../services/pro';
 
 /**
  * /pro/success — Stripe redirects here after checkout with ?session_id=...
- * We verify the session server-side, store the issued proToken, and confirm.
+ * We verify the session server-side, store the issued proToken, and show the
+ * Pro code so the buyer can restore Pro on any other device.
  */
 export default function ProSuccess() {
   const verifyCheckout = useAction(api.stripe.verifyCheckout);
   const [status, setStatus] = useState('verifying'); // verifying | success | pending | error
+  const [code, setCode] = useState(null);
   const ranRef = useRef(false);
 
   useEffect(() => {
@@ -26,6 +28,7 @@ export default function ProSuccess() {
       .then((res) => {
         if (res?.proToken) {
           setProToken(res.proToken);
+          setCode(res.proToken);
           setStatus('success');
         } else {
           setStatus('pending'); // payment not completed/confirmed yet
@@ -46,10 +49,20 @@ export default function ProSuccess() {
       {status === 'success' && (
         <>
           <h1 className="text-3xl font-bold mb-3">You're Pro! 🎉</h1>
-          <p className="text-gray-300 max-w-md mb-8">
+          <p className="text-gray-300 max-w-md mb-6">
             Thanks for supporting Aux Wars. Games you host are now <strong>ad-free</strong> for
             everyone in the room and support <strong>bigger lobbies</strong>.
           </p>
+          {code && (
+            <div className="mb-8 w-full max-w-md">
+              <p className="text-xs text-gray-400 mb-2">
+                Your Pro code — save this to restore Pro on another device or browser:
+              </p>
+              <code className="block break-all bg-[#181818] border border-gray-700 rounded-lg px-4 py-3 text-sm text-[#68d570] select-all">
+                {code}
+              </code>
+            </div>
+          )}
           <Link
             to="/"
             className="px-6 py-3 rounded-full font-bold text-black bg-[#68d570] hover:bg-[#7de884] transition-colors"
@@ -62,22 +75,24 @@ export default function ProSuccess() {
       {status === 'pending' && (
         <>
           <h1 className="text-2xl font-bold mb-3">Payment not confirmed</h1>
-          <p className="text-gray-300 max-w-md mb-8">
+          <p className="text-gray-300 max-w-md mb-6">
             We couldn't confirm a completed payment for this session yet. If you were charged,
-            give it a moment and refresh — otherwise you can try again.
+            give it a moment and refresh — or restore with the email you used.
           </p>
-          <Link to="/" className="text-[#68d570] underline">Back to Aux Wars</Link>
+          <Link to="/pro/restore" className="text-[#68d570] underline mb-2">Restore Pro</Link>
+          <Link to="/" className="text-gray-400 underline">Back to Aux Wars</Link>
         </>
       )}
 
       {status === 'error' && (
         <>
           <h1 className="text-2xl font-bold mb-3">Something went wrong</h1>
-          <p className="text-gray-300 max-w-md mb-8">
-            We couldn't verify your purchase. If you were charged, reach out via the Feedback
-            button and we'll sort it out.
+          <p className="text-gray-300 max-w-md mb-6">
+            We couldn't verify your purchase. If you were charged, try restoring with your email,
+            or reach out via the Feedback button.
           </p>
-          <Link to="/" className="text-[#68d570] underline">Back to Aux Wars</Link>
+          <Link to="/pro/restore" className="text-[#68d570] underline mb-2">Restore Pro</Link>
+          <Link to="/" className="text-gray-400 underline">Back to Aux Wars</Link>
         </>
       )}
     </div>

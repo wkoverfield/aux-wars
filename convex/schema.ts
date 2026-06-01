@@ -130,6 +130,10 @@ export default defineSchema({
       playerCount: v.optional(v.number()),
       roundNumber: v.optional(v.number()),
       totalRounds: v.optional(v.number()),
+      // Generic fields so new metrics don't need a schema change each time:
+      value: v.optional(v.number()), // durations (ms), counts, etc.
+      label: v.optional(v.string()), // search query, phase name, "new"/"returning", etc.
+      phase: v.optional(v.string()), // game phase for abandonment tracking
     })),
   })
     .index("by_type", ["eventType"])
@@ -154,7 +158,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_token", ["proToken"])
-    .index("by_session", ["stripeSessionId"]),
+    .index("by_session", ["stripeSessionId"])
+    .index("by_email", ["email"]),
 });
 
 
