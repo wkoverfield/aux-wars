@@ -1,20 +1,23 @@
 /**
- * Express Server - YouTube Search Proxy
+ * Express Server - Music Search Proxy
  *
- * PURPOSE: Provides server-side YouTube search to bypass CORS restrictions
- * and enable use of the youtube-search-api scraping package.
+ * PURPOSE: Provides server-side music search using the iTunes Search API and
+ * Deezer API, returning 30-second preview clips that play via a plain HTML5
+ * <audio> element on the client.
  *
  * ARCHITECTURE NOTE: This server is intentionally separate from Convex.
  * - Convex: Handles all real-time game logic, state, mutations, queries
- * - Express: Handles YouTube search scraping (youtube-search-api package)
+ * - Express: Handles external music search (iTunes + Deezer) to avoid CORS
  *
- * Why not use Convex for YouTube search? See: convex/youtube.ts for details.
- * TL;DR: youtube-search-api package is incompatible with Convex runtime.
+ * Why these sources? Both expose free, no-key search endpoints that return a
+ * direct 30s `preview` audio URL. Unlike embedded YouTube, this lets us run our
+ * own ads without violating YouTube's API ToS and removes YouTube's own
+ * pre-roll ads from snippet playback. Tradeoff: catalog is "officially released"
+ * music only (loses bootleg/UGC/meme audio) and search is name-based.
  */
 import express from "express";
 import http from "http";
 import cors from "cors";
-import youtubesearchapi from "youtube-search-api";
 
 export const app = express();
 export const server = http.createServer(app);
@@ -62,21 +65,24 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'Aux Wars YouTube Search Proxy',
-    service: 'YouTube Search API',
+    message: 'Aux Wars Music Search Proxy',
+    service: 'iTunes + Deezer Search',
     timestamp: new Date().toISOString()
   });
 });
 
+const SEARCH_LIMIT = 20;
+const FETCH_TIMEOUT_MS = 8000;
+
 /**
- * YouTube Search Endpoint
- * Provides server-side YouTube search to bypass CORS restrictions
+ * Music Search Endpoint
+ * Searches iTunes + Deezer in parallel for tracks with 30s preview clips.
  *
- * @route POST /api/youtube/search
+ * @route POST /api/music/search  (alias: /api/youtube/search for rollout safety)
  * @body {string} query - Search query (min 2 characters)
  * @returns {Object} { tracks: Array } - Array of transformed track objects
  */
-app.post('/api/youtube/search', async (req, res) => {
+async function handleSearch(req, res) {
   try {
     const { query } = req.body;
 
@@ -84,82 +90,159 @@ app.post('/api/youtube/search', async (req, res) => {
       return res.status(400).json({ error: 'Valid search query is required' });
     }
 
-    const result = await youtubesearchapi.GetListByKeyword(
-      `${query} music`,
-      false, // not playlist
-      20,    // limit
-      [{type: "video"}] // only videos
-    );
+    const term = query.trim();
 
-    if (!result || !result.items || !Array.isArray(result.items)) {
-      return res.json({ tracks: [] });
-    }
+    // Query both sources in parallel; a failure in one must not sink the other.
+    const [itunesResults, deezerResults] = await Promise.all([
+      searchITunes(term).catch((e) => {
+        console.error('iTunes search failed:', e?.message || e);
+        return [];
+      }),
+      searchDeezer(term).catch((e) => {
+        console.error('Deezer search failed:', e?.message || e);
+        return [];
+      }),
+    ]);
 
-    const tracks = result.items
-      .map(transformToTrack)
-      .filter(track => track !== null); // Remove any failed transformations
+    // Merge + relevance-rank across both sources, then cap.
+    const tracks = mergeTracks(itunesResults, deezerResults, term).slice(0, SEARCH_LIMIT);
 
     res.json({ tracks });
-
   } catch (error) {
-    console.error('YouTube search failed:', error);
+    console.error('Music search failed:', error);
     res.status(500).json({ error: 'Search service temporarily unavailable' });
   }
-});
+}
+
+app.post('/api/music/search', handleSearch);
+// Backwards-compatible alias so already-deployed clients keep working during rollout.
+app.post('/api/youtube/search', handleSearch);
 
 /**
- * Transforms YouTube search result to app's expected format
- * @param {Object} item - YouTube search result item
- * @returns {Object} Transformed track object
+ * Fetch JSON with a timeout so a slow upstream can't hang the request.
  */
-function transformToTrack(item) {
-  if (!item || !item.id) {
-    return null;
+async function fetchJson(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Upstream responded ${response.status}`);
+    }
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
   }
+}
 
-  // Try different thumbnail property paths
-  const thumbnailUrl =
-    item.thumbnail?.url ||
-    item.thumbnails?.[0]?.url ||
-    item.thumbnails?.high?.url ||
-    item.thumbnails?.medium?.url ||
-    item.thumbnails?.default?.url ||
-    `https://i.ytimg.com/vi/${item.id}/mqdefault.jpg`; // Standard YouTube thumbnail format
+/**
+ * iTunes Search API → app track shape.
+ * Docs: https://itunes.apple.com/search?term=...&media=music&entity=song
+ */
+async function searchITunes(query) {
+  const params = new URLSearchParams({
+    term: query,
+    media: 'music',
+    entity: 'song',
+    limit: String(SEARCH_LIMIT),
+    country: 'US',
+  });
+  const data = await fetchJson(`https://itunes.apple.com/search?${params.toString()}`);
+  const results = Array.isArray(data?.results) ? data.results : [];
+  return results.map(mapItunesTrack).filter(Boolean);
+}
 
+/**
+ * Deezer search API → app track shape.
+ * Docs: https://api.deezer.com/search?q=...
+ */
+async function searchDeezer(query) {
+  const params = new URLSearchParams({ q: query, limit: String(SEARCH_LIMIT) });
+  const data = await fetchJson(`https://api.deezer.com/search?${params.toString()}`);
+  const results = Array.isArray(data?.data) ? data.data : [];
+  return results.map(mapDeezerTrack).filter(Boolean);
+}
+
+function mapItunesTrack(item) {
+  if (!item || !item.trackId || !item.previewUrl) return null;
+  const artwork = (item.artworkUrl100 || '').replace('100x100bb', '300x300bb');
   return {
-    id: item.id,
-    name: decodeHTMLEntities(item.title),
-    artists: [{ name: decodeHTMLEntities(item.channelTitle || 'Unknown Artist') }],
+    id: `itunes:${item.trackId}`,
+    name: item.trackName || 'Unknown Track',
+    artists: [{ name: item.artistName || 'Unknown Artist' }],
     album: {
-      name: "YouTube",
-      images: [
-        {
-          url: thumbnailUrl
-        }
-      ]
+      name: item.collectionName || '',
+      images: [{ url: artwork }],
     },
-    preview_url: `https://www.youtube.com/embed/${item.id}`,
-    duration_ms: 0, // Duration not available in search results
-    external_url: `https://www.youtube.com/watch?v=${item.id}`
+    preview_url: item.previewUrl,
+    duration_ms: item.trackTimeMillis || 0,
+    external_url: item.trackViewUrl || '',
+  };
+}
+
+function mapDeezerTrack(item) {
+  if (!item || !item.id || !item.preview) return null;
+  const album = item.album || {};
+  return {
+    id: `deezer:${item.id}`,
+    name: item.title || 'Unknown Track',
+    artists: [{ name: item.artist?.name || 'Unknown Artist' }],
+    album: {
+      name: album.title || '',
+      images: [{ url: album.cover_medium || album.cover_big || album.cover || '' }],
+    },
+    preview_url: item.preview,
+    duration_ms: (item.duration || 0) * 1000,
+    external_url: item.link || '',
   };
 }
 
 /**
- * Decodes HTML entities in text
- * @param {string} text - Text with HTML entities
- * @returns {string} Decoded text
+ * Merge two result lists, de-duplicating by normalized "name|artist", then
+ * relevance-rank against the query so the best match from EITHER source floats
+ * to the top — instead of dumping all of source A before any of source B
+ * (which buried exact matches past the result cap).
  */
-function decodeHTMLEntities(text) {
-  if (!text) return text;
+function mergeTracks(primary, secondary, query = '') {
+  const seen = new Set();
+  const merged = [];
+  for (const track of [...primary, ...secondary]) {
+    if (!track || !track.preview_url) continue;
+    const key = dedupeKey(track);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(track);
+  }
 
-  return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&#x2F;/g, '/')
-    .replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec))
-    .replace(/&#x([a-fA-F0-9]+);/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
+  const tokens = query.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
+  const score = (track) => {
+    const name = (track.name || '').toLowerCase();
+    const artist = (track.artists?.[0]?.name || '').toLowerCase();
+    let covered = 0; // distinct query words found anywhere (the main signal)
+    let artistHits = 0; // mild tiebreak toward artist matches
+    for (const tok of tokens) {
+      const inName = name.includes(tok);
+      const inArtist = artist.includes(tok);
+      if (inName || inArtist) covered += 1;
+      if (inArtist) artistHits += 1;
+    }
+    let s = covered * 2 + artistHits;
+    // Deprioritize obvious non-original variants when better matches exist.
+    if (/instrumental|karaoke|tribute|\bcover\b|made famous|originally performed/i.test(name)) {
+      s -= 3;
+    }
+    return s;
+  };
+
+  // Stable sort: equal scores keep their original (source) order.
+  return merged
+    .map((track, i) => ({ track, i, s: score(track) }))
+    .sort((a, b) => b.s - a.s || a.i - b.i)
+    .map((x) => x.track);
+}
+
+function dedupeKey(track) {
+  const name = (track.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const artist = (track.artists?.[0]?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return `${name}|${artist}`;
 }

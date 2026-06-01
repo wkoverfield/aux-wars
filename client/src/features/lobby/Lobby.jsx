@@ -7,11 +7,13 @@ import { motion } from "framer-motion";
 import PlayerList from "../../components/PlayerList";
 import SettingsModal from "../../components/SettingsModal";
 import SettingsPreview from "../../components/SettingsPreview";
+import AdSlot from "../../components/AdSlot";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 // GameContext removed - using RoomProvider's Convex queries directly
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
+import { getPackIdsForPrompts } from "../../data/promptCategories";
 import logo from "../../assets/aux-wars-logo.svg";
 
 /**
@@ -45,6 +47,7 @@ export default function Lobby() {
   const leaveGame = useMutation(api.game.rooms.leaveGame);
   const kickPlayer = useMutation(api.game.rooms.kickPlayer);
   const startGame = useMutation(api.game.flow.startGame);
+  const logPromptPacksUsed = useMutation(api.analytics.logPromptPacksUsed);
   const hasJoinedGame = useRef(false);
 
   // Initialize game code and name once on mount
@@ -228,6 +231,12 @@ export default function Lobby() {
     }
     if (!session?.playerId) return;
     await startGame({ code: gameCode, playerId: session.playerId });
+
+    // Track which prompt packs were used (fire-and-forget; never block game start)
+    const packIds = getPackIdsForPrompts(room?.settings?.selectedPrompts || []);
+    if (packIds.length > 0) {
+      logPromptPacksUsed({ packIds }).catch(() => {});
+    }
   };
 
   return (
@@ -273,8 +282,8 @@ export default function Lobby() {
                   <p className="text-2xl">{gameCode}</p>
                 </div>
                 <div className="lobby-container rounded-md lobby-count flex flex-col gap-2">
-                  <p className="text-xs font-normal">Players</p>
-                  <p className="text-2xl">{players.length}/8</p>
+                  <p className="text-xs font-normal">{room?.settings?.hostPro ? 'Players · Pro' : 'Players'}</p>
+                  <p className="text-2xl">{players.length}/{room?.settings?.hostPro ? 50 : 8}</p>
                 </div>
               </div>
               <div className="flex flex-col items-center gap-5">
@@ -314,6 +323,8 @@ export default function Lobby() {
                 currentPlayerId={session?.playerId}
                 onKick={handleKickPlayer}
               />
+              {/* Ad-safe: lobby is a waiting surface; scrolls with the list, ad-free in pro rooms */}
+              <AdSlot slot="lobby" />
             </div>
           </div>
           {isHost && allPlayersReady && players.length > 2 && (

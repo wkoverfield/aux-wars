@@ -23,6 +23,7 @@ export default defineSchema({
       selectedPrompts: v.array(v.string()),
       enablePromptVoting: v.optional(v.boolean()), // default true - let players vote to skip prompts
       anonymousMode: v.optional(v.boolean()), // default false - hide submitter names during rating
+      hostPro: v.optional(v.boolean()), // host purchased the pro pack: ad-free room + raised player cap
     }),
     usedPrompts: v.optional(v.array(v.string())), // Tracks prompts used this game to avoid repeats
     selectionStartedAt: v.optional(v.number()), // Timestamp when song selection phase started
@@ -129,6 +130,10 @@ export default defineSchema({
       playerCount: v.optional(v.number()),
       roundNumber: v.optional(v.number()),
       totalRounds: v.optional(v.number()),
+      // Generic fields so new metrics don't need a schema change each time:
+      value: v.optional(v.number()), // durations (ms), counts, etc.
+      label: v.optional(v.string()), // search query, phase name, "new"/"returning", etc.
+      phase: v.optional(v.string()), // game phase for abandonment tracking
     })),
   })
     .index("by_type", ["eventType"])
@@ -141,6 +146,20 @@ export default defineSchema({
     count: v.number(),
     lastUpdated: v.number(),
   }).index("by_type", ["eventType"]),
+
+  // Pro pack purchases. A proToken is issued after a verified Stripe payment and
+  // stored on the buyer's device; hosting with it flags the room as hostPro
+  // (ad-free + raised player cap).
+  entitlements: defineTable({
+    proToken: v.string(),
+    stripeSessionId: v.string(),
+    email: v.optional(v.string()),
+    active: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_token", ["proToken"])
+    .index("by_session", ["stripeSessionId"])
+    .index("by_email", ["email"]),
 });
 
 

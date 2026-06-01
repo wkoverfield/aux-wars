@@ -65,7 +65,7 @@ export default function HowToPlayModal({ showModal, onClose }) {
                   </li>
                   <li className="flex items-start gap-3">
                     <span className="text-[#68d570] mt-1">▸</span>
-                    <p>Each round, you'll get a creative prompt and a short time to search YouTube for the perfect song.</p>
+                    <p>Each round, you'll get a creative prompt and a short time to search for the perfect song.</p>
                   </li>
                   <li className="flex items-start gap-3">
                     <span className="text-[#68d570] mt-1">▸</span>
@@ -95,7 +95,7 @@ export default function HowToPlayModal({ showModal, onClose }) {
                     <p className="text-gray-300 text-sm">🚫 You cannot rate your own song.</p>
                   </div>
                   <div className="bg-[#242424] p-3 rounded-md border border-gray-700">
-                    <p className="text-gray-300 text-sm">🎵 No account needed - it all runs on YouTube.</p>
+                    <p className="text-gray-300 text-sm">🎵 No account needed — just jump in and play.</p>
                   </div>
                 </div>
               </section>

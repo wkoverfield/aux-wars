@@ -1,6 +1,7 @@
 /**
- * Server-side YouTube Search API service
- * Calls our backend endpoint which uses youtube-search-api to bypass CORS restrictions
+ * Music search service
+ * Calls our Express backend (/api/music/search) which queries the iTunes
+ * Search API + Deezer and returns tracks with 30-second preview clips.
  */
 
 // In-memory cache with TTL (Time To Live)
@@ -14,10 +15,8 @@ const pendingRequests = new Map();
 const errorCounts = new Map();
 const MAX_RETRIES = 3;
 
-// Server endpoint URL
-
 /**
- * Performs the actual YouTube search with error handling
+ * Performs the actual music search with error handling
  * @param {string} query - Search query
  * @param {string} cacheKey - Cache key for storing results
  * @returns {Promise<Array>} Array of track objects
@@ -26,8 +25,8 @@ async function performSearch(query, cacheKey) {
   try {
     // Use Express endpoint via Vite proxy in dev, explicit URL in prod
     const baseUrl = import.meta.env.VITE_SERVER_URL || '';
-    const endpoint = baseUrl ? `${baseUrl}/api/youtube/search` : '/api/youtube/search';
-    
+    const endpoint = baseUrl ? `${baseUrl}/api/music/search` : '/api/music/search';
+
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -41,14 +40,14 @@ async function performSearch(query, cacheKey) {
     }
 
     const data = await response.json();
-    
+
     if (data.error) {
       throw new Error(data.error);
     }
 
     const tracks = Array.isArray(data.tracks) ? data.tracks : [];
-    
-    
+
+
     // Cache successful results
     searchCache.set(cacheKey, {
       results: tracks,
@@ -61,24 +60,24 @@ async function performSearch(query, cacheKey) {
     return tracks;
 
   } catch (error) {
-    
+
     // Increment error count for this query
     const currentErrors = errorCounts.get(cacheKey) || 0;
     errorCounts.set(cacheKey, currentErrors + 1);
-    
+
     // Return cached stale data if available
     const stale = searchCache.get(cacheKey);
     if (stale) {
       return stale.results;
     }
-    
+
     // If no cache available, return empty array rather than throwing
     return [];
   }
 }
 
 /**
- * Searches YouTube for music videos with caching and request deduplication
+ * Searches for music tracks with caching and request deduplication
  * @param {string} query - Search query
  * @returns {Promise<Array>} Array of track objects
  */
@@ -89,14 +88,14 @@ export async function searchTracks(query) {
   }
 
   const cacheKey = query.toLowerCase().trim();
-  
+
   // Check if we should skip due to too many recent errors
   const errorCount = errorCounts.get(cacheKey) || 0;
   if (errorCount >= MAX_RETRIES) {
     const stale = searchCache.get(cacheKey);
     return stale ? stale.results : [];
   }
-  
+
   // Check cache first
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -111,18 +110,18 @@ export async function searchTracks(query) {
   // Create new request with timeout
   const requestPromise = Promise.race([
     performSearch(query, cacheKey),
-    new Promise((_, reject) => 
+    new Promise((_, reject) =>
       setTimeout(() => reject(new Error('Search timeout')), 10000)
     )
   ]);
-  
+
   pendingRequests.set(cacheKey, requestPromise);
 
   try {
     const results = await requestPromise;
     return results;
   } catch (error) {
-    
+
     // Return cached data if available, even if stale
     const stale = searchCache.get(cacheKey);
     return stale ? stale.results : [];
@@ -138,7 +137,7 @@ export async function searchTracks(query) {
  */
 export function getCachedResults(query) {
   if (!query) return null;
-  
+
   const cacheKey = query.toLowerCase().trim();
   const cached = searchCache.get(cacheKey);
   return cached ? cached.results : null;
@@ -151,7 +150,7 @@ export function getCachedResults(query) {
  */
 export function cacheSearchResults(query, results) {
   if (!query || !Array.isArray(results)) return;
-  
+
   const cacheKey = query.toLowerCase().trim();
   searchCache.set(cacheKey, {
     results: results,
@@ -165,18 +164,18 @@ export function cacheSearchResults(query, results) {
 export function cleanupCache() {
   const now = Date.now();
   const expiredKeys = [];
-  
+
   for (const [key, value] of searchCache.entries()) {
     if (now - value.timestamp > CACHE_TTL * 2) { // Keep for 2x TTL
       expiredKeys.push(key);
     }
   }
-  
+
   expiredKeys.forEach(key => {
     searchCache.delete(key);
     errorCounts.delete(key);
   });
-  
+
 }
 
 /**
@@ -202,7 +201,7 @@ export function isTokenValid() {
 export function getTokenDebugInfo() {
   return {
     authenticated: true,
-    service: "Server-side YouTube Search (No Auth)",
+    service: "Music Search (iTunes + Deezer, No Auth)",
     requiresUserAuth: false,
     cacheStats: getCacheStats()
   };

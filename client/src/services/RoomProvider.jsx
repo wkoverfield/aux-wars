@@ -26,4 +26,11 @@ export function useRoom() {
   return ctx;
 }
 
+// Non-throwing variant: returns null when used outside a RoomProvider (e.g. the
+// Home screen). Used by AdSlot so it can self-suppress ads in pro rooms without
+// breaking on screens that have no room context.
+export function useRoomOptional() {
+  return useContext(RoomContext);
+}
+
 

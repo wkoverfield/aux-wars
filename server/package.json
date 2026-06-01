@@ -7,10 +7,6 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^5.1.0",
-    "youtube-search-api": "^2.0.1"
-  },
-  "overrides": {
-    "axios": "^1.15.2"
+    "express": "^5.1.0"
   }
 }

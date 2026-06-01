@@ -1,13 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useMutation } from 'convex/react';
+import { api } from '../../../../convex/_generated/api';
 import record from '../../assets/record.svg';
 import SearchBar from '../../components/SearchBar';
-import { YouTubePlayerWithRef } from '../../components/YouTubePlayer';
+import AudioPreviewPlayer from '../../components/AudioPreviewPlayer';
 import { useToast } from '../../contexts/ToastContext';
 
 /**
  * RatingScreen component provides an interface for rating songs during the game.
- * Includes song playback, album art display, and a 5-star rating system.
- * In spectator mode, shows the video/audio but hides voting controls (for own song).
+ * Plays the song's 30s preview clip (HTML5 audio), shows album art, and a 5-star
+ * rating system. In spectator mode, shows the player but hides voting controls
+ * (for the player's own song).
  *
  * @param {Object} props - Component props
  * @param {string} props.currentPrompt - The current game prompt
@@ -16,7 +19,7 @@ import { useToast } from '../../contexts/ToastContext';
  * @param {number} props.currentIndex - Current song index in the rating sequence
  * @param {number} props.totalSongs - Total number of songs to rate
  * @param {boolean} props.anonymousMode - Whether to hide who submitted the song
- * @param {boolean} props.spectatorMode - If true, show video but hide rating UI (for viewing own song)
+ * @param {boolean} props.spectatorMode - If true, show player but hide rating UI (viewing own song)
  * @param {Function} props.onAutoSubmit - Optional callback for auto-submit on timeout (called with rating)
  * @returns {JSX.Element} Rendered component
  */
@@ -32,27 +35,13 @@ const RatingScreen = ({
 }) => {
   const [selectedRating, setSelectedRating] = useState(-1);
   const [hasSubmitted, setHasSubmitted] = useState(false);
-  const [snippetProgress, setSnippetProgress] = useState(0); // 0-1 progress within snippet
+  const [progress, setProgress] = useState(0); // 0-1 playback progress
+  const [duration, setDuration] = useState(0);
   const { showToast } = useToast();
-  const playerRef = useRef(null);
-  const lastValidTimeRef = useRef(null); // Track last valid position for restore
+  const logEvent = useMutation(api.analytics.logEvent);
+  const clipStartRef = useRef(Date.now());
 
-  // Extract YouTube video ID from preview URL
-  const getYouTubeVideoId = (url) => {
-    if (!url) return null;
-    const match = url.match(/embed\/([a-zA-Z0-9_-]{11})/);
-    return match ? match[1] : null;
-  };
-  
-  const videoId = getYouTubeVideoId(songToRate?.previewUrl);
-  
-  // Extract snippet times if available
-  const startTime = songToRate?.snippet?.startTime || 0;
-  const endTime = songToRate?.snippet?.endTime || 0;
-
-  // Snippet duration for display
-  const snippetDuration = endTime - startTime;
-  const hasSnippet = songToRate?.snippet && endTime > 0;
+  const previewUrl = songToRate?.previewUrl;
 
   // Format time as M:SS
   const formatTime = (seconds) => {
@@ -60,42 +49,6 @@ const RatingScreen = ({
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
-
-  // Monitor playback position, enforce snippet bounds, and update progress
-  useEffect(() => {
-    // Skip if no snippet (full song mode) or no valid end time
-    if (!hasSnippet) return;
-
-    // Initialize last valid time to start
-    lastValidTimeRef.current = startTime;
-
-    const interval = setInterval(() => {
-      if (playerRef.current?.getCurrentTime) {
-        const currentTime = playerRef.current.getCurrentTime();
-
-        // Check if within valid bounds
-        const isWithinBounds = currentTime >= startTime - 0.5 && currentTime <= endTime + 0.5;
-
-        if (isWithinBounds) {
-          // Update progress and save this as last valid position
-          const progress = Math.max(0, Math.min(1, (currentTime - startTime) / snippetDuration));
-          setSnippetProgress(progress);
-          lastValidTimeRef.current = currentTime;
-        } else {
-          // Outside bounds - restore to last valid position (or start if near end)
-          const restoreTime = currentTime > endTime
-            ? startTime // If past end, loop to start (natural behavior)
-            : lastValidTimeRef.current || startTime; // If before start, go back to where they were
-
-          playerRef.current.seekTo(restoreTime);
-          const progress = Math.max(0, Math.min(1, (restoreTime - startTime) / snippetDuration));
-          setSnippetProgress(progress);
-        }
-      }
-    }, 200); // Faster updates for smoother progress bar
-
-    return () => clearInterval(interval);
-  }, [startTime, endTime, snippetDuration, hasSnippet]);
 
   /**
    * Handles clicking a rating record
@@ -112,6 +65,8 @@ const RatingScreen = ({
   const handleSubmit = () => {
     if (selectedRating >= 0) {
       setHasSubmitted(true);
+      // How long they listened before voting (informs clip length / pacing).
+      logEvent({ eventType: "vote_listen", metadata: { value: Date.now() - clipStartRef.current } });
       // Add 1 to the index to get rating from 1-5 instead of 0-4
       onSubmitRating(songToRate.songId, selectedRating + 1);
     } else {
@@ -138,11 +93,9 @@ const RatingScreen = ({
   useEffect(() => {
     return () => {
       // Cleanup runs when songId changes or component unmounts
-      // Check if we had a pending rating for the previous song
       const prev = prevSongRef.current;
       const autoSubmit = onAutoSubmitRef.current;
       if (prev.songId && prev.rating >= 0 && !prev.submitted && autoSubmit) {
-        // Auto-submit the pending rating for the previous song
         autoSubmit(prev.songId, prev.rating + 1); // +1 to convert 0-4 to 1-5
       }
     };
@@ -152,6 +105,8 @@ const RatingScreen = ({
   useEffect(() => {
     setSelectedRating(-1);
     setHasSubmitted(false);
+    setProgress(0);
+    clipStartRef.current = Date.now(); // reset listen timer per song
   }, [songToRate?.songId]);
 
   return (
@@ -160,48 +115,56 @@ const RatingScreen = ({
       <div className="w-full mb-2 sm:mb-4 overflow-x-auto">
         <SearchBar value={currentPrompt || ''} readOnly onChange={() => {}} />
       </div>
-      
+
       {/* Main content vertically centered */}
       <div className="flex flex-col items-center flex-grow justify-center w-full max-w-md mx-auto">
         {/* Song counter */}
         <div className="mb-2 sm:mb-4 text-white text-center">
           <p>Rating Song {currentIndex + 1} of {totalSongs}</p>
         </div>
-        {/* Removed redundant album cover - YouTube player shows thumbnail */}
 
-        {/* YouTube Player */}
-        {videoId && (
-          <div className="mb-2 w-full max-w-md flex justify-center" style={{ height: '260px' }}>
-            <YouTubePlayerWithRef
-              ref={playerRef}
-              videoId={videoId}
-              autoplay={false}
-              startTime={startTime}
-              endTime={endTime}
+        {/* Album art */}
+        {songToRate?.albumCover && (
+          <div className="mb-4 flex justify-center">
+            <img
+              src={songToRate.albumCover}
+              alt={`${songToRate.name} album art`}
+              className="w-48 h-48 sm:w-56 sm:h-56 rounded-lg object-cover shadow-lg"
             />
           </div>
         )}
 
-        {/* Snippet Progress Indicator */}
-        {hasSnippet && (
+        {/* Audio preview player */}
+        {previewUrl && (
+          <div className="mb-4 flex justify-center">
+            <AudioPreviewPlayer
+              src={previewUrl}
+              autoPlay
+              loop
+              showControls
+              onReady={(d) => setDuration(d)}
+              onTimeUpdate={(t) => setProgress(duration > 0 ? Math.min(1, t / duration) : 0)}
+            />
+          </div>
+        )}
+
+        {/* Playback progress indicator */}
+        {previewUrl && duration > 0 && (
           <div className="w-full max-w-md mb-4 px-2">
             <div className="flex items-center gap-3">
               <span className="text-xs text-gray-400 min-w-[40px]">
-                {formatTime(snippetProgress * snippetDuration)}
+                {formatTime(progress * duration)}
               </span>
               <div className="flex-1 h-1.5 bg-[#333] rounded-full overflow-hidden">
                 <div
                   className="h-full bg-[#1db954] rounded-full transition-all duration-200"
-                  style={{ width: `${snippetProgress * 100}%` }}
+                  style={{ width: `${progress * 100}%` }}
                 />
               </div>
               <span className="text-xs text-gray-400 min-w-[40px] text-right">
-                {formatTime(snippetDuration)}
+                {formatTime(duration)}
               </span>
             </div>
-            <p className="text-xs text-gray-500 text-center mt-1">
-              Snippet: {formatTime(startTime)} - {formatTime(endTime)}
-            </p>
           </div>
         )}
 
@@ -260,4 +223,4 @@ const RatingScreen = ({
   );
 };
 
-export default RatingScreen; 
+export default RatingScreen;

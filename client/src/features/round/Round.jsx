@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 // import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { searchTracks, getCachedResults } from "../../services/serverYoutubeApi";
+import { searchTracks, getCachedResults } from "../../services/musicSearch";
 import { useToast } from "../../contexts/ToastContext";
 import RoundStart from "./RoundStart";
 import SongSelection from "./SongSelection";
@@ -34,6 +34,7 @@ export default function Round() {
   const currentRatingStatus = useQuery(api.game.flow.getCurrentRatingStatus, gameCode ? { code: gameCode } : 'skip');
   const submitSong = useMutation(api.game.flow.submitSong);
   const submitRating = useMutation(api.game.flow.submitRating);
+  const logEvent = useMutation(api.analytics.logEvent);
   const { showToast } = useToast();
   const { session, clearSession, connectionId, updateSession } = useSession();
 
@@ -150,28 +151,12 @@ export default function Round() {
         trackToSubmit && !hasAutoSubmittedRef.current) {
       hasAutoSubmittedRef.current = true;
 
-      // If in snippet selector, get user's chosen time; otherwise use defaults
+      // Preview clips are the whole snippet, so snippet is always null.
       if (showSnippetSelector && selectedTrack) {
         const currentSelection = snippetSelectorRef.current?.getCurrentSelection?.();
-        if (currentSelection) {
-          handleConfirmSongWithSnippet(currentSelection);
-        } else {
-          // Fallback if ref not available
-          const snippetDuration = room?.settings?.snippetDuration ?? 30;
-          const defaultSelection = {
-            ...selectedTrack,
-            snippet: snippetDuration === 0 ? null : { startTime: 30, endTime: 30 + snippetDuration }
-          };
-          handleConfirmSongWithSnippet(defaultSelection);
-        }
+        handleConfirmSongWithSnippet(currentSelection || { ...selectedTrack, snippet: null });
       } else {
-        // Not in snippet selector OR only have pendingTrack - use default snippet times
-        const snippetDuration = room?.settings?.snippetDuration ?? 30;
-        const defaultSelection = {
-          ...trackToSubmit,
-          snippet: snippetDuration === 0 ? null : { startTime: 30, endTime: 30 + snippetDuration }
-        };
-        handleConfirmSongWithSnippet(defaultSelection);
+        handleConfirmSongWithSnippet({ ...trackToSubmit, snippet: null });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -235,9 +220,8 @@ export default function Round() {
   // Phase changes handled by GameRouteGuard
 
   /**
-   * Handles YouTube track search with caching and debouncing via Express server
-   * NOTE: Uses Express endpoint instead of Convex Action because youtube-search-api
-   * is incompatible with Convex's Node.js runtime (package resolves as undefined)
+   * Handles music track search with caching and debouncing via Express server.
+   * The Express proxy queries iTunes + Deezer and returns 30s preview clips.
    */
   useEffect(() => {
     if (!searchTerm.trim()) {
@@ -260,7 +244,15 @@ export default function Round() {
 
         if (Array.isArray(result)) {
           setSearchResults(result);
-          setSearchError(result.length === 0 ? "No songs found. Try different keywords." : null);
+          if (result.length === 0) {
+            setSearchError("No songs found. Try different keywords.");
+            // Catalog-gap signal: which searches our sources can't fill.
+            if (searchTerm.trim().length >= 3) {
+              logEvent({ eventType: "search_no_results", metadata: { label: searchTerm.trim().slice(0, 80) } });
+            }
+          } else {
+            setSearchError(null);
+          }
         } else {
           setSearchError("Search service temporarily unavailable. Please try again.");
           setSearchResults([]);
@@ -324,7 +316,9 @@ export default function Round() {
           artist: trackWithSnippet.artists[0].name,
           albumCover: trackWithSnippet.album.images[0].url,
           previewUrl: trackWithSnippet.preview_url,
-          snippet: trackWithSnippet.snippet,
+          // Preview clips have no sub-window, so snippet is omitted (the
+          // validator is v.optional — it accepts undefined, not null).
+          ...(trackWithSnippet.snippet ? { snippet: trackWithSnippet.snippet } : {}),
         },
       });
     } catch (error) {
@@ -483,7 +477,6 @@ export default function Round() {
         <SnippetSelector
           ref={snippetSelectorRef}
           track={selectedTrack}
-          snippetDuration={room?.settings?.snippetDuration ?? 30}
           onConfirm={handleConfirmSongWithSnippet}
           onCancel={() => {
             setShowSnippetSelector(false);
