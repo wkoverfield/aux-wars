@@ -131,8 +131,8 @@ export default function Home() {
       <h1 className="sr-only">Aux Wars — Free Online Music Party Game with Friends</h1>
 
       {/* Play area — natural height, stacks directly above the sections (skribbl-style) */}
-      <section className="w-full flex flex-col items-center px-4 pt-8">
-        <div className="home-top flex flex-col items-center mt-8 mb-6">
+      <section className="w-full flex flex-col items-center px-4 pt-3">
+        <div className="home-top flex flex-col items-center mt-2 mb-6">
           <AnimatedLogo />
           <p className="text-white/60 text-sm md:text-base italic text-center px-6 -mt-2 mb-6">
             settle music taste arguments with your friends
