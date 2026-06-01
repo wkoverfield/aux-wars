@@ -184,7 +184,7 @@ export default function Home() {
       </section>
 
       {/* About / News / How to Play — stacked right below the play area */}
-      <section className="w-full max-w-5xl px-4 pt-6 pb-8 grid gap-5 md:grid-cols-3">
+      <section className="w-full max-w-5xl px-4 pt-10 pb-8 grid gap-5 md:grid-cols-3">
         {/* About */}
         <div className="bg-white/5 border border-white/10 rounded-xl p-5">
           <h2 className="text-xl font-bold text-white mb-3">About</h2>
