@@ -56,15 +56,11 @@ export function adsAllowed(consent) {
   return adsConfigured() && consent === 'accepted';
 }
 
-let scriptRequested = false;
-
-/** Injects the AdSense script once (only after configured + consented). */
+/**
+ * No-op: the AdSense script is loaded once in index.html <head> (for site
+ * ownership verification + serving), so we don't inject a second copy.
+ * Kept as an export so AdSlot's call site stays unchanged.
+ */
 export function loadAdSenseScript() {
-  if (scriptRequested || !ADSENSE_CLIENT) return;
-  scriptRequested = true;
-  const script = document.createElement('script');
-  script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`;
-  script.async = true;
-  script.crossOrigin = 'anonymous';
-  document.head.appendChild(script);
+  /* loaded once in index.html <head> */
 }

@@ -160,6 +160,14 @@ export default defineSchema({
     .index("by_token", ["proToken"])
     .index("by_session", ["stripeSessionId"])
     .index("by_email", ["email"]),
+
+  // Update notes shown in the homepage News section.
+  news: defineTable({
+    title: v.string(),
+    body: v.string(),
+    publishedAt: v.number(),
+    published: v.boolean(),
+  }).index("by_published", ["published", "publishedAt"]),
 });
 
 

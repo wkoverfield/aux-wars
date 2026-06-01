@@ -15,6 +15,7 @@ import type * as game_flow from "../game/flow.js";
 import type * as game_rooms from "../game/rooms.js";
 import type * as game_scheduler from "../game/scheduler.js";
 import type * as http from "../http.js";
+import type * as news from "../news.js";
 import type * as stripe from "../stripe.js";
 import type * as youtube from "../youtube.js";
 
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   "game/rooms": typeof game_rooms;
   "game/scheduler": typeof game_scheduler;
   http: typeof http;
+  news: typeof news;
   stripe: typeof stripe;
   youtube: typeof youtube;
 }>;
