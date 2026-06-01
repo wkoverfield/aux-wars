@@ -126,7 +126,7 @@ export default function Home() {
   };
 
   return (
-    <div className="home min-h-svh flex flex-col items-center relative z-20">
+    <div className="home h-full overflow-y-auto flex flex-col items-center relative z-20">
       {/* SEO heading (indexed; logo is the visual title) */}
       <h1 className="sr-only">Aux Wars — Free Online Music Party Game with Friends</h1>
 
