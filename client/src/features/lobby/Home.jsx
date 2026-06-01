@@ -130,8 +130,8 @@ export default function Home() {
       {/* SEO heading (indexed; logo is the visual title) */}
       <h1 className="sr-only">Aux Wars — Free Online Music Party Game with Friends</h1>
 
-      {/* HERO — play area, fills the first screen */}
-      <section className="w-full flex flex-col items-center justify-center min-h-svh px-4">
+      {/* Play area — natural height, stacks directly above the sections (skribbl-style) */}
+      <section className="w-full flex flex-col items-center px-4 pt-8">
         <div className="home-top flex flex-col items-center mt-8 mb-6">
           <AnimatedLogo />
           <p className="text-white/60 text-sm md:text-base italic text-center px-6 -mt-2 mb-6">
@@ -181,11 +181,10 @@ export default function Home() {
           </div>
         ))}
 
-        <p className="mt-8 text-xs text-white/40 animate-pulse">scroll for more ↓</p>
       </section>
 
-      {/* BELOW THE FOLD — About / News / How to Play */}
-      <section className="w-full max-w-5xl px-4 pb-10 grid gap-5 md:grid-cols-3">
+      {/* About / News / How to Play — stacked right below the play area */}
+      <section className="w-full max-w-5xl px-4 pt-6 pb-8 grid gap-5 md:grid-cols-3">
         {/* About */}
         <div className="bg-white/5 border border-white/10 rounded-xl p-5">
           <h2 className="text-xl font-bold text-white mb-3">About</h2>
