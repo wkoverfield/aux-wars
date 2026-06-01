@@ -7,6 +7,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import Song from "../../components/Song";
 import SearchBar from "../../components/SearchBar";
+import AdSlot from "../../components/AdSlot";
 import recordLogo from "../../components/record-logo.svg";
 import nextIcon from "../../assets/next-icon.svg";
 import { useSession } from "../../hooks/useSession";
@@ -230,6 +231,8 @@ export default function RoundWinner() {
                       />
                     </motion.div>
                   ))}
+              {/* Between-rounds ad (display). The end-game video lives on GameWinner. */}
+              <AdSlot slot="results" className="max-w-2xl" />
             </motion.div>
           </motion.div>
         )}
