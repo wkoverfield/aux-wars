@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useMutation } from 'convex/react';
+import { api } from '../../../../convex/_generated/api';
 import record from '../../assets/record.svg';
 import SearchBar from '../../components/SearchBar';
 import AudioPreviewPlayer from '../../components/AudioPreviewPlayer';
@@ -36,6 +38,8 @@ const RatingScreen = ({
   const [progress, setProgress] = useState(0); // 0-1 playback progress
   const [duration, setDuration] = useState(0);
   const { showToast } = useToast();
+  const logEvent = useMutation(api.analytics.logEvent);
+  const clipStartRef = useRef(Date.now());
 
   const previewUrl = songToRate?.previewUrl;
 
@@ -61,6 +65,8 @@ const RatingScreen = ({
   const handleSubmit = () => {
     if (selectedRating >= 0) {
       setHasSubmitted(true);
+      // How long they listened before voting (informs clip length / pacing).
+      logEvent({ eventType: "vote_listen", metadata: { value: Date.now() - clipStartRef.current } });
       // Add 1 to the index to get rating from 1-5 instead of 0-4
       onSubmitRating(songToRate.songId, selectedRating + 1);
     } else {
@@ -100,6 +106,7 @@ const RatingScreen = ({
     setSelectedRating(-1);
     setHasSubmitted(false);
     setProgress(0);
+    clipStartRef.current = Date.now(); // reset listen timer per song
   }, [songToRate?.songId]);
 
   return (

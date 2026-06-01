@@ -45,9 +45,15 @@ export default function Home() {
     }
   }, [session, isSessionValid, clearSession]);
 
-  // Pro funnel: count non-Pro visitors who saw the offer (viewed -> checkout -> purchased)
+  // Pro funnel: count non-Pro visitors who saw the offer (viewed -> checkout -> purchased),
+  // and a retention signal: is this a new or returning device?
   useEffect(() => {
     if (!isPro) logEvent({ eventType: "pro_cta_viewed" });
+    try {
+      const seen = localStorage.getItem("aux-wars-seen");
+      logEvent({ eventType: "session_start", metadata: { label: seen ? "returning" : "new" } });
+      if (!seen) localStorage.setItem("aux-wars-seen", String(Date.now()));
+    } catch { /* ignore storage errors */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

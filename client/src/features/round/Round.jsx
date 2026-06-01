@@ -34,6 +34,7 @@ export default function Round() {
   const currentRatingStatus = useQuery(api.game.flow.getCurrentRatingStatus, gameCode ? { code: gameCode } : 'skip');
   const submitSong = useMutation(api.game.flow.submitSong);
   const submitRating = useMutation(api.game.flow.submitRating);
+  const logEvent = useMutation(api.analytics.logEvent);
   const { showToast } = useToast();
   const { session, clearSession, connectionId, updateSession } = useSession();
 
@@ -243,7 +244,15 @@ export default function Round() {
 
         if (Array.isArray(result)) {
           setSearchResults(result);
-          setSearchError(result.length === 0 ? "No songs found. Try different keywords." : null);
+          if (result.length === 0) {
+            setSearchError("No songs found. Try different keywords.");
+            // Catalog-gap signal: which searches our sources can't fill.
+            if (searchTerm.trim().length >= 3) {
+              logEvent({ eventType: "search_no_results", metadata: { label: searchTerm.trim().slice(0, 80) } });
+            }
+          } else {
+            setSearchError(null);
+          }
         } else {
           setSearchError("Search service temporarily unavailable. Please try again.");
           setSearchResults([]);
