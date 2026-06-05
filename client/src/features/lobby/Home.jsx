@@ -5,6 +5,7 @@ import FeedbackModal from "../../components/FeedbackModal";
 import GitHubStarButton from "../../components/GitHubStarButton";
 import AdSlot from "../../components/AdSlot";
 import NewsSection from "../../components/NewsSection";
+import LiveStats from "../../components/LiveStats";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -195,6 +196,7 @@ export default function Home() {
           <p className="text-sm text-gray-400 leading-relaxed mt-3">
             No signups, no downloads — just share a code and play with friends on any device.
           </p>
+          <LiveStats />
         </div>
 
         {/* News */}
