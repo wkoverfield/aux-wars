@@ -1,4 +1,5 @@
 import { internalMutation } from "../_generated/server";
+import { internal } from "../_generated/api";
 
 function now() { return Date.now(); }
 
@@ -30,6 +31,13 @@ export const cleanupStaleRooms = internalMutation({
         .withIndex("by_room_round", (q) => q.eq("roomCode", code))
         .collect();
       for (const rt of ratings) await ctx.db.delete(rt._id);
+      // Track where games die (everything except a finished game = abandonment)
+      if (r.phase !== "gameOver") {
+        await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+          eventType: "game_abandoned",
+          metadata: { phase: r.phase, roundNumber: r.currentRound },
+        });
+      }
       await ctx.db.delete(r._id);
     }
   },
@@ -139,6 +147,14 @@ async function deleteRoomAndData(ctx: any, room: any) {
   const customPrompts = await ctx.db.query("customPrompts").withIndex("by_room", (q: any) => q.eq("roomCode", code)).collect();
   for (const prompt of customPrompts) {
     await ctx.db.delete(prompt._id);
+  }
+
+  // Track where games die (room emptied out before finishing)
+  if (room.phase !== "gameOver") {
+    await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+      eventType: "game_abandoned",
+      metadata: { phase: room.phase, roundNumber: room.currentRound },
+    });
   }
 
   // Finally delete the room itself

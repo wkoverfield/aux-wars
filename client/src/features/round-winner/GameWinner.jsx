@@ -8,6 +8,7 @@ import { useSession } from '../../hooks/useSession';
 import { useHeartbeat } from '../../hooks/useHeartbeat';
 import PlayerResultWithHover from '../../components/PlayerResultWithHover';
 import AnimatedLogo from '../../components/AnimatedLogo';
+import AdSlot from '../../components/AdSlot';
 import backIcon from '../../assets/back-icon.svg';
 
 /**
@@ -178,6 +179,9 @@ export default function GameWinner() {
             isWinner={false}
           />
         ))}
+        {/* Game-over ad (display for now). RESERVED: swap/augment with an
+            end-game interstitial video here once on a gaming ad network. */}
+        <AdSlot slot="gameover" className="max-w-2xl mx-auto" />
       </div>
     </div>
   );

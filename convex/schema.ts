@@ -23,6 +23,7 @@ export default defineSchema({
       selectedPrompts: v.array(v.string()),
       enablePromptVoting: v.optional(v.boolean()), // default true - let players vote to skip prompts
       anonymousMode: v.optional(v.boolean()), // default false - hide submitter names during rating
+      hostPro: v.optional(v.boolean()), // host purchased the pro pack: ad-free room + raised player cap
     }),
     usedPrompts: v.optional(v.array(v.string())), // Tracks prompts used this game to avoid repeats
     selectionStartedAt: v.optional(v.number()), // Timestamp when song selection phase started
@@ -123,9 +124,10 @@ export default defineSchema({
   analyticsEvents: defineTable({
     eventType: v.string(),
     timestamp: v.number(),
-    // Loosely typed: legacy events carry ad-hoc metadata fields (phase, label, ...)
-    // from older app versions, so accept any object shape rather than fail schema
-    // validation on existing data. Current code still writes structured metadata.
+    // Loosely typed: event metadata varies by app version (roomCode, playerId,
+    // playerCount, roundNumber, totalRounds, value, label, phase, ...), so accept
+    // any object shape rather than fail schema validation on legacy data. Current
+    // code still writes structured metadata.
     metadata: v.optional(v.any()),
   })
     .index("by_type", ["eventType"])
@@ -138,6 +140,28 @@ export default defineSchema({
     count: v.number(),
     lastUpdated: v.number(),
   }).index("by_type", ["eventType"]),
+
+  // Pro pack purchases. A proToken is issued after a verified Stripe payment and
+  // stored on the buyer's device; hosting with it flags the room as hostPro
+  // (ad-free + raised player cap).
+  entitlements: defineTable({
+    proToken: v.string(),
+    stripeSessionId: v.string(),
+    email: v.optional(v.string()),
+    active: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_token", ["proToken"])
+    .index("by_session", ["stripeSessionId"])
+    .index("by_email", ["email"]),
+
+  // Update notes shown in the homepage News section.
+  news: defineTable({
+    title: v.string(),
+    body: v.string(),
+    publishedAt: v.number(),
+    published: v.boolean(),
+  }).index("by_published", ["published", "publishedAt"]),
 
   // --- Site stats (pageview analytics) ---
   // Cumulative counters keyed by "total" | "path:<p>" | "day:<YYYY-MM-DD>" | "uvday:<YYYY-MM-DD>".

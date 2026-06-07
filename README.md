@@ -10,7 +10,7 @@ settle music taste arguments with your friends
 
 1. **host a game** - create a room and share the code with friends
 2. **get a prompt** - something like "song that makes you wanna text your ex"
-3. **pick a song** - search youtube for the perfect track
+3. **pick a song** - search for the perfect track and preview it
 4. **rate each other** - listen to everyone's picks and vote 1-5
 5. **crown the winner** - best average rating wins the round
 
@@ -40,18 +40,18 @@ settle music taste arguments with your friends
 
 - works on phones
 - no signups or logins
-- uses youtube so most songs are available
+- 30-second song previews from iTunes & Deezer
 - real-time multiplayer
-- custom prompts
-- configurable round timers and snippet lengths
+- custom prompts + themed prompt packs
+- configurable round timers
 
 ## stats
 
-**900+ games played** with 40,000+ song ratings
+**1,000+ games played** with 50,000+ song ratings
 
 ## tech
 
-react, convex, youtube api, tailwind
+react, convex, itunes + deezer apis, tailwind
 
 ---
 

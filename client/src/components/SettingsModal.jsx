@@ -278,37 +278,6 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
             </div>
           </div>
 
-          {/* Snippet Duration */}
-          <div className="mb-6">
-            <label className="text-sm font-semibold text-white block mb-2">
-              Snippet Duration
-            </label>
-            <p className="text-xs text-gray-400 mb-3">How long the audio clip plays during voting</p>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: 15, label: "15s" },
-                { value: 30, label: "30s" },
-                { value: 45, label: "45s" },
-                { value: 60, label: "60s" },
-                { value: 90, label: "90s" },
-                { value: 0, label: "Full Song" },
-              ].map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setSnippetDuration(value)}
-                  className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-                    snippetDuration === value
-                      ? "bg-green-600 text-black"
-                      : "bg-[#242424] text-white hover:bg-[#333]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Game Mode Toggles */}
           <div className="mb-6 space-y-4">
             <label className="text-sm font-semibold text-white block mb-2">

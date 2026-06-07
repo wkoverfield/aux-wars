@@ -10,6 +10,10 @@ import GameRouteGuard from "./components/GameRouteGuard";
 import NavigationBlocker from "./components/NavigationBlocker";
 import ConnectionStatus from "./components/ConnectionStatus";
 import PageviewTracker from "./components/PageviewTracker";
+import CookieConsent from "./components/CookieConsent";
+import PrivacyPolicy from "./features/legal/PrivacyPolicy";
+import ProSuccess from "./features/legal/ProSuccess";
+import ProRestore from "./features/legal/ProRestore";
 import { ToastProvider } from "./contexts/ToastContext";
 import { RoomProvider } from "./services/RoomProvider";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -36,9 +40,13 @@ export default function App() {
           <NavigationBlocker />
           <PageviewTracker />
           <ConnectionStatus />
+          <CookieConsent />
           <Routes>
               <Route path="/" element={<AppDisplay />}>
                 <Route index element={<PageTransition><Home /></PageTransition>} />
+                <Route path="privacy" element={<PageTransition><PrivacyPolicy /></PageTransition>} />
+                <Route path="pro/success" element={<PageTransition><ProSuccess /></PageTransition>} />
+                <Route path="pro/restore" element={<PageTransition><ProRestore /></PageTransition>} />
                 <Route path="/lobby" element={<Navigate to="/" replace />} />
                 <Route path="/lobby/:gameCode" element={<GameRouteGuard />}>
                   <Route element={<RoomProviderOutlet />}>
