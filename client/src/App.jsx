@@ -9,6 +9,7 @@ import GameWinner from "./features/round-winner/GameWinner";
 import GameRouteGuard from "./components/GameRouteGuard";
 import NavigationBlocker from "./components/NavigationBlocker";
 import ConnectionStatus from "./components/ConnectionStatus";
+import PageviewTracker from "./components/PageviewTracker";
 import { ToastProvider } from "./contexts/ToastContext";
 import { RoomProvider } from "./services/RoomProvider";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -33,6 +34,7 @@ export default function App() {
       <Router>
         <ToastProvider>
           <NavigationBlocker />
+          <PageviewTracker />
           <ConnectionStatus />
           <Routes>
               <Route path="/" element={<AppDisplay />}>

@@ -123,13 +123,10 @@ export default defineSchema({
   analyticsEvents: defineTable({
     eventType: v.string(),
     timestamp: v.number(),
-    metadata: v.optional(v.object({
-      roomCode: v.optional(v.string()),
-      playerId: v.optional(v.string()),
-      playerCount: v.optional(v.number()),
-      roundNumber: v.optional(v.number()),
-      totalRounds: v.optional(v.number()),
-    })),
+    // Loosely typed: legacy events carry ad-hoc metadata fields (phase, label, ...)
+    // from older app versions, so accept any object shape rather than fail schema
+    // validation on existing data. Current code still writes structured metadata.
+    metadata: v.optional(v.any()),
   })
     .index("by_type", ["eventType"])
     .index("by_timestamp", ["timestamp"])
@@ -141,6 +138,19 @@ export default defineSchema({
     count: v.number(),
     lastUpdated: v.number(),
   }).index("by_type", ["eventType"]),
+
+  // --- Site stats (pageview analytics) ---
+  // Cumulative counters keyed by "total" | "path:<p>" | "day:<YYYY-MM-DD>" | "uvday:<YYYY-MM-DD>".
+  pageviewCounters: defineTable({
+    key: v.string(),
+    count: v.number(),
+  }).index("by_key", ["key"]),
+
+  // Per-day unique-visitor dedup rows (pruned > 120 days by cron).
+  pageviewVisits: defineTable({
+    date: v.string(),
+    visitorId: v.string(),
+  }).index("by_date_and_visitor", ["date", "visitorId"]),
 });
 
 
