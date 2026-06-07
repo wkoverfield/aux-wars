@@ -8,6 +8,10 @@ function sanitizePath(raw: string): string | null {
   let p = (raw || "").split("?")[0].split("#")[0].trim();
   if (!p.startsWith("/")) return null;
   if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+  // Collapse the ephemeral lobby game-code segment (a new code per game, forever)
+  // so top-pages stay meaningful and pageviewCounters doesn't grow unbounded.
+  // "/lobby/ABCD" -> "/lobby/:code", "/lobby/ABCD/round" -> "/lobby/:code/round".
+  p = p.replace(/^\/lobby\/[^/]+/, "/lobby/:code");
   if (p.length > 120) p = p.slice(0, 120);
   return p;
 }
