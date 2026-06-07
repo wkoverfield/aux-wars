@@ -22,6 +22,12 @@ crons.daily(
   { retentionDays: 90 }
 );
 
+crons.daily(
+  "prune-pageview-visits",
+  { hourUTC: 4, minuteUTC: 30 }, // shortly after analytics cleanup
+  internal.siteStats.pruneVisits
+);
+
 export default crons;
 
 
