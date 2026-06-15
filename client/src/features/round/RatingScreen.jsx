@@ -3,14 +3,15 @@ import { useMutation } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import record from '../../assets/record.svg';
 import SearchBar from '../../components/SearchBar';
-import AudioPreviewPlayer from '../../components/AudioPreviewPlayer';
+import TrackPlayer from '../../components/TrackPlayer';
 import { useToast } from '../../contexts/ToastContext';
 
 /**
  * RatingScreen component provides an interface for rating songs during the game.
- * Plays the song's 30s preview clip (HTML5 audio), shows album art, and a 5-star
- * rating system. In spectator mode, shows the player but hides voting controls
- * (for the player's own song).
+ * Plays the submitted clip — a chosen window of a full YouTube song, or an
+ * iTunes/Deezer 30s preview (TrackPlayer picks per source) — shows album art (or
+ * the video), and a 5-star rating system. In spectator mode, shows the player
+ * but hides voting controls (for the player's own song).
  *
  * @param {Object} props - Component props
  * @param {string} props.currentPrompt - The current game prompt
@@ -42,6 +43,11 @@ const RatingScreen = ({
   const clipStartRef = useRef(Date.now());
 
   const previewUrl = songToRate?.previewUrl;
+  const videoId = songToRate?.videoId;
+  const snippet = songToRate?.snippet;
+  const startTime = snippet?.startTime ?? 0;
+  const endTime = snippet?.endTime ?? 0;
+  const hasPlayable = !!(previewUrl || videoId);
 
   // Format time as M:SS
   const formatTime = (seconds) => {
@@ -123,8 +129,8 @@ const RatingScreen = ({
           <p>Rating Song {currentIndex + 1} of {totalSongs}</p>
         </div>
 
-        {/* Album art */}
-        {songToRate?.albumCover && (
+        {/* Album art — for preview tracks; YouTube tracks show the video instead */}
+        {songToRate?.albumCover && !videoId && (
           <div className="mb-4 flex justify-center">
             <img
               src={songToRate.albumCover}
@@ -134,11 +140,14 @@ const RatingScreen = ({
           </div>
         )}
 
-        {/* Audio preview player */}
-        {previewUrl && (
-          <div className="mb-4 flex justify-center">
-            <AudioPreviewPlayer
+        {/* Player — YouTube window (aspect-video) or audio preview (button) */}
+        {hasPlayable && (
+          <div className="w-full mb-4 flex justify-center">
+            <TrackPlayer
+              videoId={videoId}
               src={previewUrl}
+              startTime={startTime}
+              endTime={endTime}
               autoPlay
               loop
               showControls
@@ -149,7 +158,7 @@ const RatingScreen = ({
         )}
 
         {/* Playback progress indicator */}
-        {previewUrl && duration > 0 && (
+        {hasPlayable && duration > 0 && (
           <div className="w-full max-w-md mb-4 px-2">
             <div className="flex items-center gap-3">
               <span className="text-xs text-gray-400 min-w-[40px]">

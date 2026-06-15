@@ -1,63 +1,96 @@
-import React, { useEffect, useImperativeHandle, useRef } from 'react';
+import React, { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import AudioPreviewPlayer from './AudioPreviewPlayer';
+import TrackPlayer from './TrackPlayer';
 
 /**
- * SnippetSelector — preview & confirm a track before submitting it.
+ * SnippetSelector — pick the clip to submit.
  *
- * Music previews are fixed ~30s clips (iTunes / Deezer), so there is no longer a
- * window to select within a full song. This modal lets the player hear the clip
- * and confirm. The whole preview clip is the snippet, so `snippet` is null.
+ * YouTube track (full song): a window picker. Slide a fixed-length window
+ * (snippetDuration; 0 = full song) to ANY point in the song and the preview
+ * re-plays that window live so you HEAR the part you're choosing. Submits
+ * `snippet: { startTime, endTime }`.
  *
- * @param {Object}   props.ref       - React 19 ref prop; exposes getCurrentSelection() for auto-submit on timer expiry
- * @param {Object}   props.track     - The selected track (app shape)
- * @param {Function} props.onConfirm - Called with the track to submit
- * @param {Function} props.onCancel  - Called when the player backs out
+ * iTunes/Deezer track (30s preview, fallback): just preview & confirm — the
+ * whole clip is the snippet, so `snippet` is null.
+ *
+ * @param {Object}   props.ref             - React 19 ref; exposes getCurrentSelection() for auto-submit on timer expiry
+ * @param {Object}   props.track           - The selected track (app shape; videoId => YouTube)
+ * @param {Function} props.onConfirm       - Called with the track (+ snippet) to submit
+ * @param {Function} props.onCancel        - Called when the player backs out
+ * @param {number}   props.snippetDuration - Window length in seconds (0 = full song); default 30
  */
-export default function SnippetSelector({ ref, track, onConfirm, onCancel }) {
+export default function SnippetSelector({ track, onConfirm, onCancel, snippetDuration = 30, ref }) {
   const playerRef = useRef(null);
-
+  const videoId = track?.videoId;
   const albumCover = track?.album?.images?.[0]?.url;
   const artist = track?.artists?.[0]?.name || '';
 
-  // Expose current selection to parent for auto-submit on timer expiry.
-  // The 30s preview clip IS the snippet, so snippet is null.
-  useImperativeHandle(
-    ref,
-    () => ({
-      getCurrentSelection: () => ({ ...track, snippet: null }),
-    }),
-    [track]
-  );
+  // Fixed window length. 0 = full song (no windowing).
+  const len = snippetDuration === 0 ? 0 : (snippetDuration || 30);
+  const [duration, setDuration] = useState(0); // full song length (seconds)
+  const [start, setStart] = useState(0);       // window start (seconds)
 
-  const handleConfirm = () => {
-    onConfirm({ ...track, snippet: null });
+  const maxStart = len > 0 && duration > 0 ? Math.max(0, duration - len) : 0;
+  const end = len > 0 ? Math.min(start + len, duration > 0 ? duration : start + len) : 0;
+  const isWindowed = !!videoId && len > 0;
+
+  const formatTime = (s) => {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
-  // Keyboard controls: Enter = confirm, Escape = cancel, Space = play/pause preview
+  // Clamp the start once we learn the full duration (so the window never runs past the end).
+  useEffect(() => {
+    if (duration > 0 && start > maxStart) setStart(maxStart);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duration]);
+
+  // Build what we submit. YouTube + a real window => snippet; otherwise null.
+  const buildSelection = () => {
+    if (!videoId || len === 0 || duration === 0) {
+      return { ...track, snippet: null };
+    }
+    return {
+      ...track,
+      snippet: { startTime: Math.round(start), endTime: Math.round(Math.min(start + len, duration)) },
+    };
+  };
+
+  useImperativeHandle(
+    ref,
+    () => ({ getCurrentSelection: () => buildSelection() }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [track, start, duration, len, videoId]
+  );
+
+  // Latest handlers in refs so the keydown listener binds once but never goes stale.
+  const confirmRef = useRef(null);
+  const cancelRef = useRef(null);
+  confirmRef.current = () => onConfirm(buildSelection());
+  cancelRef.current = () => onCancel();
+
+  // Keyboard: Enter = confirm, Escape = cancel, Space = play/pause (but let the
+  // focused range slider keep its native key behavior).
   useEffect(() => {
     const handleKeyPress = (e) => {
-      switch (e.key) {
-        case 'Enter':
-          e.preventDefault();
-          handleConfirm();
-          break;
-        case 'Escape':
-          e.preventDefault();
-          onCancel();
-          break;
-        case ' ':
-          e.preventDefault();
-          playerRef.current?.toggle();
-          break;
-        default:
-          break;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        confirmRef.current?.();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelRef.current?.();
+      } else if (e.key === ' ') {
+        if (e.target?.tagName === 'INPUT') return;
+        e.preventDefault();
+        playerRef.current?.toggle();
       }
     };
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track]);
+  }, []);
+
+  const handleConfirm = () => onConfirm(buildSelection());
 
   return (
     <div className="snippet-modal z-50 fixed inset-0 flex items-center justify-center p-4">
@@ -67,18 +100,42 @@ export default function SnippetSelector({ ref, track, onConfirm, onCancel }) {
         exit={{ opacity: 0, scale: 0.95 }}
         className="bg-[#181818] rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl"
       >
-        <h2 className="text-2xl font-bold text-white mb-1">Preview your pick</h2>
-        <p className="text-sm text-gray-400 mb-5">Have a listen, then lock it in.</p>
+        <h2 className="text-2xl font-bold text-white mb-1">
+          {isWindowed ? 'Clip your moment' : 'Preview your pick'}
+        </h2>
+        <p className="text-sm text-gray-400 mb-5">
+          {isWindowed ? 'Slide to the part you want everyone to hear.' : 'Have a listen, then lock it in.'}
+        </p>
 
-        {/* Album art */}
-        {albumCover && (
-          <div className="flex justify-center mb-5">
-            <img
-              src={albumCover}
-              alt={`${track.name} album art`}
-              className="w-44 h-44 rounded-lg object-cover shadow-lg"
+        {/* Media: YouTube video (windowed) OR album art + audio preview */}
+        {videoId ? (
+          <div className="mb-5">
+            <TrackPlayer
+              ref={playerRef}
+              videoId={videoId}
+              startTime={start}
+              endTime={end}
+              autoPlay
+              loop
+              showControls
+              onDuration={(d) => setDuration(d)}
             />
           </div>
+        ) : (
+          <>
+            {albumCover && (
+              <div className="flex justify-center mb-5">
+                <img
+                  src={albumCover}
+                  alt={`${track.name} album art`}
+                  className="w-44 h-44 rounded-lg object-cover shadow-lg"
+                />
+              </div>
+            )}
+            <div className="flex justify-center mb-6">
+              <TrackPlayer ref={playerRef} src={track?.preview_url} autoPlay loop showControls />
+            </div>
+          </>
         )}
 
         {/* Track info */}
@@ -87,21 +144,61 @@ export default function SnippetSelector({ ref, track, onConfirm, onCancel }) {
           <p className="text-gray-400 truncate">{artist}</p>
         </div>
 
-        {/* Preview player */}
-        <div className="flex justify-center mb-6">
-          <AudioPreviewPlayer
-            ref={playerRef}
-            src={track?.preview_url}
-            autoPlay
-            loop
-            showControls
-          />
-        </div>
+        {/* Window picker — YouTube + a real clip length only */}
+        {isWindowed && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08 }}
+            className="mb-6"
+          >
+            <div className="flex items-center justify-between text-xs text-gray-400 mb-2">
+              <span className="min-w-[40px]">{formatTime(start)}</span>
+              <span className="text-[#68d570] font-semibold">{len}s clip</span>
+              <span className="min-w-[40px] text-right">{duration > 0 ? formatTime(duration) : '—:—'}</span>
+            </div>
+
+            {/* The window band is the hero: glowing green region = your clip */}
+            <div className="relative w-full h-6 flex items-center">
+              <div className="absolute left-0 right-0 h-2 rounded-full bg-[#333]" />
+              {duration > 0 && (
+                <div
+                  className="absolute h-2 rounded-full bg-[#68d570] shadow-[0_0_12px_2px_rgba(104,213,112,0.55)]"
+                  style={{
+                    left: `${(Math.min(start, maxStart) / duration) * 100}%`,
+                    width: `${Math.min(100, (len / duration) * 100)}%`,
+                  }}
+                />
+              )}
+              <input
+                type="range"
+                className="slider absolute inset-0 w-full h-6"
+                min={0}
+                max={duration > 0 ? Math.floor(duration) : 0}
+                step={1}
+                value={Math.min(start, maxStart)}
+                disabled={duration === 0}
+                onChange={(e) => setStart(Math.min(Number(e.target.value), maxStart))}
+                aria-label="Clip start position"
+              />
+            </div>
+
+            <p className="text-center text-xs text-gray-500 mt-3">
+              {duration > 0 ? 'Drag to move your clip anywhere in the song.' : 'Loading the full song…'}
+            </p>
+          </motion.div>
+        )}
+
+        {/* Full-song mode note */}
+        {!!videoId && len === 0 && (
+          <p className="text-center text-sm text-gray-400 mb-6">Playing the full song.</p>
+        )}
 
         {/* Action buttons */}
         <div className="flex gap-4">
           <button
             onClick={handleConfirm}
+            aria-label="Confirm selection"
             className="flex-1 py-3 bg-green-600 hover:bg-green-500 text-black rounded-md font-semibold transition-colors"
           >
             Confirm Selection
@@ -109,6 +206,7 @@ export default function SnippetSelector({ ref, track, onConfirm, onCancel }) {
 
           <button
             onClick={onCancel}
+            aria-label="Cancel"
             className="flex-1 py-3 bg-[#242424] hover:bg-[#1a1a1a] text-white rounded-md transition-colors"
           >
             Cancel

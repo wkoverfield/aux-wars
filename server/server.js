@@ -1,23 +1,29 @@
 /**
  * Express Server - Music Search Proxy
  *
- * PURPOSE: Provides server-side music search using the iTunes Search API and
- * Deezer API, returning 30-second preview clips that play via a plain HTML5
- * <audio> element on the client.
+ * PURPOSE: Provides server-side music search. YouTube is the PRIMARY source
+ * (full songs → players can clip any moment), with the iTunes Search API +
+ * Deezer API as an automatic FALLBACK (free 30s previews) so the game keeps
+ * working if the YouTube scraper is empty, errors, or times out.
  *
  * ARCHITECTURE NOTE: This server is intentionally separate from Convex.
  * - Convex: Handles all real-time game logic, state, mutations, queries
- * - Express: Handles external music search (iTunes + Deezer) to avoid CORS
+ * - Express: Handles external music search (YouTube + iTunes/Deezer) to avoid CORS
  *
- * Why these sources? Both expose free, no-key search endpoints that return a
- * direct 30s `preview` audio URL. Unlike embedded YouTube, this lets us run our
- * own ads without violating YouTube's API ToS and removes YouTube's own
- * pre-roll ads from snippet playback. Tradeoff: catalog is "officially released"
- * music only (loses bootleg/UGC/meme audio) and search is name-based.
+ * Why YouTube primary? It has the full catalog (incl. bootleg/UGC/sped-up
+ * audio iTunes/Deezer miss) and the full song, which is what lets the snippet
+ * picker work. Why a fallback? `youtube-search-api` scrapes, so it can break;
+ * iTunes/Deezer keep search alive when it does.
+ *
+ * ADS/ToS NOTE (dormant-but-real): running our OWN ads next to embedded YouTube
+ * content violates YouTube's API ToS. We currently serve no ads
+ * (VITE_ADSENSE_CLIENT unset → AdSlot renders nothing), so this is dormant. If
+ * ads are ever re-enabled, gate YouTube playback to ad-free rooms first.
  */
 import express from "express";
 import http from "http";
 import cors from "cors";
+import youtubesearchapi from "youtube-search-api";
 
 export const app = express();
 export const server = http.createServer(app);
@@ -73,10 +79,13 @@ app.get('/', (req, res) => {
 
 const SEARCH_LIMIT = 20;
 const FETCH_TIMEOUT_MS = 8000;
+// Keep the YouTube budget short so a slow/broken scraper falls back fast.
+const YT_TIMEOUT_MS = 4000;
 
 /**
  * Music Search Endpoint
- * Searches iTunes + Deezer in parallel for tracks with 30s preview clips.
+ * YouTube-first (full songs); falls back to iTunes + Deezer 30s previews on
+ * empty / error / timeout so the game never loses search.
  *
  * @route POST /api/music/search  (alias: /api/youtube/search for rollout safety)
  * @body {string} query - Search query (min 2 characters)
@@ -92,7 +101,18 @@ async function handleSearch(req, res) {
 
     const term = query.trim();
 
-    // Query both sources in parallel; a failure in one must not sink the other.
+    // 1) YouTube first — full songs let players clip any moment, and the
+    //    catalog is far deeper. Fast-fail to the fallback on any problem.
+    const ytTracks = await searchYouTube(term).catch((e) => {
+      console.error('YouTube search failed:', e?.message || e);
+      return [];
+    });
+    if (ytTracks.length > 0) {
+      return res.json({ tracks: ytTracks.slice(0, SEARCH_LIMIT) });
+    }
+
+    // 2) Fallback: iTunes + Deezer in parallel; a failure in one must not sink
+    //    the other. Merge + relevance-rank across both, then cap.
     const [itunesResults, deezerResults] = await Promise.all([
       searchITunes(term).catch((e) => {
         console.error('iTunes search failed:', e?.message || e);
@@ -104,7 +124,6 @@ async function handleSearch(req, res) {
       }),
     ]);
 
-    // Merge + relevance-rank across both sources, then cap.
     const tracks = mergeTracks(itunesResults, deezerResults, term).slice(0, SEARCH_LIMIT);
 
     res.json({ tracks });
@@ -195,6 +214,76 @@ function mapDeezerTrack(item) {
     duration_ms: (item.duration || 0) * 1000,
     external_url: item.link || '',
   };
+}
+
+/**
+ * YouTube search via `youtube-search-api` (scrapes, no key) → app track shape.
+ * Wrapped in a timeout so a slow/broken scraper fails fast to the fallback.
+ * YouTube tracks carry a `videoId` and NO `preview_url` (full-song IFrame
+ * playback); that absence is how the client tells the two sources apart.
+ */
+async function searchYouTube(query) {
+  const result = await Promise.race([
+    youtubesearchapi.GetListByKeyword(query, false, SEARCH_LIMIT, [{ type: 'video' }]),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('YouTube timeout')), YT_TIMEOUT_MS)),
+  ]);
+  const items = Array.isArray(result?.items) ? result.items : [];
+  return items
+    .filter((it) => it && it.type === 'video' && it.id && !it.isLive)
+    .map(mapYouTubeTrack)
+    .filter(Boolean);
+}
+
+function mapYouTubeTrack(item) {
+  const thumbs = item.thumbnail?.thumbnails || [];
+  const thumb = thumbs[thumbs.length - 1]?.url || thumbs[0]?.url || '';
+  const { name, artist } = cleanTitle(item.title, item.channelTitle);
+  return {
+    id: `youtube:${item.id}`,
+    videoId: item.id,
+    name,
+    artists: [{ name: artist }],
+    album: { name: '', images: [{ url: thumb }] },
+    preview_url: null, // full song plays via the YouTube IFrame, not a 30s clip
+    duration_ms: parseLength(item.length?.simpleText),
+    external_url: `https://www.youtube.com/watch?v=${item.id}`,
+  };
+}
+
+/**
+ * Turn a messy YouTube title into { name, artist }. Strips decoration like
+ * "(Official Video)" / "[HD]" / "(Lyrics)", splits "Artist - Title", and
+ * otherwise falls back to the channel name (minus " - Topic" / "VEVO").
+ */
+function cleanTitle(rawTitle, channelTitle) {
+  let t = (rawTitle || '').trim();
+  t = t.replace(
+    /[([][^)\]]*\b(official|lyric|lyrics|audio|video|music\s*video|visualizer|mv|hd|hq|4k|explicit|clean|remaster(?:ed)?|prod\.?)\b[^)\]]*[)\]]/gi,
+    ''
+  );
+  t = t.replace(/\s{2,}/g, ' ').trim();
+
+  const dash = t.match(/^(.+?)\s[-–—]\s(.+)$/);
+  if (dash) {
+    return { name: (dash[2].trim() || rawTitle || 'Unknown Track'), artist: dash[1].trim() };
+  }
+  const artist = (channelTitle || '')
+    .replace(/\s*-\s*Topic$/i, '')
+    .replace(/VEVO$/i, '')
+    .trim() || 'Unknown Artist';
+  return { name: t || rawTitle || 'Unknown Track', artist };
+}
+
+/** "3:45" → 225000 ms; "1:02:03" → 3723000 ms; bad/missing input → 0. */
+function parseLength(s) {
+  if (!s || typeof s !== 'string') return 0;
+  const parts = s.split(':').map((n) => parseInt(n, 10));
+  if (parts.some((n) => Number.isNaN(n))) return 0;
+  let secs = 0;
+  if (parts.length === 3) secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
+  else if (parts.length === 2) secs = parts[0] * 60 + parts[1];
+  else secs = parts[0];
+  return secs * 1000;
 }
 
 /**

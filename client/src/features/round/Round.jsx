@@ -313,11 +313,13 @@ export default function Round() {
         trackId: trackWithSnippet.id,
         trackDetails: {
           name: trackWithSnippet.name,
-          artist: trackWithSnippet.artists[0].name,
-          albumCover: trackWithSnippet.album.images[0].url,
-          previewUrl: trackWithSnippet.preview_url,
-          // Preview clips have no sub-window, so snippet is omitted (the
-          // validator is v.optional — it accepts undefined, not null).
+          artist: trackWithSnippet.artists?.[0]?.name || "Unknown Artist",
+          albumCover: trackWithSnippet.album?.images?.[0]?.url || "",
+          // A track is EITHER a YouTube video (videoId, full song) OR an
+          // iTunes/Deezer preview (previewUrl). Omit — don't null — the absent
+          // one (the validator is v.optional: undefined is fine, null is not).
+          ...(trackWithSnippet.videoId ? { videoId: trackWithSnippet.videoId } : {}),
+          ...(trackWithSnippet.preview_url ? { previewUrl: trackWithSnippet.preview_url } : {}),
           ...(trackWithSnippet.snippet ? { snippet: trackWithSnippet.snippet } : {}),
         },
       });
@@ -477,6 +479,7 @@ export default function Round() {
         <SnippetSelector
           ref={snippetSelectorRef}
           track={selectedTrack}
+          snippetDuration={room?.settings?.snippetDuration ?? 30}
           onConfirm={handleConfirmSongWithSnippet}
           onCancel={() => {
             setShowSnippetSelector(false);

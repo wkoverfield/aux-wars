@@ -81,7 +81,12 @@ export const submitSong = mutation({
       name: v.string(),
       artist: v.string(),
       albumCover: v.string(),
-      previewUrl: v.string(),
+      // A track is EITHER a YouTube video (videoId, full song) OR an
+      // iTunes/Deezer preview (previewUrl, 30s) — so both are optional.
+      previewUrl: v.optional(v.string()),
+      videoId: v.optional(v.string()),
+      // For YouTube tracks the window ranges over the full song; for preview
+      // tracks it's omitted (the whole 30s clip is the snippet).
       snippet: v.optional(v.object({ startTime: v.number(), endTime: v.number() })),
     }),
   },
@@ -548,6 +553,7 @@ export const getCurrentRatingSong = query({
       artist: submission.trackDetails.artist,
       albumCover: submission.trackDetails.albumCover,
       previewUrl: submission.trackDetails.previewUrl,
+      videoId: submission.trackDetails.videoId,
       snippet: submission.trackDetails.snippet,
       player: {
         id: submission.playerId,
