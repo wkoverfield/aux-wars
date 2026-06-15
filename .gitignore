@@ -29,4 +29,8 @@ dist-ssr
 .env.local
 .env.development.local
 .env.test.local
-.env.production.local.playwright-mcp/
+.env.production.local
+.playwright-mcp/
+
+# Claude Code local files (worktrees, plans, wizard-installed skills)
+.claude/

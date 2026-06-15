@@ -24,6 +24,18 @@ import express from "express";
 import http from "http";
 import cors from "cors";
 import youtubesearchapi from "youtube-search-api";
+import { PostHog } from "posthog-node";
+
+// Only init PostHog when a token is configured (Railway env). Without it —
+// e.g. local dev or before the env var is set — fall back to a no-op stub so
+// capture/captureException/shutdown calls never throw or spam errors.
+const POSTHOG_TOKEN = process.env.POSTHOG_PROJECT_TOKEN;
+export const posthog = POSTHOG_TOKEN
+  ? new PostHog(POSTHOG_TOKEN, {
+      host: process.env.POSTHOG_HOST || "https://us.i.posthog.com",
+      enableExceptionAutocapture: true,
+    })
+  : { capture() {}, captureException() {}, async shutdown() {} };
 
 export const app = express();
 export const server = http.createServer(app);
@@ -59,7 +71,7 @@ app.use(cors({
   origin: corsOriginFunction,
   methods: ["GET", "POST"],
   credentials: true,
-  allowedHeaders: ["Content-Type"]
+  allowedHeaders: ["Content-Type", "X-POSTHOG-DISTINCT-ID"]
 }));
 
 app.use(express.json());
@@ -92,6 +104,7 @@ const YT_TIMEOUT_MS = 4000;
  * @returns {Object} { tracks: Array } - Array of transformed track objects
  */
 async function handleSearch(req, res) {
+  const distinctId = req.headers['x-posthog-distinct-id'] || 'anon';
   try {
     const { query } = req.body;
 
@@ -108,7 +121,18 @@ async function handleSearch(req, res) {
       return [];
     });
     if (ytTracks.length > 0) {
-      return res.json({ tracks: ytTracks.slice(0, SEARCH_LIMIT) });
+      const resultTracks = ytTracks.slice(0, SEARCH_LIMIT);
+      posthog.capture({
+        distinctId,
+        event: 'music_searched',
+        properties: {
+          query_length: term.length,
+          source: 'youtube',
+          result_count: resultTracks.length,
+          $process_person_profile: false,
+        },
+      });
+      return res.json({ tracks: resultTracks });
     }
 
     // 2) Fallback: iTunes + Deezer in parallel; a failure in one must not sink
@@ -126,9 +150,32 @@ async function handleSearch(req, res) {
 
     const tracks = mergeTracks(itunesResults, deezerResults, term).slice(0, SEARCH_LIMIT);
 
+    if (tracks.length === 0) {
+      posthog.capture({
+        distinctId,
+        event: 'music_search_no_results',
+        properties: {
+          query_length: term.length,
+          $process_person_profile: false,
+        },
+      });
+    } else {
+      posthog.capture({
+        distinctId,
+        event: 'music_searched',
+        properties: {
+          query_length: term.length,
+          source: 'itunes_deezer_fallback',
+          result_count: tracks.length,
+          $process_person_profile: false,
+        },
+      });
+    }
+
     res.json({ tracks });
   } catch (error) {
     console.error('Music search failed:', error);
+    posthog.captureException(error, distinctId, { endpoint: '/api/music/search' });
     res.status(500).json({ error: 'Search service temporarily unavailable' });
   }
 }

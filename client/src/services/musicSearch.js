@@ -3,6 +3,7 @@
  * Calls our Express backend (/api/music/search) which queries the iTunes
  * Search API + Deezer and returns tracks with 30-second preview clips.
  */
+import { getVisitorId } from "../utils/visitorId";
 
 // In-memory cache with TTL (Time To Live)
 const searchCache = new Map();
@@ -31,6 +32,7 @@ async function performSearch(query, cacheKey) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-POSTHOG-DISTINCT-ID': getVisitorId(),
       },
       body: JSON.stringify({ query })
     });

@@ -5,6 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { searchTracks, getCachedResults } from "../../services/musicSearch";
+import { capture } from "../../services/posthog";
 import { useToast } from "../../contexts/ToastContext";
 import RoundStart from "./RoundStart";
 import SongSelection from "./SongSelection";
@@ -323,6 +324,18 @@ export default function Round() {
           ...(trackWithSnippet.snippet ? { snippet: trackWithSnippet.snippet } : {}),
         },
       });
+      // Funnel + new-feature usage (no-ops if PostHog isn't configured).
+      capture("song_submitted", {
+        source: trackWithSnippet.videoId ? "youtube" : "preview",
+        has_clip_window: Boolean(trackWithSnippet.snippet),
+      });
+      if (trackWithSnippet.snippet) {
+        const { startTime = 0, endTime = 0 } = trackWithSnippet.snippet;
+        capture("clip_window_selected", {
+          window_seconds: Math.max(0, Math.round(endTime - startTime)),
+          start_seconds: Math.round(startTime),
+        });
+      }
     } catch (error) {
       const errorMessage = error?.message || "Failed to submit song. Please try again.";
       showToast(errorMessage, "error");

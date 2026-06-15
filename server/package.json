@@ -8,6 +8,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "posthog-node": "^5.21.2",
     "youtube-search-api": "^2.0.1"
   }
 }
