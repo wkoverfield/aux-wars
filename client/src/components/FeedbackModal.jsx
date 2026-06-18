@@ -230,6 +230,7 @@ export default function FeedbackModal({ showModal, onClose }) {
                     feedback.map((item) => {
                       const typeConfig = getTypeConfig(item.type);
                       const hasVoted = item.upvoterIds.includes(visitorId);
+                      const mergedRequests = item.mergedRequests || [];
 
                       return (
                         <div
@@ -284,6 +285,29 @@ export default function FeedbackModal({ showModal, onClose }) {
                               </div>
                               <h3 className="text-white font-medium mb-1">{item.title}</h3>
                               <p className="text-gray-400 text-sm">{item.description}</p>
+                              {mergedRequests.length > 0 && (
+                                <div className="mt-3 rounded-md border border-gray-700 bg-[#1f1f1f] p-3">
+                                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                                    Also requested as
+                                  </div>
+                                  <div className="space-y-2">
+                                    {mergedRequests.map((request) => (
+                                      <div
+                                        key={request._id}
+                                        className="border-l-2 border-[#68d570]/60 pl-3"
+                                      >
+                                        <div className="text-sm text-gray-200">
+                                          {request.title}
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                          {request.authorName || 'Anonymous'} •{' '}
+                                          {new Date(request.createdAt).toLocaleDateString()}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                               <div className="mt-2 text-xs text-gray-500">
                                 {item.authorName || 'Anonymous'} •{' '}
                                 {new Date(item.createdAt).toLocaleDateString()}

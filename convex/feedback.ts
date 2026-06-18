@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
 /**
@@ -8,8 +8,37 @@ export const getFeedback = query({
   args: {},
   handler: async (ctx) => {
     const feedback = await ctx.db.query("feedback").collect();
-    // Sort by upvotes descending, then by createdAt descending
-    return feedback.sort((a, b) => {
+
+    const childrenByParent = new Map<string, typeof feedback>();
+    for (const item of feedback) {
+      if (!item.mergedInto) continue;
+      const parentId = item.mergedInto;
+      childrenByParent.set(parentId, [...(childrenByParent.get(parentId) || []), item]);
+    }
+
+    const parentItems = feedback
+      .filter((item) => !item.mergedInto)
+      .map((item) => {
+        const mergedRequests = (childrenByParent.get(item._id) || []).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        const upvoterIds = Array.from(
+          new Set([
+            ...item.upvoterIds,
+            ...mergedRequests.flatMap((request) => request.upvoterIds),
+          ])
+        );
+
+        return {
+          ...item,
+          mergedRequests,
+          upvotes: upvoterIds.length,
+          upvoterIds,
+        };
+      });
+
+    // Sort by upvotes descending, then by createdAt descending.
+    return parentItems.sort((a, b) => {
       if (b.upvotes !== a.upvotes) return b.upvotes - a.upvotes;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
@@ -68,8 +97,16 @@ export const upvoteFeedback = mutation({
       throw new Error("Feedback not found");
     }
 
+    const childRequests = await ctx.db
+      .query("feedback")
+      .filter((q) => q.eq(q.field("mergedInto"), args.feedbackId))
+      .collect();
+    const hasVotedOnMergedRequest = childRequests.some((item) =>
+      item.upvoterIds.includes(args.visitorId)
+    );
+
     // Check if already voted
-    if (feedback.upvoterIds.includes(args.visitorId)) {
+    if (feedback.upvoterIds.includes(args.visitorId) || hasVotedOnMergedRequest) {
       return { success: false, message: "Already voted" };
     }
 
@@ -101,6 +138,66 @@ export const updateStatus = mutation({
 });
 
 /**
+ * Merge duplicate feedback into a canonical request.
+ *
+ * The child rows stay in the database and are returned nested under the parent
+ * by getFeedback, so people can still see their original request counted.
+ */
+export const mergeFeedback = internalMutation({
+  args: {
+    parentId: v.id("feedback"),
+    childIds: v.array(v.id("feedback")),
+    status: v.optional(v.string()),
+    title: v.optional(v.string()),
+    description: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const parent = await ctx.db.get(args.parentId);
+    if (!parent) {
+      throw new Error("Parent feedback not found");
+    }
+    if (args.status && !["pending", "planned", "completed", "declined"].includes(args.status)) {
+      throw new Error("Invalid status");
+    }
+    if (args.title !== undefined && (!args.title.trim() || args.title.length > 100)) {
+      throw new Error("Title must be 1-100 characters");
+    }
+    if (
+      args.description !== undefined &&
+      (!args.description.trim() || args.description.length > 500)
+    ) {
+      throw new Error("Description must be 1-500 characters");
+    }
+
+    const patch: {
+      status?: string;
+      title?: string;
+      description?: string;
+    } = {};
+    if (args.status) patch.status = args.status;
+    if (args.title !== undefined) patch.title = args.title.trim();
+    if (args.description !== undefined) patch.description = args.description.trim();
+    if (Object.keys(patch).length > 0) {
+      await ctx.db.patch(args.parentId, patch);
+    }
+
+    const nowIso = new Date().toISOString();
+    for (const childId of args.childIds) {
+      if (childId === args.parentId) continue;
+      const child = await ctx.db.get(childId);
+      if (!child) continue;
+      await ctx.db.patch(childId, {
+        mergedInto: args.parentId,
+        mergedAt: nowIso,
+        status: args.status || parent.status,
+      });
+    }
+
+    return { success: true };
+  },
+});
+
+/**
  * Remove upvote (toggle)
  */
 export const removeUpvote = mutation({
@@ -115,15 +212,31 @@ export const removeUpvote = mutation({
     }
 
     // Check if has voted
-    if (!feedback.upvoterIds.includes(args.visitorId)) {
+    const childRequests = await ctx.db
+      .query("feedback")
+      .filter((q) => q.eq(q.field("mergedInto"), args.feedbackId))
+      .collect();
+    const childrenWithVote = childRequests.filter((item) =>
+      item.upvoterIds.includes(args.visitorId)
+    );
+
+    if (!feedback.upvoterIds.includes(args.visitorId) && childrenWithVote.length === 0) {
       return { success: false, message: "Not voted" };
     }
 
-    // Remove vote
-    await ctx.db.patch(args.feedbackId, {
-      upvotes: Math.max(0, feedback.upvotes - 1),
-      upvoterIds: feedback.upvoterIds.filter((id) => id !== args.visitorId),
-    });
+    if (feedback.upvoterIds.includes(args.visitorId)) {
+      await ctx.db.patch(args.feedbackId, {
+        upvotes: Math.max(0, feedback.upvotes - 1),
+        upvoterIds: feedback.upvoterIds.filter((id) => id !== args.visitorId),
+      });
+    }
+
+    for (const child of childrenWithVote) {
+      await ctx.db.patch(child._id, {
+        upvotes: Math.max(0, child.upvotes - 1),
+        upvoterIds: child.upvoterIds.filter((id) => id !== args.visitorId),
+      });
+    }
 
     return { success: true };
   },
