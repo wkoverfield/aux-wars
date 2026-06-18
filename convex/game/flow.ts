@@ -5,6 +5,10 @@ import { internalMutation, mutation, query } from "../_generated/server";
 
 function now() { return Date.now(); }
 
+function submitSongFailure(code: string, message: string) {
+  return { success: false, code, message };
+}
+
 export const startGame = mutation({
   args: { code: v.string(), playerId: v.string() },
   handler: async (ctx, { code, playerId }) => {
@@ -94,21 +98,21 @@ export const submitSong = mutation({
     const room = await getRoom(ctx, code);
 
     if (!room || room.phase !== "songSelection") {
-      throw new Error("Cannot submit song: game is not in song selection phase");
+      return submitSongFailure("not_song_selection", "Song selection has already ended.");
     }
 
     // Validate connection (prevents stale tabs from submitting after takeover)
     const player = await validateConnection(ctx, code, playerId, connectionId);
     if (!player) {
       console.log(`[submitSong] Rejecting submission: connection validation failed`);
-      throw new Error("Connection validation failed. Please refresh the page.");
+      return submitSongFailure("connection_invalid", "Connection issue. Please refresh the page.");
     }
 
     // Rate limiting: Prevent rapid submission attempts (max 1 per second)
     const lastAttempt = player.lastSubmissionAttempt;
     if (lastAttempt && now() - lastAttempt < 1000) {
       console.log(`[submitSong] Rate limit: Player ${playerId} attempting too quickly`);
-      throw new Error("Please wait before submitting again");
+      return submitSongFailure("rate_limited", "Please wait a second before submitting again.");
     }
 
     // Update last attempt timestamp
@@ -134,7 +138,7 @@ export const submitSong = mutation({
           submittedRounds: [...(player.submittedRounds || []), room.currentRound]
         });
       }
-      throw new Error("You have already submitted a song for this round");
+      return submitSongFailure("already_submitted", "You already submitted a song for this round.");
     }
 
     // Mark this round as submitted BEFORE inserting (prevents race condition)
@@ -170,7 +174,10 @@ export const submitSong = mutation({
 
     if (allSubmitted) {
       // Use scheduler to avoid direct mutation-to-mutation call
-      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code });
+      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, {
+        code,
+        round: room.currentRound,
+      });
     }
 
     return { success: true };
@@ -700,14 +707,14 @@ export const endSelectionPhase = internalMutation({
 
     if (allSubmitted) {
       // All submitted - normal transition
-      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code });
+      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code, round });
     } else {
       // Some players didn't submit - force transition anyway
       console.log(`[endSelectionPhase] Time up! ${submittedPlayerIds.size}/${players.length} submitted. Advancing anyway.`);
 
       // If at least one player submitted, proceed to rating
       if (subs.length > 0) {
-        await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code });
+        await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code, round });
       } else {
         // No submissions at all - skip to results with no winner
         console.log(`[endSelectionPhase] No submissions for round ${round}. Skipping to results.`);
@@ -725,10 +732,25 @@ export const endSelectionPhase = internalMutation({
 });
 
 export const startRatingPhaseInternal = internalMutation({
-  args: { code: v.string() },
-  handler: async (ctx, { code }) => {
+  args: { code: v.string(), round: v.number() },
+  handler: async (ctx, { code, round }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
+
+    if (room.phase !== "songSelection" || room.currentRound !== round) {
+      console.log(`[startRatingPhaseInternal] Skipping - phase: ${room.phase}, currentRound: ${room.currentRound}, expected: ${round}`);
+      return;
+    }
+
+    const subs = await ctx.db
+      .query("submissions")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", round))
+      .collect();
+    if (subs.length === 0) {
+      console.log(`[startRatingPhaseInternal] Skipping - no submissions for round ${round}`);
+      return;
+    }
+
     await ctx.db.patch(room._id, { phase: "rating", currentRatingIndex: 0, lastActivityAt: now() });
     // Kick off first rating step shortly
     await ctx.scheduler.runAfter(500, internal.game.flow.advanceRating, { code });
@@ -903,5 +925,3 @@ function pickPrompt(prompts: string[], usedPrompts: string[] = []): string {
   const pool = available.length > 0 ? available : prompts; // Reset if all used
   return pool[Math.floor(Math.random() * pool.length)];
 }
-
-

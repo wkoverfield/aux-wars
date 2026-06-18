@@ -17,6 +17,17 @@ import PromptVoting from "./PromptVoting";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 
+const SUBMIT_SONG_FALLBACK_MESSAGE = "Couldn't submit that song. Please try again.";
+
+function getUserSafeSubmitSongError(error) {
+  const message = error?.message || "";
+  if (!message || message.includes("[CONVEX") || message.includes("Server Error")) {
+    return SUBMIT_SONG_FALLBACK_MESSAGE;
+  }
+
+  return message;
+}
+
 /**
  * Round component manages the game round flow including song selection and rating phases.
  * Handles socket events for game state updates, player interactions, and phase transitions.
@@ -307,7 +318,7 @@ export default function Round() {
     }
 
     try {
-      await submitSong({
+      const result = await submitSong({
         code: gameCode,
         playerId: session.playerId,
         connectionId: finalConnectionId,
@@ -324,6 +335,12 @@ export default function Round() {
           ...(trackWithSnippet.snippet ? { snippet: trackWithSnippet.snippet } : {}),
         },
       });
+
+      if (result && result.success === false) {
+        showToast(result.message || SUBMIT_SONG_FALLBACK_MESSAGE, "error");
+        return;
+      }
+
       // Funnel + new-feature usage (no-ops if PostHog isn't configured).
       capture("song_submitted", {
         source: trackWithSnippet.videoId ? "youtube" : "preview",
@@ -337,8 +354,8 @@ export default function Round() {
         });
       }
     } catch (error) {
-      const errorMessage = error?.message || "Failed to submit song. Please try again.";
-      showToast(errorMessage, "error");
+      console.error("Song submission failed:", error);
+      showToast(getUserSafeSubmitSongError(error), "error");
       return;
     }
     setIsSongSelectionView(false);
