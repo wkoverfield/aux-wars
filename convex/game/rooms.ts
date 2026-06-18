@@ -425,7 +425,8 @@ export const addCustomPrompt = mutation({
       throw new Error("Prompt must be between 1 and 200 characters");
     }
 
-    // Rate limiting: max 50 custom prompts per room
+    // Custom prompt pool cap. Round count stays capped separately, so a larger
+    // pool only improves prompt variety across games.
     const allPrompts = await ctx.db
       .query("customPrompts")
       .withIndex("by_room", (q) => q.eq("roomCode", code))
@@ -434,11 +435,7 @@ export const addCustomPrompt = mutation({
       throw new Error("Maximum custom prompts reached (50)");
     }
 
-    // Rate limiting: max 10 prompts per player per room
     const playerPrompts = allPrompts.filter(p => p.createdBy === createdBy);
-    if (playerPrompts.length >= 10) {
-      throw new Error("You can only add up to 10 custom prompts");
-    }
 
     // Rate limiting: 2 second cooldown per player
     const recentPrompt = playerPrompts.find(p => Date.now() - p.createdAt < 2000);
@@ -461,6 +458,51 @@ export const addCustomPrompt = mutation({
       createdBy,
       createdAt: Date.now(),
     });
+  },
+});
+
+export const addCustomPrompts = mutation({
+  args: { code: v.string(), prompts: v.array(v.string()), createdBy: v.string() },
+  handler: async (ctx, { code, prompts, createdBy }) => {
+    const allPrompts = await ctx.db
+      .query("customPrompts")
+      .withIndex("by_room", (q) => q.eq("roomCode", code))
+      .collect();
+    const existingTexts = new Set(allPrompts.map((p) => p.text));
+    const nextPrompts: string[] = [];
+    let skipped = 0;
+
+    for (const prompt of prompts) {
+      const text = prompt.trim();
+      if (!text || text.length > 200) {
+        skipped += 1;
+        continue;
+      }
+      if (existingTexts.has(text) || nextPrompts.includes(text)) {
+        skipped += 1;
+        continue;
+      }
+      nextPrompts.push(text);
+    }
+
+    const remainingSlots = Math.max(0, 50 - allPrompts.length);
+    const promptsToAdd = nextPrompts.slice(0, remainingSlots);
+    const maxedOut = nextPrompts.length > promptsToAdd.length || remainingSlots === 0;
+
+    for (const text of promptsToAdd) {
+      await ctx.db.insert("customPrompts", {
+        roomCode: code,
+        text,
+        createdBy,
+        createdAt: Date.now(),
+      });
+    }
+
+    return {
+      added: promptsToAdd.length,
+      skipped: skipped + Math.max(0, nextPrompts.length - promptsToAdd.length),
+      maxedOut,
+    };
   },
 });
 
@@ -582,6 +624,4 @@ const defaultPrompts = [
   "If life had a montage, this song would play in mine.",
   "A song that instantly hypes up the whole room.",
 ];
-
-
 

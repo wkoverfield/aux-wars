@@ -8,7 +8,36 @@ import { useToast } from "../contexts/ToastContext";
 import PromptCategory from "./PromptCategory";
 import CustomPromptInput from "./CustomPromptInput";
 import { promptCategories } from "../data/promptCategories";
-import { getSavedSettings } from "../hooks/useSettingsPersistence";
+
+const MIN_PROMPT_POOL_SIZE = 5;
+const MAX_PROMPT_POOL_SIZE = 50;
+const PROMPT_PACKS_STORAGE_KEY = "aux-wars-prompt-packs-v1";
+
+function loadSavedPromptPacks() {
+  try {
+    const raw = localStorage.getItem(PROMPT_PACKS_STORAGE_KEY);
+    if (!raw) return [];
+    const packs = JSON.parse(raw);
+    return Array.isArray(packs)
+      ? packs.filter((pack) => pack?.id && pack?.name && Array.isArray(pack?.prompts))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePromptPacks(packs) {
+  try {
+    localStorage.setItem(PROMPT_PACKS_STORAGE_KEY, JSON.stringify(packs));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createPromptPackId() {
+  return globalThis.crypto?.randomUUID?.() || `pack-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 /**
  * SettingsModal component for configuring game settings.
@@ -19,11 +48,12 @@ import { getSavedSettings } from "../hooks/useSettingsPersistence";
  * @param {string} props.gameCode - Current game code
  * @returns {JSX.Element|null} Rendered component or null if not visible
  */
-export default function SettingsModal({ showModal, onClose, gameCode, isHost = false, playerId }) {
+export default function SettingsModal({ showModal, onClose, gameCode, playerId }) {
   const roomQuery = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
   // const socket = useSocket();
   const updateSettingsMutation = useMutation(api.game.rooms.updateSettings);
   const addCustomPromptMutation = useMutation(api.game.rooms.addCustomPrompt);
+  const addCustomPromptsMutation = useMutation(api.game.rooms.addCustomPrompts);
   const removeCustomPromptMutation = useMutation(api.game.rooms.removeCustomPrompt);
   const { showToast } = useToast();
 
@@ -31,14 +61,13 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
   const room = roomQuery?.room || roomQuery;
   const roomSettings = room?.settings;
 
-  // For hosts creating new games, use saved settings. For joining players, use room state.
-  const savedSettings = isHost ? getSavedSettings() : null;
   const [rounds, setRounds] = useState(roomSettings?.numberOfRounds ?? 3);
   const [roundLength, setRoundLength] = useState(roomSettings?.roundLength ?? 60); // Song selection time limit
   const [snippetDuration, setSnippetDuration] = useState(roomSettings?.snippetDuration ?? 30); // Audio playback duration
   const [selectedPrompts, setSelectedPrompts] = useState(roomSettings?.selectedPrompts ?? []);
   const [enablePromptVoting, setEnablePromptVoting] = useState(roomSettings?.enablePromptVoting !== false); // default true
   const [anonymousMode, setAnonymousMode] = useState(roomSettings?.anonymousMode ?? false); // default false
+  const [savedPromptPacks, setSavedPromptPacks] = useState(() => loadSavedPromptPacks());
   // Shared custom prompts, reactive per room
   const roomCustomPrompts = useQuery(
     api.game.rooms.getCustomPrompts,
@@ -113,8 +142,8 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
   const handleAddCustomPrompt = async (prompt) => {
     const text = (prompt || '').trim();
     if (!text) return;
-    if (Array.isArray(roomCustomPrompts) && roomCustomPrompts.length >= 10) {
-      showToast("Max 10 custom prompts per lobby", "warning");
+    if (Array.isArray(roomCustomPrompts) && roomCustomPrompts.length >= MAX_PROMPT_POOL_SIZE) {
+      showToast(`Max ${MAX_PROMPT_POOL_SIZE} custom prompts per lobby`, "warning");
       return;
     }
     try {
@@ -122,6 +151,88 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
       setSelectedPrompts((prev) => [...new Set([...prev, text])]);
     } catch (_e) {
       showToast("Failed to add prompt", "error");
+    }
+  };
+
+  const handleSavePromptPack = (packName) => {
+    const prompts = Array.isArray(roomCustomPrompts)
+      ? [...new Set(roomCustomPrompts.map((prompt) => prompt.trim()).filter(Boolean))]
+      : [];
+    const name = (packName || '').trim();
+
+    if (!name) {
+      showToast("Name your prompt pack first", "warning");
+      return;
+    }
+    if (prompts.length === 0) {
+      showToast("Add custom prompts before saving a pack", "warning");
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const existingIndex = savedPromptPacks.findIndex(
+      (pack) => pack.name.trim().toLowerCase() === name.toLowerCase()
+    );
+    const nextPack = {
+      id: existingIndex >= 0 ? savedPromptPacks[existingIndex].id : createPromptPackId(),
+      name,
+      prompts,
+      createdAt: existingIndex >= 0 ? savedPromptPacks[existingIndex].createdAt : nowIso,
+      updatedAt: nowIso,
+    };
+    const nextPacks =
+      existingIndex >= 0
+        ? savedPromptPacks.map((pack, index) => (index === existingIndex ? nextPack : pack))
+        : [nextPack, ...savedPromptPacks];
+
+    setSavedPromptPacks(nextPacks);
+    if (savePromptPacks(nextPacks)) {
+      showToast(`Saved "${name}" (${prompts.length} prompts)`, "success");
+    } else {
+      setSavedPromptPacks(savedPromptPacks);
+      showToast("Couldn't save pack in this browser", "error");
+    }
+  };
+
+  const handleLoadPromptPack = async (packId) => {
+    const pack = savedPromptPacks.find((item) => item.id === packId);
+    if (!pack) return;
+    const existingPrompts = new Set(Array.isArray(roomCustomPrompts) ? roomCustomPrompts : []);
+    const remainingSlots = Math.max(0, MAX_PROMPT_POOL_SIZE - existingPrompts.size);
+    const promptsThatCanFit = pack.prompts
+      .map((prompt) => prompt.trim())
+      .filter((prompt) => prompt && !existingPrompts.has(prompt))
+      .slice(0, remainingSlots);
+
+    try {
+      const result = await addCustomPromptsMutation({
+        code: gameCode,
+        prompts: pack.prompts,
+        createdBy: "anon",
+      });
+      setSelectedPrompts((prev) => [...new Set([...prev, ...promptsThatCanFit])]);
+
+      if (result?.maxedOut) {
+        showToast(`Added ${result.added} prompts. Room is full at ${MAX_PROMPT_POOL_SIZE}.`, "warning");
+      } else if (result?.added > 0) {
+        showToast(`Added ${result.added} prompts from "${pack.name}"`, "success");
+      } else {
+        showToast("Those prompts are already in this lobby", "info");
+      }
+    } catch (error) {
+      console.error("Failed to load prompt pack:", error);
+      showToast("Failed to load prompt pack", "error");
+    }
+  };
+
+  const handleDeletePromptPack = (packId) => {
+    const nextPacks = savedPromptPacks.filter((pack) => pack.id !== packId);
+    setSavedPromptPacks(nextPacks);
+    if (savePromptPacks(nextPacks)) {
+      showToast("Prompt pack deleted", "success");
+    } else {
+      setSavedPromptPacks(savedPromptPacks);
+      showToast("Couldn't update saved packs", "error");
     }
   };
   
@@ -152,13 +263,13 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
     }
 
     // Validate settings
-    if (selectedPrompts.length < 5) {
-      showToast("Please select at least 5 prompts", "warning");
+    if (selectedPrompts.length < MIN_PROMPT_POOL_SIZE) {
+      showToast(`Please select at least ${MIN_PROMPT_POOL_SIZE} prompts`, "warning");
       return;
     }
 
-    if (selectedPrompts.length > 20) {
-      showToast("Please select no more than 20 prompts", "warning");
+    if (selectedPrompts.length > MAX_PROMPT_POOL_SIZE) {
+      showToast(`Please select no more than ${MAX_PROMPT_POOL_SIZE} prompts`, "warning");
       return;
     }
 
@@ -352,7 +463,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
                 Select Prompts
               </label>
               <span className="text-xs text-gray-400">
-                {selectedPrompts.length} selected (min: 5, max: 20)
+                {selectedPrompts.length} selected (min: {MIN_PROMPT_POOL_SIZE}, max: {MAX_PROMPT_POOL_SIZE})
               </span>
             </div>
             
@@ -361,7 +472,11 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
               customPrompts={Array.isArray(roomCustomPrompts) ? roomCustomPrompts : []}
               onAddPrompt={handleAddCustomPrompt}
               onRemovePrompt={handleRemoveCustomPrompt}
-              maxPrompts={10}
+              maxPrompts={MAX_PROMPT_POOL_SIZE}
+              savedPromptPacks={savedPromptPacks}
+              onSavePack={handleSavePromptPack}
+              onLoadPack={handleLoadPromptPack}
+              onDeletePack={handleDeletePromptPack}
             />
             
             {/* Prompt categories */}
@@ -382,18 +497,18 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
         {/* Fixed action buttons */}
         <div className="p-6 pt-4 border-t border-gray-700 bg-[#1a1a1a]">
           <div className="flex flex-col gap-3">
-            {(selectedPrompts.length < 5 || selectedPrompts.length > 20) && (
+            {(selectedPrompts.length < MIN_PROMPT_POOL_SIZE || selectedPrompts.length > MAX_PROMPT_POOL_SIZE) && (
               <p className="text-sm text-yellow-500 text-center">
-                {selectedPrompts.length < 5
-                  ? `Select at least 5 prompts (${selectedPrompts.length} selected)`
-                  : `Maximum 20 prompts allowed (${selectedPrompts.length} selected)`
+                {selectedPrompts.length < MIN_PROMPT_POOL_SIZE
+                  ? `Select at least ${MIN_PROMPT_POOL_SIZE} prompts (${selectedPrompts.length} selected)`
+                  : `Maximum ${MAX_PROMPT_POOL_SIZE} prompts allowed (${selectedPrompts.length} selected)`
                 }
               </p>
             )}
             <button
               onClick={applySettings}
               className="w-full py-3 green-btn rounded-md text-black font-semibold transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-              disabled={selectedPrompts.length < 5 || selectedPrompts.length > 20}
+              disabled={selectedPrompts.length < MIN_PROMPT_POOL_SIZE || selectedPrompts.length > MAX_PROMPT_POOL_SIZE}
             >
               Apply Settings
             </button>
