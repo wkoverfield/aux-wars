@@ -6,11 +6,11 @@ import { Link } from 'react-router-dom';
  */
 export default function PrivacyPolicy() {
   return (
-    <div className="min-h-svh w-full text-white px-6 py-12 flex justify-center">
-      <div className="max-w-2xl w-full">
+    <div className="h-full w-full overflow-y-auto text-white px-6 py-12 flex justify-center">
+      <div className="max-w-2xl w-full pb-16">
         <Link to="/" className="text-[#68d570] underline text-sm">← Back to Aux Wars</Link>
         <h1 className="text-3xl font-bold mt-6 mb-2">Privacy Policy</h1>
-        <p className="text-gray-400 text-sm mb-8">Last updated: May 31, 2026</p>
+        <p className="text-gray-400 text-sm mb-8">Last updated: June 18, 2026</p>
 
         <div className="space-y-6 text-gray-300 text-sm leading-relaxed">
           <section>
@@ -27,7 +27,7 @@ export default function PrivacyPolicy() {
             <ul className="list-disc pl-5 space-y-1">
               <li>A temporary display name and an anonymous game/session identifier, used only to run the game in real time.</li>
               <li>Your song picks and ratings within a game.</li>
-              <li>Anonymous, aggregate usage analytics (e.g. how many games are played).</li>
+              <li>Anonymous, aggregate usage analytics (e.g. how many games are played and which features are used).</li>
             </ul>
             <p className="mt-2">Game rooms are temporary and are automatically cleaned up after they end.</p>
           </section>
@@ -45,9 +45,10 @@ export default function PrivacyPolicy() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-2">Third-party services</h2>
             <p>
-              We use the iTunes Search API and Deezer API to find songs and play 30-second
-              previews, Convex to run real-time game state, and Google AdSense for advertising
-              (when enabled). Each handles data under its own policies.
+              We use YouTube, the iTunes Search API, and Deezer API to find songs and play
+              clips/previews, Convex to run real-time game state, PostHog for product analytics,
+              and Google AdSense for advertising (when enabled). Each handles data under its
+              own policies.
             </p>
           </section>
 
