@@ -33,10 +33,10 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
 
   // For hosts creating new games, use saved settings. For joining players, use room state.
   const savedSettings = isHost ? getSavedSettings() : null;
-  const [rounds, setRounds] = useState(roomSettings?.numberOfRounds || 3);
-  const [roundLength, setRoundLength] = useState(roomSettings?.roundLength || 60); // Song selection time limit
-  const [snippetDuration, setSnippetDuration] = useState(roomSettings?.snippetDuration || 30); // Audio playback duration
-  const [selectedPrompts, setSelectedPrompts] = useState(roomSettings?.selectedPrompts || []);
+  const [rounds, setRounds] = useState(roomSettings?.numberOfRounds ?? 3);
+  const [roundLength, setRoundLength] = useState(roomSettings?.roundLength ?? 60); // Song selection time limit
+  const [snippetDuration, setSnippetDuration] = useState(roomSettings?.snippetDuration ?? 30); // Audio playback duration
+  const [selectedPrompts, setSelectedPrompts] = useState(roomSettings?.selectedPrompts ?? []);
   const [enablePromptVoting, setEnablePromptVoting] = useState(roomSettings?.enablePromptVoting !== false); // default true
   const [anonymousMode, setAnonymousMode] = useState(roomSettings?.anonymousMode ?? false); // default false
   // Shared custom prompts, reactive per room
