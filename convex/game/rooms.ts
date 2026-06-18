@@ -10,6 +10,9 @@ function now() {
 // much higher cap (effectively unlimited for a party, while protecting the backend).
 const FREE_PLAYER_CAP = 8;
 const PRO_PLAYER_CAP = 50;
+const MIN_SELECTED_PROMPTS = 5;
+const MAX_SELECTED_PROMPTS = 50;
+const MAX_CUSTOM_PROMPTS = 50;
 
 export const hostGame = mutation({
   args: { proToken: v.optional(v.string()) },
@@ -338,37 +341,38 @@ export const updateSettings = mutation({
   handler: async (ctx, { code, playerId, numberOfRounds, roundLength, snippetDuration, selectedPrompts, enablePromptVoting, anonymousMode }) => {
     // Validate settings
     if (numberOfRounds < 1 || numberOfRounds > 10) {
-      throw new Error("Number of rounds must be between 1 and 10");
+      return { success: false, message: "Number of rounds must be between 1 and 10" } as const;
     }
     // roundLength: 0 = no limit, or 15-300 seconds
     if (roundLength !== 0 && (roundLength < 15 || roundLength > 300)) {
-      throw new Error("Round length must be 0 (no limit) or between 15-300 seconds");
+      return { success: false, message: "Round length must be 0 (no limit) or between 15-300 seconds" } as const;
     }
     // snippetDuration: 0 = full song, or 15/30/45/60/90 seconds
     const validSnippetDurations = [0, 15, 30, 45, 60, 90];
     if (!validSnippetDurations.includes(snippetDuration)) {
-      throw new Error("Invalid snippet duration");
+      return { success: false, message: "Invalid snippet duration" } as const;
     }
-    if (selectedPrompts.length < 1 || selectedPrompts.length > 50) {
-      throw new Error("Must have between 1 and 50 prompts selected");
+    if (selectedPrompts.length < MIN_SELECTED_PROMPTS || selectedPrompts.length > MAX_SELECTED_PROMPTS) {
+      return { success: false, message: `Must have between ${MIN_SELECTED_PROMPTS} and ${MAX_SELECTED_PROMPTS} prompts selected` } as const;
     }
 
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) {
-      throw new Error("Room not found");
+      return { success: false, message: "Room not found" } as const;
     }
 
     // Only host can change settings
     const player = await getPlayer(ctx, code, playerId);
     if (!player) {
-      throw new Error("Player not found");
+      return { success: false, message: "Player not found" } as const;
     }
     if (!player.isHost) {
-      throw new Error("Only the host can update settings");
+      return { success: false, message: "Only the host can update settings" } as const;
     }
 
     await ctx.db.patch(room._id, {
       settings: {
+        ...room.settings,
         numberOfRounds,
         roundLength,
         snippetDuration,
@@ -378,6 +382,7 @@ export const updateSettings = mutation({
       },
       lastActivityAt: now(),
     });
+    return { success: true } as const;
   },
 });
 
@@ -419,10 +424,15 @@ export const getCustomPrompts = query({
 export const addCustomPrompt = mutation({
   args: { code: v.string(), text: v.string(), createdBy: v.string() },
   handler: async (ctx, { code, text, createdBy }) => {
+    const room = await getRoomByCodeInternal(ctx, code);
+    if (!room) {
+      return { success: false, message: "Room not found" } as const;
+    }
+
     // Validate custom prompt length
     const trimmedText = text.trim();
     if (!trimmedText || trimmedText.length < 1 || trimmedText.length > 200) {
-      throw new Error("Prompt must be between 1 and 200 characters");
+      return { success: false, message: "Prompt must be between 1 and 200 characters" } as const;
     }
 
     // Custom prompt pool cap. Round count stays capped separately, so a larger
@@ -431,8 +441,8 @@ export const addCustomPrompt = mutation({
       .query("customPrompts")
       .withIndex("by_room", (q) => q.eq("roomCode", code))
       .collect();
-    if (allPrompts.length >= 50) {
-      throw new Error("Maximum custom prompts reached (50)");
+    if (allPrompts.length >= MAX_CUSTOM_PROMPTS) {
+      return { success: false, message: `Maximum custom prompts reached (${MAX_CUSTOM_PROMPTS})` } as const;
     }
 
     const playerPrompts = allPrompts.filter(p => p.createdBy === createdBy);
@@ -440,7 +450,7 @@ export const addCustomPrompt = mutation({
     // Rate limiting: 2 second cooldown per player
     const recentPrompt = playerPrompts.find(p => Date.now() - p.createdAt < 2000);
     if (recentPrompt) {
-      throw new Error("Please wait before adding another prompt");
+      return { success: false, message: "Please wait before adding another prompt" } as const;
     }
 
     // Check for duplicate
@@ -449,7 +459,7 @@ export const addCustomPrompt = mutation({
       .withIndex("by_room_text", (q) => q.eq("roomCode", code).eq("text", trimmedText))
       .unique();
     if (existing) {
-      throw new Error("This prompt already exists");
+      return { success: false, message: "This prompt already exists" } as const;
     }
 
     await ctx.db.insert("customPrompts", {
@@ -458,12 +468,19 @@ export const addCustomPrompt = mutation({
       createdBy,
       createdAt: Date.now(),
     });
+    const selected = await includeCustomPromptsInSelectedPool(ctx, room, [trimmedText]);
+    return { success: true, added: 1, selected } as const;
   },
 });
 
 export const addCustomPrompts = mutation({
   args: { code: v.string(), prompts: v.array(v.string()), createdBy: v.string() },
   handler: async (ctx, { code, prompts, createdBy }) => {
+    const room = await getRoomByCodeInternal(ctx, code);
+    if (!room) {
+      return { success: false, message: "Room not found", added: 0, skipped: prompts.length, maxedOut: false, selected: 0 } as const;
+    }
+
     const allPrompts = await ctx.db
       .query("customPrompts")
       .withIndex("by_room", (q) => q.eq("roomCode", code))
@@ -485,7 +502,7 @@ export const addCustomPrompts = mutation({
       nextPrompts.push(text);
     }
 
-    const remainingSlots = Math.max(0, 50 - allPrompts.length);
+    const remainingSlots = Math.max(0, MAX_CUSTOM_PROMPTS - allPrompts.length);
     const promptsToAdd = nextPrompts.slice(0, remainingSlots);
     const maxedOut = nextPrompts.length > promptsToAdd.length || remainingSlots === 0;
 
@@ -497,11 +514,14 @@ export const addCustomPrompts = mutation({
         createdAt: Date.now(),
       });
     }
+    const selected = await includeCustomPromptsInSelectedPool(ctx, room, promptsToAdd);
 
     return {
+      success: true,
       added: promptsToAdd.length,
       skipped: skipped + Math.max(0, nextPrompts.length - promptsToAdd.length),
       maxedOut,
+      selected,
     };
   },
 });
@@ -546,6 +566,36 @@ async function getRoomByCodeInternal(ctx: any, code: string) {
 
 async function touchRoom(ctx: any, roomId: any) {
   await ctx.db.patch(roomId, { lastActivityAt: now() });
+}
+
+async function includeCustomPromptsInSelectedPool(ctx: any, room: any, prompts: string[]) {
+  const currentPrompts = Array.isArray(room.settings?.selectedPrompts)
+    ? room.settings.selectedPrompts
+    : [];
+  const nextPrompts = [...currentPrompts];
+  let selected = 0;
+
+  for (const prompt of prompts) {
+    if (nextPrompts.length >= MAX_SELECTED_PROMPTS) break;
+    if (!nextPrompts.includes(prompt)) {
+      nextPrompts.push(prompt);
+      selected += 1;
+    }
+  }
+
+  if (selected > 0) {
+    await ctx.db.patch(room._id, {
+      settings: {
+        ...room.settings,
+        selectedPrompts: nextPrompts,
+      },
+      lastActivityAt: now(),
+    });
+  } else {
+    await touchRoom(ctx, room._id);
+  }
+
+  return selected;
 }
 
 /**
@@ -624,4 +674,3 @@ const defaultPrompts = [
   "If life had a montage, this song would play in mine.",
   "A song that instantly hypes up the whole room.",
 ];
-
