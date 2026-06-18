@@ -1,58 +1,79 @@
-# aux wars
+# Aux Wars
 
-settle music taste arguments with your friends
+Settle music taste arguments with your friends.
 
-**[play now at aux-wars.com](https://aux-wars.com)**
+**[Play now at aux-wars.com](https://aux-wars.com)**
 
 ![Landing Page](screenshots/landing.png)
 
-## how it works
+## How It Works
 
-1. **host a game** - create a room and share the code with friends
-2. **get a prompt** - something like "song that makes you wanna text your ex"
-3. **pick a song** - search for the perfect track and preview it
-4. **rate each other** - listen to everyone's picks and vote 1-5
-5. **crown the winner** - best average rating wins the round
+1. **Host a game** - create a room and share the code with friends.
+2. **Get a prompt** - something like "song that makes you wanna text your ex."
+3. **Pick a song** - search for a track, then choose the exact clip you want everyone to hear.
+4. **Rate each other** - listen to everyone's picks and vote 1-5.
+5. **Crown the winner** - best average rating wins the round.
 
-## screenshots
+## Screenshots
 
-### lobby
+### Lobby
 ![Lobby](screenshots/lobby-enter-name.png)
 
-### game settings
+### Game Settings
 ![Settings](screenshots/settings.png)
 
-### how to play
+### How to Play
 ![How to Play](screenshots/how-to-play.png)
 
-<!-- TODO: add gameplay screenshots
-### song selection
+## Screenshots To Add
+
+These are the next key pages to capture when the UI is ready:
+
+- Song search + selection
+- YouTube clip selector
+- Rating playback
+- Round results
+- Game winner
+- Feedback modal
+- Privacy / cookie consent
+
+<!--
+### Song Selection
 ![Song Selection](screenshots/song-selection.png)
 
-### rating
+### YouTube Clip Selector
+![Clip Selector](screenshots/clip-selector.png)
+
+### Rating
 ![Rating](screenshots/rating.png)
 
-### results
+### Results
 ![Results](screenshots/results.png)
+
+### Game Winner
+![Game Winner](screenshots/game-winner.png)
 -->
 
-## features
+## Features
 
-- works on phones
-- no signups or logins
-- 30-second song previews from iTunes & Deezer
-- real-time multiplayer
-- custom prompts + themed prompt packs
-- configurable round timers
+- Works on phones and desktops.
+- No signups or logins.
+- Real-time multiplayer rooms with shareable codes.
+- YouTube-powered full-song search with draggable clip selection.
+- iTunes and Deezer fallback previews when YouTube search does not return results.
+- Custom prompts, themed prompt packs, and browser-local saved prompt packs.
+- Up to 50 custom or selected prompts while keeping games capped at 10 rounds.
+- Configurable song selection time, clip length, prompt voting, and anonymous mode.
+- Feedback, news, privacy, cookie consent, analytics, and ad-safe monetization plumbing.
 
-## stats
+## Stats
 
-**1,000+ games played** with 50,000+ song ratings
+**2,400+ games played** with **80,000+ song ratings**.
 
-## tech
+## Tech
 
-react, convex, itunes + deezer apis, tailwind
+React, Convex, Express/Railway, Vercel, Tailwind CSS, YouTube search, iTunes Search API, Deezer API, PostHog, and Google AdSense.
 
 ---
 
-built by [wilson overfield](https://github.com/woverfield)
+Built by [Wilson Overfield](https://github.com/woverfield).
