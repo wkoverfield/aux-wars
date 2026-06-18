@@ -3,7 +3,7 @@
  *
  * Starts the Express server for the iTunes + Deezer music search API proxy
  */
-import { server } from "./server.js";
+import { server, posthog } from "./server.js";
 
 const PORT = process.env.PORT || 3002;
 
@@ -23,8 +23,9 @@ server.on('error', (error) => {
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('[Music Proxy] SIGTERM received, closing server...');
+  await posthog.shutdown();
   server.close(() => {
     console.log('[Music Proxy] Server closed');
     process.exit(0);

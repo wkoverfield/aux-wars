@@ -27,6 +27,7 @@ const AudioPreviewPlayer = forwardRef(function AudioPreviewPlayer(
     onReady,
     onTimeUpdate,
     onEnded,
+    onPlayingChange,
     className = '',
   },
   ref
@@ -89,10 +90,17 @@ const AudioPreviewPlayer = forwardRef(function AudioPreviewPlayer(
         loop={loop}
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={() => onTimeUpdate?.(audioRef.current?.currentTime || 0)}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
+        onPlay={() => {
+          setIsPlaying(true);
+          onPlayingChange?.(true);
+        }}
+        onPause={() => {
+          setIsPlaying(false);
+          onPlayingChange?.(false);
+        }}
         onEnded={() => {
           setIsPlaying(false);
+          onPlayingChange?.(false);
           onEnded?.();
         }}
         onError={() => setHasError(true)}

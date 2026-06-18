@@ -33,10 +33,10 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
 
   // For hosts creating new games, use saved settings. For joining players, use room state.
   const savedSettings = isHost ? getSavedSettings() : null;
-  const [rounds, setRounds] = useState(roomSettings?.numberOfRounds || 3);
-  const [roundLength, setRoundLength] = useState(roomSettings?.roundLength || 60); // Song selection time limit
-  const [snippetDuration, setSnippetDuration] = useState(roomSettings?.snippetDuration || 30); // Audio playback duration
-  const [selectedPrompts, setSelectedPrompts] = useState(roomSettings?.selectedPrompts || []);
+  const [rounds, setRounds] = useState(roomSettings?.numberOfRounds ?? 3);
+  const [roundLength, setRoundLength] = useState(roomSettings?.roundLength ?? 60); // Song selection time limit
+  const [snippetDuration, setSnippetDuration] = useState(roomSettings?.snippetDuration ?? 30); // Audio playback duration
+  const [selectedPrompts, setSelectedPrompts] = useState(roomSettings?.selectedPrompts ?? []);
   const [enablePromptVoting, setEnablePromptVoting] = useState(roomSettings?.enablePromptVoting !== false); // default true
   const [anonymousMode, setAnonymousMode] = useState(roomSettings?.anonymousMode ?? false); // default false
   // Shared custom prompts, reactive per room
@@ -268,6 +268,38 @@ export default function SettingsModal({ showModal, onClose, gameCode, isHost = f
                   onClick={() => setRoundLength(value)}
                   className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
                     roundLength === value
+                      ? "bg-green-600 text-black"
+                      : "bg-[#242424] text-white hover:bg-[#333]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Clip length — how much of the song plays. Only affects YouTube
+              songs (full-song picks); iTunes/Deezer previews are fixed ~30s. */}
+          <div className="mb-6">
+            <label className="text-sm font-semibold text-white block mb-2">
+              Clip Length
+            </label>
+            <p className="text-xs text-gray-400 mb-3">How long the chosen clip plays (YouTube songs)</p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: 15, label: "15s" },
+                { value: 30, label: "30s" },
+                { value: 45, label: "45s" },
+                { value: 60, label: "60s" },
+                { value: 90, label: "90s" },
+                { value: 0, label: "Full Song" },
+              ].map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setSnippetDuration(value)}
+                  className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                    snippetDuration === value
                       ? "bg-green-600 text-black"
                       : "bg-[#242424] text-white hover:bg-[#333]"
                   }`}

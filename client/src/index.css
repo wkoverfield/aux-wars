@@ -5,12 +5,39 @@
   --default-font-family: "Plus Jakarta Sans";
 }
 
-/* Custom slider styles for snippet selector */
+/* Shared slider thumb styles. Track visuals are scoped per use case. */
 .slider {
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
   cursor: pointer;
+}
+
+.clip-playback-slider {
+  background: linear-gradient(
+    to right,
+    #68d570 0%,
+    #68d570 var(--progress, 0%),
+    #333 var(--progress, 0%),
+    #333 100%
+  );
+  border-radius: 999px;
+}
+
+.snippet-window-slider::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  background: #68d570;
+  border: 2px solid #f5f5f5;
+  box-shadow: none;
+}
+
+.snippet-window-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #68d570;
+  border: 2px solid #f5f5f5;
+  box-shadow: none;
 }
 
 .slider::-webkit-slider-thumb {

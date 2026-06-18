@@ -17,6 +17,7 @@
     "@vercel/analytics": "^1.5.0",
     "convex": "^1.14.0",
     "framer-motion": "^12.4.7",
+    "posthog-js": "^1.386.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.2.0",

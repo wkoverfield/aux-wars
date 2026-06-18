@@ -13,6 +13,7 @@ import { useSession } from "../../hooks/useSession";
 import { useToast } from "../../contexts/ToastContext";
 import { getProToken, useIsPro } from "../../services/pro";
 import { adsConfigured } from "../../services/ads";
+import { capture } from "../../services/posthog";
 
 const HOW_TO_PLAY = [
   { n: 1, title: "Host a game", text: "Create a room and share the code with your friends." },
@@ -53,6 +54,7 @@ export default function Home() {
     try {
       const seen = localStorage.getItem("aux-wars-seen");
       logEvent({ eventType: "session_start", metadata: { label: seen ? "returning" : "new" } });
+      capture("session_start", { visitor_type: seen ? "returning" : "new" });
       if (!seen) localStorage.setItem("aux-wars-seen", String(Date.now()));
     } catch { /* ignore storage errors */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps

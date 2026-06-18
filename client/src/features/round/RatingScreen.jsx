@@ -3,14 +3,15 @@ import { useMutation } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import record from '../../assets/record.svg';
 import SearchBar from '../../components/SearchBar';
-import AudioPreviewPlayer from '../../components/AudioPreviewPlayer';
+import TrackPlayer from '../../components/TrackPlayer';
 import { useToast } from '../../contexts/ToastContext';
 
 /**
  * RatingScreen component provides an interface for rating songs during the game.
- * Plays the song's 30s preview clip (HTML5 audio), shows album art, and a 5-star
- * rating system. In spectator mode, shows the player but hides voting controls
- * (for the player's own song).
+ * Plays the submitted clip — a chosen window of a full YouTube song, or an
+ * iTunes/Deezer 30s preview (TrackPlayer picks per source) — shows album art (or
+ * the video), and a 5-star rating system. In spectator mode, shows the player
+ * but hides voting controls (for the player's own song).
  *
  * @param {Object} props - Component props
  * @param {string} props.currentPrompt - The current game prompt
@@ -36,12 +37,20 @@ const RatingScreen = ({
   const [selectedRating, setSelectedRating] = useState(-1);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [progress, setProgress] = useState(0); // 0-1 playback progress
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const { showToast } = useToast();
   const logEvent = useMutation(api.analytics.logEvent);
   const clipStartRef = useRef(Date.now());
+  const playerRef = useRef(null);
 
   const previewUrl = songToRate?.previewUrl;
+  const videoId = songToRate?.videoId;
+  const snippet = songToRate?.snippet;
+  const startTime = snippet?.startTime ?? 0;
+  const endTime = snippet?.endTime ?? 0;
+  const hasPlayable = !!(previewUrl || videoId);
 
   // Format time as M:SS
   const formatTime = (seconds) => {
@@ -56,6 +65,17 @@ const RatingScreen = ({
    */
   const handleRatingClick = (index) => {
     setSelectedRating(index);
+  };
+
+  const handleTogglePlayback = () => {
+    playerRef.current?.toggle?.();
+  };
+
+  const handleSeek = (seconds) => {
+    const next = Math.max(0, Math.min(seconds, duration || seconds));
+    playerRef.current?.seekTo?.(next);
+    setPlaybackTime(next);
+    setProgress(duration > 0 ? Math.min(1, next / duration) : 0);
   };
 
   /**
@@ -106,6 +126,9 @@ const RatingScreen = ({
     setSelectedRating(-1);
     setHasSubmitted(false);
     setProgress(0);
+    setPlaybackTime(0);
+    setIsPlaying(false);
+    setDuration(0);
     clipStartRef.current = Date.now(); // reset listen timer per song
   }, [songToRate?.songId]);
 
@@ -123,8 +146,8 @@ const RatingScreen = ({
           <p>Rating Song {currentIndex + 1} of {totalSongs}</p>
         </div>
 
-        {/* Album art */}
-        {songToRate?.albumCover && (
+        {/* Album art — for preview tracks; YouTube tracks show the video instead */}
+        {songToRate?.albumCover && !videoId && (
           <div className="mb-4 flex justify-center">
             <img
               src={songToRate.albumCover}
@@ -134,34 +157,73 @@ const RatingScreen = ({
           </div>
         )}
 
-        {/* Audio preview player */}
-        {previewUrl && (
-          <div className="mb-4 flex justify-center">
-            <AudioPreviewPlayer
+        {/* Player — YouTube window (aspect-video) or audio preview (button) */}
+        {hasPlayable && (
+          <div className="w-full mb-4 flex justify-center">
+            <TrackPlayer
+              ref={playerRef}
+              videoId={videoId}
               src={previewUrl}
+              startTime={startTime}
+              endTime={endTime}
               autoPlay
               loop
-              showControls
+              showControls={!videoId}
               onReady={(d) => setDuration(d)}
-              onTimeUpdate={(t) => setProgress(duration > 0 ? Math.min(1, t / duration) : 0)}
+              onTimeUpdate={(t) => {
+                setPlaybackTime(t);
+                setProgress(duration > 0 ? Math.min(1, t / duration) : 0);
+              }}
+              onPlayingChange={setIsPlaying}
             />
           </div>
         )}
 
-        {/* Playback progress indicator */}
-        {previewUrl && duration > 0 && (
-          <div className="w-full max-w-md mb-4 px-2">
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-400 min-w-[40px]">
-                {formatTime(progress * duration)}
-              </span>
-              <div className="flex-1 h-1.5 bg-[#333] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[#1db954] rounded-full transition-all duration-200"
-                  style={{ width: `${progress * 100}%` }}
+        {/* Playback controls */}
+        {hasPlayable && duration > 0 && (
+          <div className="w-full max-w-md mb-5 px-1">
+            <div className="flex items-center gap-3 rounded-[8px] border border-white/10 bg-[#111]/90 px-3 py-3">
+              <button
+                type="button"
+                onClick={handleTogglePlayback}
+                aria-label={isPlaying ? 'Pause clip' : 'Play clip'}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#68d570] text-black transition hover:bg-[#7de884] active:scale-95"
+              >
+                {isPlaying ? (
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <rect x="6" y="5" width="4" height="14" rx="1" />
+                    <rect x="14" y="5" width="4" height="14" rx="1" />
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M8 5.14v13.72a1 1 0 0 0 1.54.84l10.29-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14z" />
+                  </svg>
+                )}
+              </button>
+
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">
+                    Clip
+                  </span>
+                  <span className="text-xs tabular-nums text-white/70">
+                    {formatTime(playbackTime)}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  aria-label="Clip playback position"
+                  min={0}
+                  max={Math.max(0, Math.floor(duration))}
+                  step={0.25}
+                  value={Math.min(playbackTime, duration)}
+                  onChange={(e) => handleSeek(Number(e.target.value))}
+                  className="slider clip-playback-slider h-3 w-full"
+                  style={{ '--progress': `${progress * 100}%` }}
                 />
               </div>
-              <span className="text-xs text-gray-400 min-w-[40px] text-right">
+
+              <span className="flex h-8 min-w-[48px] items-center justify-center rounded-md bg-white/[0.07] px-2 text-xs tabular-nums text-white/75">
                 {formatTime(duration)}
               </span>
             </div>
