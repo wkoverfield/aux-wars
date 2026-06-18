@@ -120,6 +120,8 @@ export default defineSchema({
     upvotes: v.number(),
     upvoterIds: v.array(v.string()), // Track who voted (prevent double voting)
     authorName: v.optional(v.string()),
+    mergedInto: v.optional(v.id("feedback")),
+    mergedAt: v.optional(v.string()),
     createdAt: v.string(),
   })
     .index("by_upvotes", ["upvotes"])
@@ -180,5 +182,4 @@ export default defineSchema({
     visitorId: v.string(),
   }).index("by_date_and_visitor", ["date", "visitorId"]),
 });
-
 
