@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
  * @param {Function} props.onSavePack - Callback when saving current prompts as a pack
  * @param {Function} props.onLoadPack - Callback when loading a saved pack
  * @param {Function} props.onDeletePack - Callback when deleting a saved pack
+ * @param {boolean} props.canRemovePrompts - Whether prompt removal controls are shown
  * @returns {JSX.Element} Rendered component
  */
 export default function CustomPromptInput({
@@ -23,7 +24,8 @@ export default function CustomPromptInput({
   savedPromptPacks = [],
   onSavePack,
   onLoadPack,
-  onDeletePack
+  onDeletePack,
+  canRemovePrompts = true
 }) {
   const [newPrompt, setNewPrompt] = useState('');
   const [packName, setPackName] = useState('');
@@ -184,24 +186,27 @@ export default function CustomPromptInput({
                       className="flex items-center justify-between p-2 bg-[#1a1a1a] rounded-md"
                     >
                       <span className="text-white text-sm flex-1 mr-2">{prompt}</span>
-                      <button
-                        onClick={() => onRemovePrompt(index)}
-                        className="text-red-400 hover:text-red-300 transition-colors"
-                      >
-                        <svg
-                          className="w-5 h-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
+                      {canRemovePrompts && (
+                        <button
+                          type="button"
+                          onClick={() => onRemovePrompt(index)}
+                          className="text-red-400 hover:text-red-300 transition-colors"
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M6 18L18 6M6 6l12 12"
-                          />
-                        </svg>
-                      </button>
+                          <svg
+                            className="w-5 h-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M6 18L18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      )}
                     </motion.div>
                   ))}
                 </div>

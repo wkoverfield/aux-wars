@@ -39,6 +39,15 @@ function createPromptPackId() {
   return globalThis.crypto?.randomUUID?.() || `pack-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function formatDurationLabel(seconds) {
+  if (seconds === 0) return "No limit";
+  if (seconds >= 60) {
+    const minutes = seconds / 60;
+    return `${minutes % 1 === 0 ? minutes : minutes.toFixed(1)} min`;
+  }
+  return `${seconds}s`;
+}
+
 /**
  * SettingsModal component for configuring game settings.
  *
@@ -48,7 +57,7 @@ function createPromptPackId() {
  * @param {string} props.gameCode - Current game code
  * @returns {JSX.Element|null} Rendered component or null if not visible
  */
-export default function SettingsModal({ showModal, onClose, gameCode, playerId }) {
+export default function SettingsModal({ showModal, onClose, gameCode, playerId, isHost = false }) {
   const roomQuery = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
   // const socket = useSocket();
   const updateSettingsMutation = useMutation(api.game.rooms.updateSettings);
@@ -114,19 +123,21 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
    * @param {string} prompt - Prompt to toggle
    */
   const togglePrompt = (prompt) => {
+    if (!isHost) return;
     if (selectedPrompts.includes(prompt)) {
       setSelectedPrompts(selectedPrompts.filter((p) => p !== prompt));
     } else {
       setSelectedPrompts([...selectedPrompts, prompt]);
     }
   };
-  
+
   /**
    * Selects or deselects all prompts in a category
    * @param {Array} prompts - Array of prompts to select/deselect
    * @param {boolean} select - Whether to select or deselect
    */
   const handleSelectAll = (prompts, select) => {
+    if (!isHost) return;
     if (select) {
       const newPrompts = [...new Set([...selectedPrompts, ...prompts])];
       setSelectedPrompts(newPrompts);
@@ -134,7 +145,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
       setSelectedPrompts(selectedPrompts.filter(p => !prompts.includes(p)));
     }
   };
-  
+
   /**
    * Adds a custom prompt
    * @param {string} prompt - The custom prompt to add
@@ -147,8 +158,15 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
       return;
     }
     try {
-      await addCustomPromptMutation({ code: gameCode, text, createdBy: "anon" });
-      setSelectedPrompts((prev) => [...new Set([...prev, text])]);
+      const result = await addCustomPromptMutation({ code: gameCode, text, createdBy: playerId || "anon" });
+      if (result?.success === false) {
+        showToast(result.message || "Failed to add prompt", "warning");
+        return;
+      }
+      setSelectedPrompts((prev) => [...new Set([...prev, text])].slice(0, MAX_PROMPT_POOL_SIZE));
+      if (result?.selected === 0) {
+        showToast(`Added prompt. Host prompt pool is full at ${MAX_PROMPT_POOL_SIZE}.`, "warning");
+      }
     } catch (_e) {
       showToast("Failed to add prompt", "error");
     }
@@ -208,12 +226,18 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
       const result = await addCustomPromptsMutation({
         code: gameCode,
         prompts: pack.prompts,
-        createdBy: "anon",
+        createdBy: playerId || "anon",
       });
-      setSelectedPrompts((prev) => [...new Set([...prev, ...promptsThatCanFit])]);
+      if (result?.success === false) {
+        showToast(result.message || "Failed to load prompt pack", "warning");
+        return;
+      }
+      setSelectedPrompts((prev) => [...new Set([...prev, ...promptsThatCanFit])].slice(0, MAX_PROMPT_POOL_SIZE));
 
       if (result?.maxedOut) {
         showToast(`Added ${result.added} prompts. Room is full at ${MAX_PROMPT_POOL_SIZE}.`, "warning");
+      } else if (result?.added > 0 && result?.selected === 0) {
+        showToast(`Added ${result.added} prompts. Host prompt pool is full at ${MAX_PROMPT_POOL_SIZE}.`, "warning");
       } else if (result?.added > 0) {
         showToast(`Added ${result.added} prompts from "${pack.name}"`, "success");
       } else {
@@ -235,12 +259,16 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
       showToast("Couldn't update saved packs", "error");
     }
   };
-  
+
   /**
    * Removes a custom prompt
    * @param {number} index - Index of the prompt to remove
    */
   const handleRemoveCustomPrompt = async (index) => {
+    if (!isHost) {
+      showToast("Only the host can remove prompts", "warning");
+      return;
+    }
     if (!Array.isArray(roomCustomPrompts)) return;
     const promptToRemove = roomCustomPrompts[index];
     if (!promptToRemove) return;
@@ -256,6 +284,11 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
    * Applies the current settings to the game
    */
   const applySettings = async () => {
+    if (!isHost) {
+      onClose();
+      return;
+    }
+
     // Validate session first
     if (!playerId) {
       showToast("Session expired. Please refresh the page.", "error");
@@ -285,7 +318,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
 
     // Update settings in Convex and wait for completion (host only)
     try {
-      await updateSettingsMutation({
+      const result = await updateSettingsMutation({
         code: gameCode,
         playerId,
         numberOfRounds: rounds,
@@ -295,6 +328,10 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
         enablePromptVoting,
         anonymousMode
       });
+      if (result?.success === false) {
+        showToast(result.message || "Failed to update settings. Please try again.", "warning");
+        return;
+      }
       onClose(); // Only close after successful update
     } catch (error) {
       console.error("Settings update failed:", error);
@@ -305,7 +342,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
   return (
     <AnimatePresence>
       {showModal && (
-        <motion.div 
+        <motion.div
           className="settings-modal z-50 fixed inset-0 flex items-center justify-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -313,160 +350,209 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
           transition={{ duration: 0.2 }}
         >
           {/* Backdrop */}
-          <motion.div 
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm" 
+          <motion.div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
             onClick={onClose}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
           />
-          
+
           {/* Modal content */}
-          <motion.div 
-            className="relative w-full max-w-xl mx-4 bg-[#1a1a1a] rounded-lg shadow-2xl flex flex-col" 
+          <motion.div
+            className="relative w-full max-w-xl mx-4 bg-[#1a1a1a] rounded-lg shadow-2xl flex flex-col"
             style={{ maxHeight: '85vh' }}
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
-            transition={{ 
+            transition={{
               type: "spring",
               stiffness: 300,
               damping: 30
             }}
           >
         {/* Header */}
-        <div className="p-6 pb-4 border-b border-gray-700">
-          <h2 className="text-2xl font-bold text-white mb-1">Game Settings</h2>
-          <p className="text-gray-400 text-sm">Customize your game experience</p>
-        </div>
-        
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto p-6 pt-4">
-          {/* Number of rounds */}
-          <div className="mb-6">
-            <label className="text-sm font-semibold text-white block mb-2">
-              Number of Rounds
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="10"
-              className="w-full rounded-md bg-[#242424] text-white p-3 focus:outline-none focus:ring-2 focus:ring-green-500"
-              value={rounds}
-              onChange={(e) => setRounds(parseInt(e.target.value) || 1)}
-            />
-          </div>
+	        <div className="p-6 pb-4 border-b border-gray-700">
+	          <h2 className="text-2xl font-bold text-white mb-1">
+	            {isHost ? "Game Settings" : "Custom Prompts"}
+	          </h2>
+	          <p className="text-gray-400 text-sm">
+	            {isHost
+	              ? "Customize your game experience"
+	              : "Add prompt ideas for this lobby"}
+	          </p>
+	        </div>
 
-          {/* Song Selection Time */}
-          <div className="mb-6">
-            <label className="text-sm font-semibold text-white block mb-2">
-              Song Selection Time
-            </label>
-            <p className="text-xs text-gray-400 mb-3">How long players have to pick their song</p>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: 30, label: "30s" },
-                { value: 60, label: "60s" },
-                { value: 90, label: "90s" },
-                { value: 120, label: "2 min" },
-                { value: 180, label: "3 min" },
-                { value: 0, label: "No Limit" },
-              ].map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setRoundLength(value)}
-                  className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-                    roundLength === value
-                      ? "bg-green-600 text-black"
-                      : "bg-[#242424] text-white hover:bg-[#333]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+	        {/* Scrollable content */}
+	        <div className="flex-1 overflow-y-auto p-6 pt-4">
+          {isHost && (
+            <>
+	              {/* Number of rounds */}
+	              <div className="mb-6">
+	                <label className="text-sm font-semibold text-white block mb-2">
+	                  Number of Rounds
+	                </label>
+	                <input
+	                  type="number"
+	                  min="1"
+	                  max="10"
+	                  className="w-full rounded-md bg-[#242424] text-white p-3 focus:outline-none focus:ring-2 focus:ring-green-500"
+	                  value={rounds}
+	                  onChange={(e) => setRounds(parseInt(e.target.value) || 1)}
+	                />
+	              </div>
 
-          {/* Clip length — how much of the song plays. Only affects YouTube
-              songs (full-song picks); iTunes/Deezer previews are fixed ~30s. */}
-          <div className="mb-6">
-            <label className="text-sm font-semibold text-white block mb-2">
-              Clip Length
-            </label>
-            <p className="text-xs text-gray-400 mb-3">How long the chosen clip plays (YouTube songs)</p>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: 15, label: "15s" },
-                { value: 30, label: "30s" },
-                { value: 45, label: "45s" },
-                { value: 60, label: "60s" },
-                { value: 90, label: "90s" },
-                { value: 0, label: "Full Song" },
-              ].map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setSnippetDuration(value)}
-                  className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-                    snippetDuration === value
-                      ? "bg-green-600 text-black"
-                      : "bg-[#242424] text-white hover:bg-[#333]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+	              {/* Song Selection Time */}
+	              <div className="mb-6">
+	                <label className="text-sm font-semibold text-white block mb-2">
+	                  Song Selection Time
+	                </label>
+	                <p className="text-xs text-gray-400 mb-3">How long players have to pick their song</p>
+	                <div className="grid grid-cols-3 gap-2">
+	                  {[
+	                    { value: 30, label: "30s" },
+	                    { value: 60, label: "60s" },
+	                    { value: 90, label: "90s" },
+	                    { value: 120, label: "2 min" },
+	                    { value: 180, label: "3 min" },
+	                    { value: 0, label: "No Limit" },
+	                  ].map(({ value, label }) => (
+	                    <button
+	                      key={value}
+	                      type="button"
+	                      onClick={() => setRoundLength(value)}
+	                      className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+	                        roundLength === value
+	                          ? "bg-green-600 text-black"
+	                          : "bg-[#242424] text-white hover:bg-[#333]"
+	                      }`}
+	                    >
+	                      {label}
+	                    </button>
+	                  ))}
+	                </div>
+	              </div>
 
-          {/* Game Mode Toggles */}
-          <div className="mb-6 space-y-4">
-            <label className="text-sm font-semibold text-white block mb-2">
-              Game Modes
-            </label>
+	              {/* Clip length — how much of the song plays. Only affects YouTube
+	                  songs (full-song picks); iTunes/Deezer previews are fixed ~30s. */}
+	              <div className="mb-6">
+	                <label className="text-sm font-semibold text-white block mb-2">
+	                  Clip Length
+	                </label>
+	                <p className="text-xs text-gray-400 mb-3">How long the chosen clip plays (YouTube songs)</p>
+	                <div className="grid grid-cols-3 gap-2">
+	                  {[
+	                    { value: 15, label: "15s" },
+	                    { value: 30, label: "30s" },
+	                    { value: 45, label: "45s" },
+	                    { value: 60, label: "60s" },
+	                    { value: 90, label: "90s" },
+	                    { value: 0, label: "Full Song" },
+	                  ].map(({ value, label }) => (
+	                    <button
+	                      key={value}
+	                      type="button"
+	                      onClick={() => setSnippetDuration(value)}
+	                      className={`py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+	                        snippetDuration === value
+	                          ? "bg-green-600 text-black"
+	                          : "bg-[#242424] text-white hover:bg-[#333]"
+	                      }`}
+	                    >
+	                      {label}
+	                    </button>
+	                  ))}
+	                </div>
+	              </div>
 
-            {/* Prompt Voting Toggle */}
-            <div
-              className="flex items-center justify-between p-3 bg-[#242424] rounded-md cursor-pointer hover:bg-[#333] transition-colors"
-              onClick={() => setEnablePromptVoting(!enablePromptVoting)}
-            >
-              <div>
-                <p className="text-white font-medium">Prompt Voting</p>
-                <p className="text-xs text-gray-400">Let players vote to skip prompts</p>
+	              {/* Game Mode Toggles */}
+	              <div className="mb-6 space-y-4">
+	                <label className="text-sm font-semibold text-white block mb-2">
+	                  Game Modes
+	                </label>
+
+	                {/* Prompt Voting Toggle */}
+	                <div
+	                  className="flex items-center justify-between p-3 bg-[#242424] rounded-md cursor-pointer hover:bg-[#333] transition-colors"
+	                  onClick={() => setEnablePromptVoting(!enablePromptVoting)}
+	                >
+	                  <div>
+	                    <p className="text-white font-medium">Prompt Voting</p>
+	                    <p className="text-xs text-gray-400">Let players vote to skip prompts</p>
+	                  </div>
+	                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${enablePromptVoting ? 'bg-green-600' : 'bg-gray-600'}`}>
+	                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${enablePromptVoting ? 'translate-x-6' : 'translate-x-0'}`} />
+	                  </div>
+	                </div>
+
+	                {/* Anonymous Mode Toggle */}
+	                <div
+	                  className="flex items-center justify-between p-3 bg-[#242424] rounded-md cursor-pointer hover:bg-[#333] transition-colors"
+	                  onClick={() => setAnonymousMode(!anonymousMode)}
+	                >
+	                  <div>
+	                    <p className="text-white font-medium">Anonymous Mode</p>
+	                    <p className="text-xs text-gray-400">Hide who submitted songs during rating</p>
+	                  </div>
+	                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${anonymousMode ? 'bg-green-600' : 'bg-gray-600'}`}>
+	                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${anonymousMode ? 'translate-x-6' : 'translate-x-0'}`} />
+	                  </div>
+	                </div>
+	              </div>
+            </>
+          )}
+
+          {!isHost && (
+            <div className="mb-6 rounded-lg border border-gray-700 bg-[#202020] p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-white">Current Settings</h3>
+                <span className="text-xs text-gray-500">Host managed</span>
               </div>
-              <div className={`w-12 h-6 rounded-full p-1 transition-colors ${enablePromptVoting ? 'bg-green-600' : 'bg-gray-600'}`}>
-                <div className={`w-4 h-4 rounded-full bg-white transition-transform ${enablePromptVoting ? 'translate-x-6' : 'translate-x-0'}`} />
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Rounds</p>
+                  <p className="mt-1 text-white">{rounds}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Song Pick Time</p>
+                  <p className="mt-1 text-white">{formatDurationLabel(roundLength)}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Clip Length</p>
+                  <p className="mt-1 text-white">
+                    {snippetDuration === 0 ? "Full song" : formatDurationLabel(snippetDuration)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Prompt Voting</p>
+                  <p className="mt-1 text-white">{enablePromptVoting ? "On" : "Off"}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Anonymous Mode</p>
+                  <p className="mt-1 text-white">{anonymousMode ? "On" : "Off"}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Prompt Pool</p>
+                  <p className="mt-1 text-white">{selectedPrompts.length}/{MAX_PROMPT_POOL_SIZE}</p>
+                </div>
               </div>
             </div>
-
-            {/* Anonymous Mode Toggle */}
-            <div
-              className="flex items-center justify-between p-3 bg-[#242424] rounded-md cursor-pointer hover:bg-[#333] transition-colors"
-              onClick={() => setAnonymousMode(!anonymousMode)}
-            >
-              <div>
-                <p className="text-white font-medium">Anonymous Mode</p>
-                <p className="text-xs text-gray-400">Hide who submitted songs during rating</p>
-              </div>
-              <div className={`w-12 h-6 rounded-full p-1 transition-colors ${anonymousMode ? 'bg-green-600' : 'bg-gray-600'}`}>
-                <div className={`w-4 h-4 rounded-full bg-white transition-transform ${anonymousMode ? 'translate-x-6' : 'translate-x-0'}`} />
-              </div>
-            </div>
-          </div>
+          )}
 
           {/* Prompt selection */}
           <div>
-            <div className="flex justify-between items-baseline mb-4">
-              <label className="text-sm font-semibold text-white">
-                Select Prompts
-              </label>
-              <span className="text-xs text-gray-400">
-                {selectedPrompts.length} selected (min: {MIN_PROMPT_POOL_SIZE}, max: {MAX_PROMPT_POOL_SIZE})
-              </span>
-            </div>
-            
+	            <div className="flex justify-between items-baseline mb-4">
+	              <label className="text-sm font-semibold text-white">
+	                {isHost ? "Select Prompts" : "Prompt Ideas"}
+	              </label>
+	              {isHost && (
+	                <span className="text-xs text-gray-400">
+	                  {selectedPrompts.length} selected (min: {MIN_PROMPT_POOL_SIZE}, max: {MAX_PROMPT_POOL_SIZE})
+	                </span>
+	              )}
+	            </div>
+
             {/* Custom prompts */}
             <CustomPromptInput
               customPrompts={Array.isArray(roomCustomPrompts) ? roomCustomPrompts : []}
@@ -474,50 +560,55 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId }
               onRemovePrompt={handleRemoveCustomPrompt}
               maxPrompts={MAX_PROMPT_POOL_SIZE}
               savedPromptPacks={savedPromptPacks}
-              onSavePack={handleSavePromptPack}
-              onLoadPack={handleLoadPromptPack}
-              onDeletePack={handleDeletePromptPack}
-            />
-            
-            {/* Prompt categories */}
-            <div className="space-y-3">
-              {promptCategories.map((category) => (
-                <PromptCategory
-                  key={category.id}
-                  category={category}
-                  selectedPrompts={selectedPrompts}
-                  onTogglePrompt={togglePrompt}
-                  onSelectAll={handleSelectAll}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-        
+	              onSavePack={handleSavePromptPack}
+	              onLoadPack={handleLoadPromptPack}
+	              onDeletePack={handleDeletePromptPack}
+	              canRemovePrompts={isHost}
+	            />
+
+	            {/* Prompt categories */}
+	            {isHost && (
+	              <div className="space-y-3">
+	                {promptCategories.map((category) => (
+	                  <PromptCategory
+	                    key={category.id}
+	                    category={category}
+	                    selectedPrompts={selectedPrompts}
+	                    onTogglePrompt={togglePrompt}
+	                    onSelectAll={handleSelectAll}
+	                  />
+	                ))}
+	              </div>
+	            )}
+	          </div>
+	        </div>
+
         {/* Fixed action buttons */}
         <div className="p-6 pt-4 border-t border-gray-700 bg-[#1a1a1a]">
           <div className="flex flex-col gap-3">
-            {(selectedPrompts.length < MIN_PROMPT_POOL_SIZE || selectedPrompts.length > MAX_PROMPT_POOL_SIZE) && (
-              <p className="text-sm text-yellow-500 text-center">
-                {selectedPrompts.length < MIN_PROMPT_POOL_SIZE
-                  ? `Select at least ${MIN_PROMPT_POOL_SIZE} prompts (${selectedPrompts.length} selected)`
+	            {isHost && (selectedPrompts.length < MIN_PROMPT_POOL_SIZE || selectedPrompts.length > MAX_PROMPT_POOL_SIZE) && (
+	              <p className="text-sm text-yellow-500 text-center">
+	                {selectedPrompts.length < MIN_PROMPT_POOL_SIZE
+	                  ? `Select at least ${MIN_PROMPT_POOL_SIZE} prompts (${selectedPrompts.length} selected)`
                   : `Maximum ${MAX_PROMPT_POOL_SIZE} prompts allowed (${selectedPrompts.length} selected)`
                 }
               </p>
             )}
-            <button
-              onClick={applySettings}
-              className="w-full py-3 green-btn rounded-md text-black font-semibold transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-              disabled={selectedPrompts.length < MIN_PROMPT_POOL_SIZE || selectedPrompts.length > MAX_PROMPT_POOL_SIZE}
-            >
-              Apply Settings
-            </button>
-            <button
-              onClick={onClose}
-              className="w-full py-3 rounded-md text-white font-semibold bg-[#242424] hover:bg-[#1a1a1a] transition-colors"
-            >
-              Cancel
-            </button>
+	            {isHost && (
+	              <button
+	                onClick={applySettings}
+	                className="w-full py-3 green-btn rounded-md text-black font-semibold transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+	                disabled={selectedPrompts.length < MIN_PROMPT_POOL_SIZE || selectedPrompts.length > MAX_PROMPT_POOL_SIZE}
+	              >
+	                Apply Settings
+	              </button>
+	            )}
+	            <button
+	              onClick={onClose}
+	              className="w-full py-3 rounded-md text-white font-semibold bg-[#242424] hover:bg-[#1a1a1a] transition-colors"
+	            >
+	              {isHost ? "Cancel" : "Close"}
+	            </button>
           </div>
         </div>
           </motion.div>
