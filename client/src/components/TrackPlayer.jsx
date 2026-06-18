@@ -27,6 +27,7 @@ const TrackPlayer = forwardRef(function TrackPlayer(
     onTimeUpdate,
     onEnded,
     onDuration,
+    onPlayingChange,
     className = '',
   },
   ref
@@ -45,6 +46,7 @@ const TrackPlayer = forwardRef(function TrackPlayer(
         onTimeUpdate={onTimeUpdate}
         onEnded={onEnded}
         onDuration={onDuration}
+        onPlayingChange={onPlayingChange}
         className={className}
       />
     );
@@ -60,6 +62,7 @@ const TrackPlayer = forwardRef(function TrackPlayer(
       onReady={onReady}
       onTimeUpdate={onTimeUpdate}
       onEnded={onEnded}
+      onPlayingChange={onPlayingChange}
       className={className}
     />
   );

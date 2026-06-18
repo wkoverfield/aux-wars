@@ -29,10 +29,15 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
   const len = snippetDuration === 0 ? 0 : (snippetDuration || 30);
   const [duration, setDuration] = useState(0); // full song length (seconds)
   const [start, setStart] = useState(0);       // window start (seconds)
+  const [previewTime, setPreviewTime] = useState(0); // current time inside the selected window
+  const [isPreviewing, setIsPreviewing] = useState(false);
 
   const maxStart = len > 0 && duration > 0 ? Math.max(0, duration - len) : 0;
   const end = len > 0 ? Math.min(start + len, duration > 0 ? duration : start + len) : 0;
   const isWindowed = !!videoId && len > 0;
+  const startPercent = duration > 0 ? (Math.min(start, maxStart) / duration) * 100 : 0;
+  const windowPercent = duration > 0 ? Math.min(100, (len / duration) * 100) : 0;
+  const playedWindowPercent = len > 0 ? Math.min(100, (Math.min(previewTime, len) / len) * 100) : 0;
 
   const formatTime = (s) => {
     const m = Math.floor(s / 60);
@@ -45,6 +50,10 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
     if (duration > 0 && start > maxStart) setStart(maxStart);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duration]);
+
+  useEffect(() => {
+    setPreviewTime(0);
+  }, [start, videoId]);
 
   // Build what we submit. YouTube + a real window => snippet; otherwise null.
   const buildSelection = () => {
@@ -119,6 +128,8 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
               loop
               showControls
               onDuration={(d) => setDuration(d)}
+              onTimeUpdate={(t) => setPreviewTime(t)}
+              onPlayingChange={setIsPreviewing}
             />
           </div>
         ) : (
@@ -152,40 +163,52 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
             transition={{ delay: 0.08 }}
             className="mb-6"
           >
-            <div className="flex items-center justify-between text-xs text-gray-400 mb-2">
-              <span className="min-w-[40px]">{formatTime(start)}</span>
-              <span className="text-[#68d570] font-semibold">{len}s clip</span>
-              <span className="min-w-[40px] text-right">{duration > 0 ? formatTime(duration) : '—:—'}</span>
+            <div className="mb-2 flex items-center justify-between text-xs">
+              <span className="font-semibold text-[#68d570]">{len}s clip</span>
+              <span className="tabular-nums text-gray-400">
+                {duration > 0 ? `${formatTime(start)} - ${formatTime(end)}` : 'Loading'}
+              </span>
             </div>
 
-            {/* The window band is the hero: glowing green region = your clip */}
-            <div className="relative w-full h-6 flex items-center">
-              <div className="absolute left-0 right-0 h-2 rounded-full bg-[#333]" />
+            <div className="relative flex h-8 w-full items-center">
+              <div className="absolute left-0 right-0 h-1.5 rounded-full bg-[#333]" />
               {duration > 0 && (
                 <div
-                  className="absolute h-2 rounded-full bg-[#68d570] shadow-[0_0_12px_2px_rgba(104,213,112,0.55)]"
+                  className="absolute h-1.5 overflow-hidden rounded-full bg-[#68d570]"
                   style={{
-                    left: `${(Math.min(start, maxStart) / duration) * 100}%`,
-                    width: `${Math.min(100, (len / duration) * 100)}%`,
+                    left: `${startPercent}%`,
+                    width: `${windowPercent}%`,
                   }}
-                />
+                >
+                  <div
+                    className="h-full bg-[#8ee695]"
+                    style={{ width: isPreviewing ? `${playedWindowPercent}%` : '0%' }}
+                  />
+                </div>
               )}
               <input
                 type="range"
-                className="slider absolute inset-0 w-full h-6"
+                className="slider snippet-window-slider absolute inset-0 h-8 w-full"
                 min={0}
                 max={duration > 0 ? Math.floor(duration) : 0}
                 step={1}
                 value={Math.min(start, maxStart)}
                 disabled={duration === 0}
-                onChange={(e) => setStart(Math.min(Number(e.target.value), maxStart))}
+                onChange={(e) => {
+                  setStart(Math.min(Number(e.target.value), maxStart));
+                  setPreviewTime(0);
+                }}
                 aria-label="Clip start position"
               />
             </div>
 
-            <p className="text-center text-xs text-gray-500 mt-3">
-              {duration > 0 ? 'Drag to move your clip anywhere in the song.' : 'Loading the full song…'}
-            </p>
+            <div className="mt-1 flex items-center justify-between text-xs tabular-nums text-gray-500">
+              <span>0:00</span>
+              <span className={isPreviewing ? 'text-white' : ''}>
+                {formatTime(start + previewTime)}
+              </span>
+              <span>{duration > 0 ? formatTime(duration) : 'Loading'}</span>
+            </div>
           </motion.div>
         )}
 

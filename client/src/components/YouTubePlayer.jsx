@@ -60,14 +60,22 @@ const YouTubePlayerWithRef = forwardRef(function YouTubePlayerWithRef(
     onTimeUpdate,
     onEnded,
     onDuration,
+    onPlayingChange,
     className = '',
   },
   ref
 ) {
-  const hostRef = useRef(null);     // div the API replaces with the iframe
+  const hostRef = useRef(null);     // stable wrapper React owns
   const playerRef = useRef(null);   // YT.Player instance
+  const mountRef = useRef(null);    // child node YouTube is allowed to replace
   const intervalRef = useRef(null); // window-enforcement poll
+  const mountedRef = useRef(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0); // window-relative
+  const [duration, setDuration] = useState(0);       // window length
+  const [playerError, setPlayerError] = useState(false);
 
   // Keep latest window/callbacks in refs so the poll + events never go stale
   // and we don't have to recreate the player when they change.
@@ -75,29 +83,55 @@ const YouTubePlayerWithRef = forwardRef(function YouTubePlayerWithRef(
   const endRef = useRef(endTime);
   const loopRef = useRef(loop);
   const autoPlayRef = useRef(autoPlay);
-  const cbRef = useRef({ onReady, onTimeUpdate, onEnded, onDuration });
+  const cbRef = useRef({ onReady, onTimeUpdate, onEnded, onDuration, onPlayingChange });
   useEffect(() => { loopRef.current = loop; }, [loop]);
   useEffect(() => { autoPlayRef.current = autoPlay; }, [autoPlay]);
-  useEffect(() => { cbRef.current = { onReady, onTimeUpdate, onEnded, onDuration }; });
+  useEffect(() => { cbRef.current = { onReady, onTimeUpdate, onEnded, onDuration, onPlayingChange }; });
 
   const stopPolling = () => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
   };
 
+  const getWindowDuration = (fullDuration = 0) => {
+    const start = startRef.current || 0;
+    const end = endRef.current || 0;
+    if (end > start) return Math.max(0, end - start);
+    return Math.max(0, fullDuration - start);
+  };
+
+  const seekToWindowTime = (seconds) => {
+    const p = playerRef.current;
+    if (!p || !Number.isFinite(seconds)) return;
+    const windowLength = duration || getWindowDuration(p.getDuration?.() || 0);
+    const relative = Math.max(0, windowLength > 0 ? Math.min(seconds, windowLength) : seconds);
+    const absolute = (startRef.current || 0) + relative;
+    try {
+      p.seekTo(absolute, true);
+      setCurrentTime(relative);
+      cbRef.current.onTimeUpdate?.(relative);
+    } catch { /* noop */ }
+  };
+
   const startPolling = () => {
     stopPolling();
     intervalRef.current = setInterval(() => {
+      if (!mountedRef.current) return;
       const p = playerRef.current;
       if (!p || typeof p.getCurrentTime !== 'function') return;
       const t = p.getCurrentTime() || 0;
       const start = startRef.current || 0;
       const end = endRef.current || 0;
-      cbRef.current.onTimeUpdate?.(Math.max(0, t - start));
+      const relative = Math.max(0, t - start);
+      setCurrentTime(relative);
+      cbRef.current.onTimeUpdate?.(relative);
       if (end > 0 && t >= end) {
         if (loopRef.current) {
           p.seekTo(start, true);
+          setCurrentTime(0);
         } else {
           p.pauseVideo();
+          setIsPlaying(false);
+          cbRef.current.onPlayingChange?.(false);
           cbRef.current.onEnded?.();
         }
       }
@@ -112,55 +146,102 @@ const YouTubePlayerWithRef = forwardRef(function YouTubePlayerWithRef(
     if (p && typeof p.seekTo === 'function') {
       try { p.seekTo(startTime || 0, true); } catch { /* not ready */ }
     }
+    setCurrentTime(0);
+    setDuration(getWindowDuration(p?.getDuration?.() || 0));
   }, [startTime, endTime]);
 
-  // Create / destroy the player when the video changes. key={videoId} on the
-  // host div guarantees a fresh DOM node per video (the API mutates it).
+  // Create / destroy the player when the video changes. The API mutates its
+  // target node, so the target is created imperatively inside a stable wrapper.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   useEffect(() => {
     if (!videoId) return undefined;
     let cancelled = false;
     setHasStarted(false);
+    setIsReady(false);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setPlayerError(false);
 
     loadYouTubeApi().then((YT) => {
       if (cancelled || !hostRef.current) return;
-      playerRef.current = new YT.Player(hostRef.current, {
+
+      // The YouTube API replaces its target node with an iframe. Create that
+      // target outside React's ownership so React never tries to remove a node
+      // YouTube already swapped out, which can throw intermittent NotFoundError.
+      hostRef.current.replaceChildren();
+      const mount = document.createElement('div');
+      hostRef.current.appendChild(mount);
+      mountRef.current = mount;
+
+      playerRef.current = new YT.Player(mount, {
         width: '100%',
         height: '100%',
         videoId,
         playerVars: {
           autoplay: 0, // we drive play() after ready so we can seek first
-          controls: 1,
+          controls: 0,
+          disablekb: 1,
           modestbranding: 1,
           rel: 0,
           playsinline: 1, // critical: no iOS fullscreen hijack
-          fs: 1,
+          fs: 0,
           start: Math.floor(startRef.current || 0),
           end: endRef.current > 0 ? Math.floor(endRef.current) : undefined,
           origin: window.location.origin,
         },
         events: {
           onReady: (e) => {
+            if (cancelled || !mountedRef.current) return;
             const player = e.target;
             const start = startRef.current || 0;
             const end = endRef.current || 0;
             const full = player.getDuration?.() || 0;
+            const windowLength = getWindowDuration(full);
+            setIsReady(true);
+            setDuration(windowLength);
             cbRef.current.onDuration?.(full);
-            cbRef.current.onReady?.(end > 0 ? Math.max(0, end - start) : full);
+            cbRef.current.onReady?.(end > 0 ? Math.max(0, end - start) : windowLength);
             if (start > 0) { try { player.seekTo(start, true); } catch { /* noop */ } }
             if (autoPlayRef.current) { try { player.playVideo(); } catch { /* blocked */ } }
             startPolling();
           },
           onStateChange: (e) => {
+            if (cancelled || !mountedRef.current) return;
             const YTNS = window.YT;
             if (!YTNS) return;
-            if (e.data === YTNS.PlayerState.PLAYING) setHasStarted(true);
+            if (e.data === YTNS.PlayerState.PLAYING) {
+              setHasStarted(true);
+              setIsPlaying(true);
+              cbRef.current.onPlayingChange?.(true);
+            }
+            if (e.data === YTNS.PlayerState.PAUSED || e.data === YTNS.PlayerState.CUED) {
+              setIsPlaying(false);
+              cbRef.current.onPlayingChange?.(false);
+            }
             if (e.data === YTNS.PlayerState.ENDED) {
+              setIsPlaying(false);
+              cbRef.current.onPlayingChange?.(false);
               if (loopRef.current) {
-                try { e.target.seekTo(startRef.current || 0, true); e.target.playVideo(); } catch { /* noop */ }
+                try {
+                  e.target.seekTo(startRef.current || 0, true);
+                  setCurrentTime(0);
+                  e.target.playVideo();
+                } catch { /* noop */ }
               } else {
                 cbRef.current.onEnded?.();
               }
             }
+          },
+          onError: () => {
+            if (cancelled || !mountedRef.current) return;
+            setPlayerError(true);
+            setIsPlaying(false);
+            cbRef.current.onPlayingChange?.(false);
           },
         },
       });
@@ -171,6 +252,8 @@ const YouTubePlayerWithRef = forwardRef(function YouTubePlayerWithRef(
       stopPolling();
       try { playerRef.current?.destroy?.(); } catch { /* noop */ }
       playerRef.current = null;
+      mountRef.current = null;
+      try { hostRef.current?.replaceChildren(); } catch { /* noop */ }
     };
     // Recreate only when the video changes; refs carry the latest window/cb.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -185,32 +268,40 @@ const YouTubePlayerWithRef = forwardRef(function YouTubePlayerWithRef(
       if (p.getPlayerState?.() === YT.PlayerState.PLAYING) p.pauseVideo();
       else p.playVideo();
     },
-    seekTo: (s) => { if (Number.isFinite(s)) { try { playerRef.current?.seekTo?.(Math.max(0, s), true); } catch { /* noop */ } } },
-    getCurrentTime: () => playerRef.current?.getCurrentTime?.() || 0,
-    getDuration: () => playerRef.current?.getDuration?.() || 0,
+    seekTo: (s) => seekToWindowTime(s),
+    getCurrentTime: () => currentTime,
+    getDuration: () => duration,
     isPlaying: () => {
       const p = playerRef.current; const YT = window.YT;
       return !!(p && YT && p.getPlayerState?.() === YT.PlayerState.PLAYING);
     },
-  }), []);
+  }), [currentTime, duration]);
 
   if (!videoId) return null;
 
   const handleTapToPlay = () => { try { playerRef.current?.playVideo?.(); } catch { /* noop */ } };
-
   return (
     <div className={`relative w-full aspect-video overflow-hidden rounded-xl bg-black ring-1 ring-white/10 ${className}`}>
-      <div key={videoId} ref={hostRef} className="w-full h-full" />
+      <div ref={hostRef} className="w-full h-full pointer-events-none" />
+
+      {playerError && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80 px-6 text-center">
+          <p className="text-sm text-red-300">
+            This YouTube video cannot be played here. Pick another result.
+          </p>
+        </div>
+      )}
 
       {/* Branded "tap to play" — the primary action on mobile, where autoplay
           with sound is blocked. Shown until the first play, then native
           controls take over. */}
-      {showControls && !hasStarted && (
+      {showControls && !hasStarted && !playerError && (
         <button
           type="button"
           onClick={handleTapToPlay}
           aria-label="Play"
-          className="absolute inset-0 flex items-center justify-center bg-black/35"
+          disabled={!isReady}
+          className="absolute inset-0 flex items-center justify-center bg-black/35 disabled:cursor-wait"
         >
           <span className="relative flex items-center justify-center">
             <span className="absolute h-16 w-16 rounded-full bg-[#1db954] opacity-60 animate-ping" aria-hidden="true" />
