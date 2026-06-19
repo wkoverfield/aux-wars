@@ -60,9 +60,13 @@ export function initPostHog() {
     before_send: sanitizeEvent,
     disable_session_recording: false,
     session_recording: {
-      maskAllInputs: true,
+      // Show gameplay in replays — searches, player names, prompts, and game
+      // codes aren't sensitive, and they're what we want to see. The only
+      // credential is the Pro code, masked via the `ph-no-capture` class on
+      // that one input. data-ph-mask stays as a hook for future sensitive text.
+      maskAllInputs: false,
       maskTextSelector: "[data-ph-mask]",
-      sampleRate: 0.5,
+      sampleRate: 1, // record every session (was 0.5 → only half captured)
     },
   });
 

@@ -286,7 +286,7 @@ export default function Lobby() {
               <div className="lobby-code-count flex gap-5">
                 <div className="lobby-container rounded-md lobby-code flex flex-col gap-2">
                   <p className="text-xs font-normal">Code</p>
-                  <p className="text-2xl" data-ph-mask>{gameCode}</p>
+                  <p className="text-2xl">{gameCode}</p>
                 </div>
                 <div className="lobby-container rounded-md lobby-count flex flex-col gap-2">
                   <p className="text-xs font-normal">{room?.settings?.hostPro ? 'Players · Pro' : 'Players'}</p>

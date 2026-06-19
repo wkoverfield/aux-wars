@@ -59,7 +59,7 @@ export default function ProRestore() {
                   value={codeInput}
                   onChange={(e) => setCodeInput(e.target.value)}
                   placeholder="paste your Pro code"
-                  className="flex-1 bg-[#181818] border border-gray-700 rounded-md px-3 py-2 text-white"
+                  className="flex-1 bg-[#181818] border border-gray-700 rounded-md px-3 py-2 text-white ph-no-capture"
                 />
                 <button
                   onClick={restoreCode}

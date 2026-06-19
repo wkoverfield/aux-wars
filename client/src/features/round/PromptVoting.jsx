@@ -123,7 +123,7 @@ export default function PromptVoting({ gameCode }) {
             transition={{ duration: 0.3 }}
             className="bg-[#242424] rounded-xl p-6 text-center"
           >
-            <p className="text-2xl md:text-3xl font-bold text-white leading-relaxed" data-ph-mask>
+            <p className="text-2xl md:text-3xl font-bold text-white leading-relaxed">
               "{displayedPrompt}"
             </p>
           </motion.div>
