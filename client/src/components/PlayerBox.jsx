@@ -29,7 +29,7 @@ export default function PlayerBox({ player, isHost, currentPlayerId, onKick }) {
   return (
     <div className="lobby-player rounded-md">
       {/* Player name with host indicator */}
-      <p className={player.isHost ? "font-bold" : ""}>{player.name}</p>
+      <p className={player.isHost ? "font-bold" : ""} data-ph-mask>{player.name}</p>
 
       <div className="flex items-center gap-3">
         {/* Ready status */}

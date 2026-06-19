@@ -5,6 +5,7 @@ import record from '../../assets/record.svg';
 import SearchBar from '../../components/SearchBar';
 import TrackPlayer from '../../components/TrackPlayer';
 import { useToast } from '../../contexts/ToastContext';
+import { captureGameEvent } from '../../services/analytics';
 
 /**
  * RatingScreen component provides an interface for rating songs during the game.
@@ -86,7 +87,14 @@ const RatingScreen = ({
     if (selectedRating >= 0) {
       setHasSubmitted(true);
       // How long they listened before voting (informs clip length / pacing).
-      logEvent({ eventType: "vote_listen", metadata: { value: Date.now() - clipStartRef.current } });
+      const listenMs = Date.now() - clipStartRef.current;
+      logEvent({ eventType: "vote_listen", metadata: { value: listenMs } });
+      captureGameEvent("vote_listen", {
+        listen_ms: listenMs,
+        rating_value: selectedRating + 1,
+        source: videoId ? "youtube" : "preview",
+        has_clip_window: Boolean(snippet),
+      });
       // Add 1 to the index to get rating from 1-5 instead of 0-4
       onSubmitRating(songToRate.songId, selectedRating + 1);
     } else {
@@ -237,7 +245,7 @@ const RatingScreen = ({
             {songToRate.artist}
           </p>
           <p className="text-xs text-gray-400 mt-1 text-center">
-            Submitted by: {anonymousMode ? '???' : (songToRate.player?.name || 'Unknown Player')}
+            Submitted by: <span data-ph-mask>{anonymousMode ? '???' : (songToRate.player?.name || 'Unknown Player')}</span>
           </p>
         </div>
 

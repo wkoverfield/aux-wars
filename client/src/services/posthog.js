@@ -20,6 +20,23 @@ const CONSENT_EVENT = "aux-wars-consent-changed"; // mirrors ads.js
 
 let started = false;
 
+function sanitizeUrl(value) {
+  if (!value || typeof value !== "string") return value;
+  return value.replace(/\/lobby\/[^/?#]+/g, "/lobby/[room]");
+}
+
+function sanitizeEvent(event) {
+  if (!event?.properties) return event;
+  const props = event.properties;
+  props.$current_url = sanitizeUrl(props.$current_url);
+  props.$pathname = sanitizeUrl(props.$pathname);
+  props.$referrer = sanitizeUrl(props.$referrer);
+  props.$initial_current_url = sanitizeUrl(props.$initial_current_url);
+  props.$initial_pathname = sanitizeUrl(props.$initial_pathname);
+  props.$initial_referrer = sanitizeUrl(props.$initial_referrer);
+  return event;
+}
+
 function applyConsent() {
   if (!started) return;
   // 'rejected' opts out; 'accepted'/null capture (matches existing analytics).
@@ -40,7 +57,13 @@ export function initPostHog() {
     person_profiles: "identified_only", // no anonymous-person bloat
     capture_pageview: "history_change", // SPA pageviews on route change
     autocapture: true,
-    disable_session_recording: true, // not opted into recording for now
+    before_send: sanitizeEvent,
+    disable_session_recording: false,
+    session_recording: {
+      maskAllInputs: true,
+      maskTextSelector: "[data-ph-mask]",
+      sampleRate: 0.5,
+    },
   });
 
   applyConsent();

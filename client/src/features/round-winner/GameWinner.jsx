@@ -9,7 +9,46 @@ import { useHeartbeat } from '../../hooks/useHeartbeat';
 import PlayerResultWithHover from '../../components/PlayerResultWithHover';
 import AnimatedLogo from '../../components/AnimatedLogo';
 import AdSlot from '../../components/AdSlot';
+import { captureGameEvent, gameProperties } from '../../services/analytics';
 import backIcon from '../../assets/back-icon.svg';
+
+function buildPlayerStatsFromRounds(results) {
+  const stats = {};
+  const rounds = Array.isArray(results) ? results : Object.values(results || {});
+  rounds.forEach((round, roundIdx) => {
+    if (!round.songs) return;
+
+    const winnerSongId = round.winnerSongId;
+
+    round.songs.forEach(song => {
+      const playerId = song.player?.id;
+      if (!playerId) return;
+
+      if (!stats[playerId]) {
+        stats[playerId] = {
+          playerId,
+          playerName: song.player.name,
+          wins: 0,
+          totalRecords: 0,
+          songs: [],
+        };
+      }
+
+      stats[playerId].songs.push({
+        ...song,
+        round: roundIdx + 1,
+        isRoundWinner: song.songId === winnerSongId
+      });
+
+      stats[playerId].totalRecords += song.totalRecords || 0;
+
+      if (song.songId === winnerSongId) {
+        stats[playerId].wins += 1;
+      }
+    });
+  });
+  return Object.values(stats);
+}
 
 /**
  * GameWinner component displays the final game results showing the winner and all players' stats.
@@ -28,6 +67,7 @@ export default function GameWinner() {
   const returnToLobbyMutation = useMutation(api.game.flow.returnToLobby);
   const { session, updateSession, clearSession } = useSession();
   const stateAllRoundResults = allRoundResultsQuery;
+  const trackedGameCompleteRef = React.useRef(false);
 
   // Check if current user is the host
   const currentPlayer = playersQuery?.find(p => p.playerId === session?.playerId);
@@ -51,6 +91,30 @@ export default function GameWinner() {
     return () => clearTimeout(timer);
   }, [setGameTransition]);
 
+  useEffect(() => {
+    if (trackedGameCompleteRef.current || !allRoundResultsQuery || !playersQuery) return;
+    const rounds = Array.isArray(allRoundResultsQuery)
+      ? allRoundResultsQuery
+      : Object.values(stateAllRoundResults || {});
+    const stats = buildPlayerStatsFromRounds(allRoundResultsQuery)
+      .sort((a, b) => b.wins - a.wins || b.totalRecords - a.totalRecords);
+    const topPlayer = stats[0];
+    if (!topPlayer) return;
+
+    trackedGameCompleteRef.current = true;
+    captureGameEvent("game_completed_viewed", gameProperties({
+      code: gameCode,
+      players: playersQuery,
+      session,
+      extra: {
+        rounds_total: rounds.length,
+        player_count: stats.length,
+        winner_wins: topPlayer.wins,
+        winner_records: topPlayer.totalRecords,
+      },
+    }));
+  }, [allRoundResultsQuery, gameCode, playersQuery, session, stateAllRoundResults]);
+
   // Show loading state while data is loading
   if (!allRoundResultsQuery || !playersQuery) {
     return (
@@ -65,63 +129,13 @@ export default function GameWinner() {
     );
   }
 
-  /**
-   * Builds player statistics from round results including wins, records, and songs.
-   * @returns {Array<Object>} Array of player stats objects with the following properties:
-   *   - playerId: string - Unique identifier for the player
-   *   - playerName: string - Display name of the player
-   *   - wins: number - Number of rounds won
-   *   - totalRecords: number - Total records earned across all rounds
-   *   - songs: Array<Object> - List of songs submitted by the player
-   */
-  const buildPlayerStats = () => {
-    const stats = {};
-    const rounds = Array.isArray(allRoundResultsQuery)
-      ? allRoundResultsQuery
-      : Object.values(stateAllRoundResults || {});
-    rounds.forEach((round, roundIdx) => {
-      if (!round.songs) return;
-      
-      const winnerSongId = round.winnerSongId;
-      
-      round.songs.forEach(song => {
-        const playerId = song.player?.id;
-        if (!playerId) return;
-        
-        if (!stats[playerId]) {
-          stats[playerId] = {
-            playerId,
-            playerName: song.player.name,
-            wins: 0,
-            totalRecords: 0,
-            songs: [],
-          };
-        }
-        
-        stats[playerId].songs.push({
-          ...song,
-          round: roundIdx + 1,
-          isRoundWinner: song.songId === winnerSongId
-        });
-        
-        stats[playerId].totalRecords += song.totalRecords || 0;
-        
-        if (song.songId === winnerSongId) {
-          stats[playerId].wins += 1;
-        }
-      });
-    });
-    return Object.values(stats);
-  };
-
   // Sort players by wins and records
-  const sortedPlayers = buildPlayerStats()
+  const sortedPlayers = buildPlayerStatsFromRounds(allRoundResultsQuery)
     .sort((a, b) => b.wins - a.wins || b.totalRecords - a.totalRecords);
 
   // Separate winner from other players
   const winner = sortedPlayers[0];
   const rest = sortedPlayers.slice(1);
-  
 
   /**
    * Handles returning to the lobby and resetting game state.
@@ -130,6 +144,11 @@ export default function GameWinner() {
   const handleReturnToLobby = async () => {
     if (!session?.playerId || !session?.connectionId) return;
     setGameTransition(true);
+    captureGameEvent("return_to_lobby_clicked", gameProperties({
+      code: gameCode,
+      players: playersQuery,
+      session,
+    }));
     // Game state reset handled by server mutation (returnToLobby)
     await returnToLobbyMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
     updateSession({ lastPhase: 'lobby' });

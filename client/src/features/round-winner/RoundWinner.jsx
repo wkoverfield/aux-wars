@@ -12,6 +12,7 @@ import recordLogo from "../../components/record-logo.svg";
 import nextIcon from "../../assets/next-icon.svg";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
+import { captureGameEvent, gameProperties } from "../../services/analytics";
 
 /**
  * RoundWinner component displays the results of a completed round.
@@ -36,6 +37,7 @@ export default function RoundWinner() {
   const roundResults = roundResultsQuery;
   const [isTransitioning, setIsTransitioning] = useState(false);
   const { session, clearSession } = useSession();
+  const trackedRoundRef = React.useRef(null);
 
   // Heartbeat to keep connection alive during results viewing
   useHeartbeat(
@@ -51,6 +53,23 @@ export default function RoundWinner() {
 
   // Check if this is the final round
   const isFinalRound = currentRound >= numberOfRounds;
+
+  useEffect(() => {
+    if (!roundResults?.songs?.length || trackedRoundRef.current === currentRound) return;
+    trackedRoundRef.current = currentRound;
+    captureGameEvent("round_completed", gameProperties({
+      code: gameCode,
+      room,
+      players: playersQuery,
+      session,
+      extra: {
+        round_number: currentRound,
+        total_songs: roundResults.songs.length,
+        final_round: isFinalRound,
+        winner_records: roundResults.songs[0]?.totalRecords,
+      },
+    }));
+  }, [currentRound, gameCode, isFinalRound, playersQuery, room, roundResults, session]);
 
   // Set up game transition
   useEffect(() => {
@@ -83,6 +102,13 @@ export default function RoundWinner() {
     if (isTransitioning || !session?.playerId || !session?.connectionId) return;
     setIsTransitioning(true);
     setGameTransition(true);
+    captureGameEvent("next_round_clicked", gameProperties({
+      code: gameCode,
+      room,
+      players: playersQuery,
+      session,
+      extra: { final_round: isFinalRound },
+    }));
     await nextRoundMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
   };
 

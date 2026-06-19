@@ -14,6 +14,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { getProToken, useIsPro } from "../../services/pro";
 import { adsConfigured } from "../../services/ads";
 import { capture } from "../../services/posthog";
+import { captureGameEvent, hashRoomCode } from "../../services/analytics";
 
 const HOW_TO_PLAY = [
   { n: 1, title: "Host a game", text: "Create a room and share the code with your friends." },
@@ -64,12 +65,17 @@ export default function Home() {
     if (isHosting) return;
     setIsHosting(true);
     clearSession();
+    captureGameEvent("host_game_clicked", { host_pro: isPro });
     try {
       const { code } = await hostGame({ proToken: getProToken() || undefined });
       const playerId = crypto.randomUUID();
       const tempName = "Host";
       const joinResp = await joinGame({ code, name: tempName, playerId, connectionId });
       if (joinResp?.success) {
+        captureGameEvent("game_created", {
+          room_code_hash: hashRoomCode(code),
+          host_pro: isPro,
+        });
         createSession({ gameCode: code, playerId, playerName: tempName, lastPhase: "lobby" });
         navigate(`/lobby/${code}`);
       } else {
@@ -105,8 +111,14 @@ export default function Home() {
       return;
     }
     const code = joinCode.trim().toUpperCase();
+    captureGameEvent("join_game_attempted", {
+      room_code_hash: hashRoomCode(code),
+      code_length: code.length,
+      returning_to_session: Boolean(session?.gameCode === code && session?.playerId && isSessionValid()),
+    });
 
     if (session?.gameCode === code && session?.playerId && isSessionValid()) {
+      captureGameEvent("join_game_resumed", { room_code_hash: hashRoomCode(code) });
       navigate(`/lobby/${code}`);
       return;
     }
@@ -118,6 +130,10 @@ export default function Home() {
     try {
       const resp = await joinGame({ code, name: tempName, playerId, connectionId });
       if (resp?.success) {
+        captureGameEvent("player_joined", {
+          room_code_hash: hashRoomCode(code),
+          took_over_connection: Boolean(resp.tookOver),
+        });
         createSession({ gameCode: code, playerId, playerName: tempName, lastPhase: "lobby" });
         navigate(`/lobby/${code}`);
       } else {
