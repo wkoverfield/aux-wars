@@ -128,10 +128,10 @@ export default function GameWinner() {
    * Emits a return-to-lobby event to the server and navigates back to the lobby.
    */
   const handleReturnToLobby = async () => {
-    if (!session?.playerId) return;
+    if (!session?.playerId || !session?.connectionId) return;
     setGameTransition(true);
     // Game state reset handled by server mutation (returnToLobby)
-    await returnToLobbyMutation({ code: gameCode, playerId: session.playerId });
+    await returnToLobbyMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
     updateSession({ lastPhase: 'lobby' });
     navigate(`/lobby/${gameCode}`, { replace: true });
   };
@@ -185,4 +185,4 @@ export default function GameWinner() {
       </div>
     </div>
   );
-} 
+}

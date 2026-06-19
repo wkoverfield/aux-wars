@@ -5,13 +5,14 @@ build + Convex typecheck green, and **dark by default** (no visible change until
 the switches below). This doc is the paint-by-numbers finish line.
 
 ## What's built
-- **Music**: YouTube scraping → iTunes + Deezer 30s previews (HTML5 audio). Kills the YouTube ToS
-  blocker for ads and removes YouTube's own pre-roll ads. (Tested live.)
+- **Music**: YouTube-powered full-song search + clip selection, with iTunes/Deezer preview fallback.
 - **Host Pack ($5 one-time)**: Stripe Checkout → durable entitlement. Pro rooms are ad-free + cap 50
-  (free = 8). Server is source of truth (webhook), with restore-by-email/code on any device.
+  (free = 8). Server is source of truth (webhook). Restore uses the post-purchase Pro code; email
+  restore stays disabled until it is a real magic-link flow.
 - **Ads (dark)**: AdSense `<AdSlot>` on Home, Lobby, Waiting, Results, Game-over. Never on
   song-pick/rating. Auto-suppressed in Pro rooms + behind cookie consent. Renders nothing until
-  `VITE_ADSENSE_CLIENT` is set. Game-over slot reserved for a future end-game video (at scale).
+  `VITE_ADSENSE_CLIENT` and placement slot IDs are set. Game-over slot reserved for a future
+  end-game video (at scale).
 - **Tip jar**: Buy Me a Coffee, already live on the homepage.
 - **Analytics**: pro funnel (cta→checkout→purchased), `search_no_results`+query, `vote_listen` ms,
   `game_abandoned`+phase (the 53%), `session_start` new/returning.
@@ -31,17 +32,22 @@ the switches below). This doc is the paint-by-numbers finish line.
 - [ ] **Webhook**: Stripe → Developers → Webhooks → Add endpoint
       - URL: `https://<PROD-DEPLOYMENT>.convex.site/stripe/webhook`
       - Event: `checkout.session.completed`
-      - Copy signing secret → `npx convex env set STRIPE_SECRET_KEY sk_live_… --prod`
-        and `npx convex env set STRIPE_WEBHOOK_SECRET whsec_… --prod`
+- [ ] Set Stripe secret key: `npx convex env set STRIPE_SECRET_KEY sk_live_… --prod`
+- [ ] Copy the webhook signing secret and set it:
+      `npx convex env set STRIPE_WEBHOOK_SECRET whsec_… --prod`
+- [ ] Optional if adding custom domains/dev URLs beyond defaults:
+      `npx convex env set AUX_WARS_ALLOWED_ORIGINS https://aux-wars.com,https://www.aux-wars.com --prod`
 - [ ] ⚠️ dev Convex = `sk_test_` / test `whsec_`; prod Convex = `sk_live_` / live `whsec_`. Never mix.
 
 ### 3. Turn on ads (when AdSense approves)
 - [ ] Apply to AdSense with `aux-wars.com` (the `/privacy` page is live for this)
-- [ ] On approval: set `VITE_ADSENSE_CLIENT=ca-pub-…` in Vercel prod → redeploy. This single switch
-      reveals everything monetization at once: ads light up, the cookie banner appears, **and the Pro
-      CTA ("Go Pro — ad-free + bigger rooms" + Restore) becomes visible.** Before this, the Pro CTA is
-      hidden on purpose — "ad-free" only makes sense once there are ads to remove, so we don't show
-      the offer (or charge) until ads are live. The Stripe backend stays fully built/ready meanwhile.
+- [ ] On approval, set `VITE_ADSENSE_CLIENT=ca-pub-…` in Vercel prod.
+- [ ] Set placement slot IDs in Vercel prod:
+      `VITE_ADSENSE_SLOT_HOME`, `VITE_ADSENSE_SLOT_LOBBY`, `VITE_ADSENSE_SLOT_WAIT`,
+      `VITE_ADSENSE_SLOT_RESULTS`, `VITE_ADSENSE_SLOT_GAMEOVER`.
+- [ ] Redeploy Vercel. Ads and the cookie banner stay dark unless the client id and placement slot ids
+      are configured. The Pro CTA appears when AdSense is configured; Stripe remains ready but hidden
+      before then.
 
 ## After launch — watch, don't guess
 A week of real data answers the open questions (query `convex/analytics.ts`):
@@ -55,7 +61,8 @@ A week of real data answers the open questions (query `convex/analytics.ts`):
 - Snippet trim-within-30s (low value if `vote_listen` shows people vote fast)
 - End-game video (needs a gaming ad network ~100k+ pageviews/mo)
 - Restore-Pro link in lobby/Settings (currently on Home + /pro/success)
-- Anti-sharing device cap / magic-link (only if sharing shows up in the data)
+- Email magic-link restore / anti-sharing device cap (only if sharing or cleared-storage restore pain
+  shows up in the data)
 - Lightweight email accounts (only if cleared-storage restore becomes a real pain)
 
 ## The actual priority after launch: GROWTH

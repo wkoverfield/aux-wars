@@ -57,7 +57,7 @@ function formatDurationLabel(seconds) {
  * @param {string} props.gameCode - Current game code
  * @returns {JSX.Element|null} Rendered component or null if not visible
  */
-export default function SettingsModal({ showModal, onClose, gameCode, playerId, isHost = false }) {
+export default function SettingsModal({ showModal, onClose, gameCode, playerId, connectionId, isHost = false }) {
   const roomQuery = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
   // const socket = useSocket();
   const updateSettingsMutation = useMutation(api.game.rooms.updateSettings);
@@ -270,10 +270,14 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
       return;
     }
     if (!Array.isArray(roomCustomPrompts)) return;
+    if (!playerId || !connectionId) {
+      showToast("Session expired. Please refresh and try again.", "error");
+      return;
+    }
     const promptToRemove = roomCustomPrompts[index];
     if (!promptToRemove) return;
     try {
-      await removeCustomPromptMutation({ code: gameCode, text: promptToRemove, playerId });
+      await removeCustomPromptMutation({ code: gameCode, text: promptToRemove, playerId, connectionId });
       setSelectedPrompts((prev) => prev.filter((p) => p !== promptToRemove));
     } catch (_e) {
       showToast("Failed to remove prompt", "error");
@@ -306,6 +310,11 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
       return;
     }
 
+    if (!playerId || !connectionId) {
+      showToast("Session expired. Please refresh and try again.", "error");
+      return;
+    }
+
     // Save settings to localStorage for future games
     localStorage.setItem('aux-wars-settings', JSON.stringify({
       numberOfRounds: rounds,
@@ -321,6 +330,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
       const result = await updateSettingsMutation({
         code: gameCode,
         playerId,
+        connectionId,
         numberOfRounds: rounds,
         roundLength,
         snippetDuration,

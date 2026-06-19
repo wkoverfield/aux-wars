@@ -9,14 +9,18 @@ function submitSongFailure(code: string, message: string) {
   return { success: false, code, message };
 }
 
+function submitRatingFailure(code: string, message: string) {
+  return { success: false, code, message };
+}
+
 export const startGame = mutation({
-  args: { code: v.string(), playerId: v.string() },
-  handler: async (ctx, { code, playerId }) => {
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
     const players = await getPlayers(ctx, code);
-    const host = room.hostPlayerId ? await ctx.db.get(room.hostPlayerId) : null;
-    if (!host || host.playerId !== playerId) return; // only host
+    const host = await validateConnection(ctx, code, playerId, connectionId);
+    if (!host || !host.isHost) return; // only active host tab
     if (players.length < 3) return; // min players
     const allReady = players.every((p) => p.isReady);
     if (!allReady) return;
@@ -188,20 +192,39 @@ export const submitRating = mutation({
   args: { code: v.string(), playerId: v.string(), connectionId: v.string(), songId: v.id("submissions"), rating: v.number() },
   handler: async (ctx, { code, playerId, connectionId, songId, rating }) => {
     const room = await getRoom(ctx, code);
-    if (!room || room.phase !== "rating") return;
+    if (!room || room.phase !== "rating") {
+      return submitRatingFailure("not_rating", "Rating has already ended.");
+    }
 
     // Validate connection (prevents stale tabs from rating after takeover)
     const player = await validateConnection(ctx, code, playerId, connectionId);
     if (!player) {
       console.log(`[submitRating] Rejecting rating: connection validation failed`);
-      return;
+      return submitRatingFailure("connection_invalid", "Connection issue. Please refresh the page.");
     }
 
     // Rate limiting: Prevent rapid rating attempts (max 1 per second)
     const lastAttempt = player.lastRatingAttempt;
     if (lastAttempt && now() - lastAttempt < 1000) {
       console.log(`[submitRating] Rate limit: Player ${playerId} attempting too quickly`);
-      return;
+      return submitRatingFailure("rate_limited", "Please wait a second before rating again.");
+    }
+
+    if (!Number.isInteger(rating) || ![-1, 1, 2, 3, 4, 5].includes(rating)) {
+      return submitRatingFailure("invalid_rating", "Rating must be between 1 and 5.");
+    }
+
+    const subs = await ctx.db
+      .query("submissions")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+      .order("asc")
+      .collect();
+    const current = subs[room.currentRatingIndex ?? 0];
+    if (!current || current._id !== songId) {
+      return submitRatingFailure("not_current_song", "That song is no longer being rated.");
+    }
+    if (rating === -1 && current.playerId !== playerId) {
+      return submitRatingFailure("invalid_skip", "Only the submitter can skip rating their own song.");
     }
 
     // Update last attempt timestamp
@@ -218,7 +241,7 @@ export const submitRating = mutation({
     const hasAlreadyVoted = existingRatings.some((r) => r.voterId === playerId);
     if (hasAlreadyVoted) {
       console.log(`[submitRating] Player ${playerId} already rated song ${songId}`);
-      return;
+      return submitRatingFailure("already_rated", "You already rated this song.");
     }
 
     await ctx.db.insert("ratings", {
@@ -239,16 +262,17 @@ export const submitRating = mutation({
     // After each rating, check if all eligible voters have voted and advance
     // Use scheduler to avoid direct mutation-to-mutation call
     await ctx.scheduler.runAfter(0, internal.game.flow.maybeAdvanceOnAllVotes, { code });
+    return { success: true } as const;
   },
 });
 
 export const nextRound = mutation({
-  args: { code: v.string(), playerId: v.string() },
-  handler: async (ctx, { code, playerId }) => {
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
-    const host = room.hostPlayerId ? await ctx.db.get(room.hostPlayerId) : null;
-    if (!host || host.playerId !== playerId) return;
+    const host = await validateConnection(ctx, code, playerId, connectionId);
+    if (!host || !host.isHost) return;
 
     const isLastRound = room.currentRound >= room.settings.numberOfRounds;
     if (isLastRound) {
@@ -308,12 +332,12 @@ export const nextRound = mutation({
 });
 
 export const returnToLobby = mutation({
-  args: { code: v.string(), playerId: v.string() },
-  handler: async (ctx, { code, playerId }) => {
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
-    const host = room.hostPlayerId ? await ctx.db.get(room.hostPlayerId) : null;
-    if (!host || host.playerId !== playerId) return;
+    const host = await validateConnection(ctx, code, playerId, connectionId);
+    if (!host || !host.isHost) return;
 
     // Clean up all game data from previous game
     const submissions = await ctx.db
@@ -753,15 +777,22 @@ export const startRatingPhaseInternal = internalMutation({
 
     await ctx.db.patch(room._id, { phase: "rating", currentRatingIndex: 0, lastActivityAt: now() });
     // Kick off first rating step shortly
-    await ctx.scheduler.runAfter(500, internal.game.flow.advanceRating, { code });
+    await ctx.scheduler.runAfter(500, internal.game.flow.advanceRating, {
+      code,
+      round,
+      ratingIndex: 0,
+      timedOut: false,
+    });
   },
 });
 
 export const calculateResultsInternal = internalMutation({
-  args: { code: v.string() },
-  handler: async (ctx, { code }) => {
+  args: { code: v.string(), round: v.optional(v.number()) },
+  handler: async (ctx, { code, round }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
+    if (room.phase !== "rating") return;
+    if (round !== undefined && room.currentRound !== round) return;
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
@@ -825,33 +856,39 @@ export const calculateResultsInternal = internalMutation({
 });
 
 export const advanceRating = internalMutation({
-  args: { code: v.string() },
-  handler: async (ctx, { code }) => {
+  args: {
+    code: v.string(),
+    round: v.number(),
+    ratingIndex: v.number(),
+    timedOut: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { code, round, ratingIndex, timedOut = false }) => {
     const room = await getRoom(ctx, code);
     if (!room || room.phase !== "rating") return;
+    if (room.currentRound !== round || (room.currentRatingIndex ?? 0) !== ratingIndex) return;
+
     const subs = await ctx.db
       .query("submissions")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", round))
       .order("asc")
       .collect();
-    const idx = room.currentRatingIndex ?? 0;
-    if (idx >= subs.length) {
+    if (ratingIndex >= subs.length) {
       // Use scheduler to avoid direct mutation-to-mutation call
-      await ctx.scheduler.runAfter(0, internal.game.flow.calculateResultsInternal, { code });
+      await ctx.scheduler.runAfter(0, internal.game.flow.calculateResultsInternal, { code, round });
       return;
     }
     // Ensure submitter auto-skip (-1) exists for the current song
-    const current = subs[idx];
+    const current = subs[ratingIndex];
     if (current) {
       const existing = await ctx.db
         .query("ratings")
         .withIndex("by_song", (q) => q.eq("songId", current._id))
         .collect();
-    const hasSubmitterSkip = existing.some((r) => r.voterId === current.playerId && r.rating === -1);
+      const hasSubmitterSkip = existing.some((r) => r.voterId === current.playerId && r.rating === -1);
       if (!hasSubmitterSkip) {
         await ctx.db.insert("ratings", {
           roomCode: code,
-          round: room.currentRound,
+          round,
           songId: current._id,
           voterId: current.playerId,
           rating: -1,
@@ -859,8 +896,25 @@ export const advanceRating = internalMutation({
         });
       }
     }
-    // schedule next check/advance after 60s
-    await ctx.scheduler.runAfter(60_000, internal.game.flow.advanceRating, { code });
+
+    if (timedOut) {
+      const nextIndex = ratingIndex + 1;
+      await ctx.db.patch(room._id, { currentRatingIndex: nextIndex, lastActivityAt: now() });
+      await ctx.scheduler.runAfter(200, internal.game.flow.advanceRating, {
+        code,
+        round,
+        ratingIndex: nextIndex,
+        timedOut: false,
+      });
+      return;
+    }
+
+    await ctx.scheduler.runAfter(60_000, internal.game.flow.advanceRating, {
+      code,
+      round,
+      ratingIndex,
+      timedOut: true,
+    });
   },
 });
 
@@ -885,7 +939,12 @@ export const maybeAdvanceOnAllVotes = internalMutation({
     const validVotes = ratings.filter((r) => r.rating > 0).length;
     if (validVotes >= eligibleVoters) {
       await ctx.db.patch(room._id, { currentRatingIndex: idx + 1, lastActivityAt: now() });
-      await ctx.scheduler.runAfter(200, internal.game.flow.advanceRating, { code });
+      await ctx.scheduler.runAfter(200, internal.game.flow.advanceRating, {
+        code,
+        round: room.currentRound,
+        ratingIndex: idx + 1,
+        timedOut: false,
+      });
     }
   },
 });

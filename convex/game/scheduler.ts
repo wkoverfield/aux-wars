@@ -116,6 +116,24 @@ export const cleanupInactivePlayers = internalMutation({
           console.log(`[cleanupInactivePlayers] Host reassigned to ${sortedRemaining[0].playerId} in room ${roomCode}`);
         }
       }
+
+      if (room.phase === "songSelection") {
+        const submissions = await ctx.db
+          .query("submissions")
+          .withIndex("by_room_round", (q) => q.eq("roomCode", roomCode).eq("round", room.currentRound))
+          .collect();
+        const submittedPlayerIds = new Set(submissions.map((submission) => submission.playerId));
+        const allRemainingSubmitted = remainingPlayers.every((player) =>
+          submittedPlayerIds.has(player.playerId)
+        );
+
+        if (submissions.length > 0 && allRemainingSubmitted) {
+          await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, {
+            code: roomCode,
+            round: room.currentRound,
+          });
+        }
+      }
     }
   },
 });
@@ -162,6 +180,5 @@ async function deleteRoomAndData(ctx: any, room: any) {
 
   console.log(`[deleteRoomAndData] Deleted room ${code} and all associated data`);
 }
-
 
 

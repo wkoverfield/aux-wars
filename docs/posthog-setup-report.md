@@ -9,7 +9,7 @@ The wizard has completed a PostHog integration for the Aux Wars Express music se
 | `server/server.js` | Added `posthog-node` client initialization with `enableExceptionAutocapture: true`; added `music_searched`, `music_search_no_results` captures in `handleSearch`; added `captureException` in the error handler; added `X-POSTHOG-DISTINCT-ID` to CORS `allowedHeaders` |
 | `server/index.js` | Imported `posthog` and added `await posthog.shutdown()` in the `SIGTERM` handler for clean flush on deploy/restart |
 | `client/src/services/musicSearch.js` | Added `X-POSTHOG-DISTINCT-ID` header forwarding the persistent visitor ID so server-side events correlate with the same anonymous identity used by the Convex analytics system |
-| `server/.env` | Created with `POSTHOG_PROJECT_TOKEN` and `POSTHOG_HOST` |
+| Railway environment | Configure `POSTHOG_PROJECT_TOKEN` and `POSTHOG_HOST`; do not commit local env files |
 
 ## Events
 

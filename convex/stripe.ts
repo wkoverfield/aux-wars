@@ -19,7 +19,32 @@ import { v } from "convex/values";
 
 const PRO_PACK_PRICE_CENTS = 500; // $5.00 one-time. Change here to reprice.
 const PRO_PACK_NAME = "Aux Wars Pro — ad-free + bigger rooms";
+const PRO_PACK_PRODUCT_KEY = "aux_wars_pro_pack";
 const STRIPE_API = "https://api.stripe.com/v1";
+
+function allowedOrigins() {
+  const configured = (process.env.AUX_WARS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  return new Set([
+    "https://aux-wars.com",
+    "https://www.aux-wars.com",
+    "http://localhost:5173",
+    ...configured,
+  ]);
+}
+
+function checkedOrigin(origin: string) {
+  try {
+    const url = new URL(origin);
+    const normalized = url.origin;
+    if (allowedOrigins().has(normalized)) return normalized;
+  } catch {
+    // fall through
+  }
+  throw new Error("Checkout origin is not allowed");
+}
 
 function secretKey(): string {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -31,14 +56,16 @@ function secretKey(): string {
 export const createCheckoutSession = action({
   args: { origin: v.string() },
   handler: async (_ctx, { origin }) => {
+    const safeOrigin = checkedOrigin(origin);
     const params = new URLSearchParams();
     params.set("mode", "payment");
-    params.set("success_url", `${origin}/pro/success?session_id={CHECKOUT_SESSION_ID}`);
-    params.set("cancel_url", `${origin}/`);
+    params.set("success_url", `${safeOrigin}/pro/success?session_id={CHECKOUT_SESSION_ID}`);
+    params.set("cancel_url", `${safeOrigin}/`);
     params.set("line_items[0][quantity]", "1");
     params.set("line_items[0][price_data][currency]", "usd");
     params.set("line_items[0][price_data][unit_amount]", String(PRO_PACK_PRICE_CENTS));
     params.set("line_items[0][price_data][product_data][name]", PRO_PACK_NAME);
+    params.set("metadata[product]", PRO_PACK_PRODUCT_KEY);
 
     const resp = await fetch(`${STRIPE_API}/checkout/sessions`, {
       method: "POST",
@@ -75,6 +102,14 @@ export const verifyCheckout = action({
     }
     if (session.payment_status !== "paid") {
       return { proToken: null, status: session.payment_status };
+    }
+    if (
+      session.mode !== "payment" ||
+      session.currency !== "usd" ||
+      session.amount_total !== PRO_PACK_PRICE_CENTS ||
+      session.metadata?.product !== PRO_PACK_PRODUCT_KEY
+    ) {
+      throw new Error("Checkout session does not match Aux Wars Pro");
     }
 
     const proToken = crypto.randomUUID();
@@ -143,11 +178,10 @@ export const getEntitlementByToken = internalQuery({
 /** Restore Pro on a new device using the email used at checkout. */
 export const restoreByEmail = action({
   args: { email: v.string() },
-  handler: async (ctx, { email }): Promise<{ proToken: string | null }> => {
-    const ent = await ctx.runQuery(internal.stripe.getEntitlementByEmail, {
-      email: email.trim().toLowerCase(),
-    });
-    return { proToken: ent?.active ? ent.proToken : null };
+  handler: async (): Promise<{ proToken: string | null }> => {
+    // Email-only restore would reveal the bearer entitlement token to anyone who
+    // knows a buyer's email. Keep this disabled until a real magic-link flow exists.
+    return { proToken: null };
   },
 });
 

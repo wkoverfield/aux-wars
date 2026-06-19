@@ -28,12 +28,11 @@ export default function FeedbackModal({ showModal, onClose }) {
   const [authorName, setAuthorName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const feedback = useQuery(api.feedback.getFeedback);
+  const visitorId = getVisitorId();
+  const feedback = useQuery(api.feedback.getFeedback, { visitorId });
   const submitFeedback = useMutation(api.feedback.submitFeedback);
   const upvoteFeedback = useMutation(api.feedback.upvoteFeedback);
   const removeUpvote = useMutation(api.feedback.removeUpvote);
-
-  const visitorId = getVisitorId();
 
   // Reset form when modal closes
   useEffect(() => {
@@ -229,7 +228,7 @@ export default function FeedbackModal({ showModal, onClose }) {
                   ) : (
                     feedback.map((item) => {
                       const typeConfig = getTypeConfig(item.type);
-                      const hasVoted = item.upvoterIds.includes(visitorId);
+                      const hasVoted = Boolean(item.hasUpvoted);
                       const mergedRequests = item.mergedRequests || [];
 
                       return (

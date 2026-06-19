@@ -126,19 +126,12 @@ export default function Lobby() {
    * This ensures immediate room cleanup if they were the last player
    */
   useEffect(() => {
-    if (!gameCode || !session?.playerId) return;
+    if (!gameCode || !session?.playerId || !session?.connectionId) return;
 
     const handleBeforeUnload = () => {
-      // Use sendBeacon for reliable delivery even during page unload
-      // This is more reliable than async fetch during beforeunload
-      const data = JSON.stringify({
-        code: gameCode,
-        playerId: session.playerId
-      });
-
       // Note: In production, you might want to call leaveGame via navigator.sendBeacon
       // For now, we rely on the mutation being called synchronously
-      leaveGame({ code: gameCode, playerId: session.playerId }).catch(() => {
+      leaveGame({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId }).catch(() => {
         // Ignore errors during unload
       });
     };
@@ -148,7 +141,7 @@ export default function Lobby() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [gameCode, session?.playerId, leaveGame]);
+  }, [gameCode, session?.playerId, session?.connectionId, leaveGame]);
 
   /**
    * Verify player still exists in room on mount/refresh
@@ -170,9 +163,9 @@ export default function Lobby() {
    * Handles leaving the game and returning to home
    */
   const handleLeaveGame = async () => {
-    if (!gameCode || !session?.playerId) return;
+    if (!gameCode || !session?.playerId || !session?.connectionId) return;
 
-    await leaveGame({ code: gameCode, playerId: session.playerId });
+    await leaveGame({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
     clearSession();
     navigate("/lobby", { replace: true });
   };
@@ -181,11 +174,12 @@ export default function Lobby() {
    * Handles kicking a player from the lobby (host only)
    */
   const handleKickPlayer = async (targetPlayerId) => {
-    if (!isHost || !session?.playerId || !gameCode) return;
+    if (!isHost || !session?.playerId || !session?.connectionId || !gameCode) return;
 
     const result = await kickPlayer({
       code: gameCode,
       hostPlayerId: session.playerId,
+      hostConnectionId: session.connectionId,
       targetPlayerId
     });
 
@@ -229,8 +223,8 @@ export default function Lobby() {
     if (players.length < 3) {
       return;
     }
-    if (!session?.playerId) return;
-    await startGame({ code: gameCode, playerId: session.playerId });
+    if (!session?.playerId || !session?.connectionId) return;
+    await startGame({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
 
     // Track which prompt packs were used (fire-and-forget; never block game start)
     const packIds = getPackIdsForPrompts(room?.settings?.selectedPrompts || []);
@@ -343,6 +337,7 @@ export default function Lobby() {
         gameCode={gameCode}
         isHost={isHost}
         playerId={session?.playerId}
+        connectionId={session?.connectionId}
       />
       <SessionTakenOverModal
         show={showTakenOverModal}

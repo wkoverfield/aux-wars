@@ -222,7 +222,9 @@ export default function Round() {
           songId: songToRate.songId,
           rating: -1
         })
-          .then(() => setHasRatingSubmitted(true))
+          .then((result) => {
+            if (result?.success !== false) setHasRatingSubmitted(true);
+          })
           .catch(() => {});
       }
     }
@@ -383,13 +385,17 @@ export default function Round() {
     }
 
     try {
-      await submitRating({
+      const result = await submitRating({
         code: gameCode,
         playerId: session.playerId,
         connectionId: finalConnectionId,
         songId,
         rating
       });
+      if (result?.success === false) {
+        showToast(result.message || "Failed to submit rating.", "warning");
+        return;
+      }
       setHasRatingSubmitted(true);
     } catch (e) {
       showToast("Failed to submit rating.", "error");
