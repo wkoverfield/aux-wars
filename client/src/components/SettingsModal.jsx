@@ -8,6 +8,7 @@ import { useToast } from "../contexts/ToastContext";
 import PromptCategory from "./PromptCategory";
 import CustomPromptInput from "./CustomPromptInput";
 import { promptCategories } from "../data/promptCategories";
+import { captureGameEvent, gameProperties } from "../services/analytics";
 
 const MIN_PROMPT_POOL_SIZE = 5;
 const MAX_PROMPT_POOL_SIZE = 50;
@@ -163,6 +164,16 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
         showToast(result.message || "Failed to add prompt", "warning");
         return;
       }
+      captureGameEvent("custom_prompt_added", gameProperties({
+        code: gameCode,
+        room,
+        session: { playerId },
+        extra: {
+          prompt_length: text.length,
+          custom_prompt_count: (Array.isArray(roomCustomPrompts) ? roomCustomPrompts.length : 0) + 1,
+          selected_by_host_pool: result?.selected,
+        },
+      }));
       setSelectedPrompts((prev) => [...new Set([...prev, text])].slice(0, MAX_PROMPT_POOL_SIZE));
       if (result?.selected === 0) {
         showToast(`Added prompt. Host prompt pool is full at ${MAX_PROMPT_POOL_SIZE}.`, "warning");
@@ -205,6 +216,16 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
 
     setSavedPromptPacks(nextPacks);
     if (savePromptPacks(nextPacks)) {
+      captureGameEvent("prompt_pack_saved", gameProperties({
+        code: gameCode,
+        room,
+        session: { playerId },
+        extra: {
+          prompt_count: prompts.length,
+          pack_count: nextPacks.length,
+          replaced_existing_pack: existingIndex >= 0,
+        },
+      }));
       showToast(`Saved "${name}" (${prompts.length} prompts)`, "success");
     } else {
       setSavedPromptPacks(savedPromptPacks);
@@ -232,6 +253,17 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
         showToast(result.message || "Failed to load prompt pack", "warning");
         return;
       }
+      captureGameEvent("prompt_pack_loaded", gameProperties({
+        code: gameCode,
+        room,
+        session: { playerId },
+        extra: {
+          pack_prompt_count: pack.prompts.length,
+          added_count: result?.added || 0,
+          skipped_count: result?.skipped || 0,
+          maxed_out: Boolean(result?.maxedOut),
+        },
+      }));
       setSelectedPrompts((prev) => [...new Set([...prev, ...promptsThatCanFit])].slice(0, MAX_PROMPT_POOL_SIZE));
 
       if (result?.maxedOut) {
@@ -253,6 +285,12 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
     const nextPacks = savedPromptPacks.filter((pack) => pack.id !== packId);
     setSavedPromptPacks(nextPacks);
     if (savePromptPacks(nextPacks)) {
+      captureGameEvent("prompt_pack_deleted", gameProperties({
+        code: gameCode,
+        room,
+        session: { playerId },
+        extra: { pack_count: nextPacks.length },
+      }));
       showToast("Prompt pack deleted", "success");
     } else {
       setSavedPromptPacks(savedPromptPacks);
@@ -342,6 +380,20 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
         showToast(result.message || "Failed to update settings. Please try again.", "warning");
         return;
       }
+      captureGameEvent("settings_updated", gameProperties({
+        code: gameCode,
+        room,
+        session: { playerId },
+        extra: {
+          rounds_total: rounds,
+          song_selection_time: roundLength,
+          clip_length: snippetDuration,
+          prompt_pool_size: selectedPrompts.length,
+          prompt_voting_enabled: enablePromptVoting,
+          anonymous_mode: anonymousMode,
+          custom_prompt_count: Array.isArray(roomCustomPrompts) ? roomCustomPrompts.length : undefined,
+        },
+      }));
       onClose(); // Only close after successful update
     } catch (error) {
       console.error("Settings update failed:", error);

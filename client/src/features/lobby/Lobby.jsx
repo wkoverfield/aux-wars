@@ -14,6 +14,7 @@ import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
 import { getPackIdsForPrompts } from "../../data/promptCategories";
+import { captureGameEvent, gameProperties } from "../../services/analytics";
 import logo from "../../assets/aux-wars-logo.svg";
 
 /**
@@ -166,6 +167,7 @@ export default function Lobby() {
     if (!gameCode || !session?.playerId || !session?.connectionId) return;
 
     await leaveGame({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
+    captureGameEvent("lobby_left", gameProperties({ code: gameCode, room, players, session }));
     clearSession();
     navigate("/lobby", { replace: true });
   };
@@ -184,6 +186,7 @@ export default function Lobby() {
     });
 
     if (result.success) {
+      captureGameEvent("player_kicked", gameProperties({ code: gameCode, room, players, session }));
       showToast("Player removed from lobby", "success");
     } else {
       showToast(result.message || "Failed to kick player", "error");
@@ -203,7 +206,15 @@ export default function Lobby() {
       showToast("Please set your nickname before readying up.", "warning");
       return;
     }
-    setIsReady((prev) => !prev);
+    const nextReady = !isReady;
+    setIsReady(nextReady);
+    captureGameEvent("player_ready_toggled", gameProperties({
+      code: gameCode,
+      room,
+      players,
+      session,
+      extra: { ready: nextReady },
+    }));
     // The useEffect will handle emitting the update
   };
 
@@ -224,7 +235,9 @@ export default function Lobby() {
       return;
     }
     if (!session?.playerId || !session?.connectionId) return;
-    await startGame({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
+    const result = await startGame({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
+    if (result?.success === false) return;
+    captureGameEvent("game_started", gameProperties({ code: gameCode, room, players, session }));
 
     // Track which prompt packs were used (fire-and-forget; never block game start)
     const packIds = getPackIdsForPrompts(room?.settings?.selectedPrompts || []);
@@ -273,7 +286,7 @@ export default function Lobby() {
               <div className="lobby-code-count flex gap-5">
                 <div className="lobby-container rounded-md lobby-code flex flex-col gap-2">
                   <p className="text-xs font-normal">Code</p>
-                  <p className="text-2xl">{gameCode}</p>
+                  <p className="text-2xl" data-ph-mask>{gameCode}</p>
                 </div>
                 <div className="lobby-container rounded-md lobby-count flex flex-col gap-2">
                   <p className="text-xs font-normal">{room?.settings?.hostPro ? 'Players · Pro' : 'Players'}</p>
@@ -307,7 +320,10 @@ export default function Lobby() {
               <SettingsPreview
                 settings={room?.settings}
                 isHost={isHost}
-                onEdit={() => setShowModal(true)}
+                onEdit={() => {
+                  captureGameEvent("settings_opened", gameProperties({ code: gameCode, room, players, session }));
+                  setShowModal(true);
+                }}
               />
             </div>
             <div className="flex-1 w-full overflow-y-auto min-h-0">

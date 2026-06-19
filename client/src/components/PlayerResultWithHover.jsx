@@ -40,7 +40,7 @@ const PlayerResultWithHover = React.memo(function PlayerResultWithHover({ player
         </div>
         
         <div className="text-center w-full mt-1 md:mt-2">
-          <h3 className="text-xl md:text-2xl lg:text-3xl font-bold m-0 text-[#68d570]">{playerName}</h3>
+          <h3 className="text-xl md:text-2xl lg:text-3xl font-bold m-0 text-[#68d570]" data-ph-mask>{playerName}</h3>
           <div className="flex flex-row justify-center items-center gap-2 md:gap-4 mt-1 md:mt-2">
             <span className="text-base md:text-lg lg:text-xl font-semibold text-white">{wins} Win{wins !== 1 ? 's' : ''}</span>
             <span className="flex items-center gap-1 text-gray-300 text-base md:text-lg lg:text-xl font-semibold">
@@ -70,7 +70,7 @@ const PlayerResultWithHover = React.memo(function PlayerResultWithHover({ player
         </div>
         
         <div className="flex-1 overflow-hidden flex flex-col justify-center">
-          <h3 className="text-xl font-bold m-0 text-white truncate">{playerName}</h3>
+          <h3 className="text-xl font-bold m-0 text-white truncate" data-ph-mask>{playerName}</h3>
           <div className="flex flex-row items-center gap-3 mt-1">
             <span className="text-base text-white font-semibold">{wins} Win{wins !== 1 ? 's' : ''}</span>
             <span className="flex items-center gap-1 text-gray-300 text-base font-semibold">

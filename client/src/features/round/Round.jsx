@@ -5,7 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { searchTracks, getCachedResults } from "../../services/musicSearch";
-import { capture } from "../../services/posthog";
+import { captureGameEvent, gameProperties } from "../../services/analytics";
 import { useToast } from "../../contexts/ToastContext";
 import RoundStart from "./RoundStart";
 import SongSelection from "./SongSelection";
@@ -105,6 +105,7 @@ export default function Round() {
   const snippetSelectorRef = useRef(null);
   // Guard to prevent multiple auto-submits during timer countdown
   const hasAutoSubmittedRef = useRef(false);
+  const lastRatingSongEventRef = useRef(null);
 
   // Derive from queries - no local state duplication
   const isRatingPhase = currentRatingSong !== null && currentRatingSong !== undefined;
@@ -202,6 +203,23 @@ export default function Round() {
     }
   }, [isRatingPhase]);
 
+  useEffect(() => {
+    if (!isRatingPhase || !songToRate?.songId || lastRatingSongEventRef.current === songToRate.songId) return;
+    lastRatingSongEventRef.current = songToRate.songId;
+    captureGameEvent("rating_started", gameProperties({
+      code: gameCode,
+      room,
+      session,
+      extra: {
+        rating_index: ratingIndex,
+        total_songs: totalSongs,
+        source: songToRate.videoId ? "youtube" : "preview",
+        has_clip_window: Boolean(songToRate.snippet),
+        spectator_mode: songToRate.player?.id === session?.playerId,
+      },
+    }));
+  }, [gameCode, isRatingPhase, ratingIndex, room, session, songToRate, totalSongs]);
+
   // Phase-driven navigation handled by GameRouteGuard
 
   // Reset hasRatingSubmitted when moving to a new song
@@ -254,24 +272,60 @@ export default function Round() {
     const delayDebounce = setTimeout(async () => {
       try {
         setSearchError(null);
+        captureGameEvent("song_search_started", gameProperties({
+          code: gameCode,
+          room,
+          session,
+          extra: {
+            query_length: searchTerm.trim().length,
+            had_cached_results: Boolean(cachedResults?.length),
+          },
+        }));
         const result = await searchTracks(searchTerm);
 
         if (Array.isArray(result)) {
           setSearchResults(result);
+          captureGameEvent("song_search_completed", gameProperties({
+            code: gameCode,
+            room,
+            session,
+            extra: {
+              query_length: searchTerm.trim().length,
+              result_count: result.length,
+            },
+          }));
           if (result.length === 0) {
             setSearchError("No songs found. Try different keywords.");
             // Catalog-gap signal: which searches our sources can't fill.
             if (searchTerm.trim().length >= 3) {
               logEvent({ eventType: "search_no_results", metadata: { label: searchTerm.trim().slice(0, 80) } });
+              captureGameEvent("song_search_no_results", gameProperties({
+                code: gameCode,
+                room,
+                session,
+                extra: { query_length: searchTerm.trim().length },
+              }));
             }
           } else {
             setSearchError(null);
           }
         } else {
+          captureGameEvent("song_search_failed", gameProperties({
+            code: gameCode,
+            room,
+            session,
+            extra: { query_length: searchTerm.trim().length, reason: "invalid_response" },
+          }));
           setSearchError("Search service temporarily unavailable. Please try again.");
           setSearchResults([]);
         }
       } catch (error) {
+        captureGameEvent("song_search_failed", gameProperties({
+          code: gameCode,
+          room,
+          session,
+          extra: { query_length: searchTerm.trim().length, reason: "exception" },
+        }));
         setSearchError("Connection issue. Please check your internet and try again.");
         // Keep existing results if we have cached ones
         if (!cachedResults || cachedResults.length === 0) {
@@ -283,6 +337,7 @@ export default function Round() {
     }, 800);
 
     return () => clearTimeout(delayDebounce);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm]);
 
   // Player count viability checks (optional) can be rendered from submissionStatus
@@ -299,6 +354,15 @@ export default function Round() {
   const handleSelectSong = (track) => {
     setSelectedTrack(track);
     setShowSnippetSelector(true);
+    captureGameEvent("song_selected", gameProperties({
+      code: gameCode,
+      room,
+      session,
+      extra: {
+        source: track?.videoId ? "youtube" : "preview",
+        has_preview_url: Boolean(track?.preview_url),
+      },
+    }));
   };
 
   /**
@@ -344,16 +408,30 @@ export default function Round() {
       }
 
       // Funnel + new-feature usage (no-ops if PostHog isn't configured).
-      capture("song_submitted", {
-        source: trackWithSnippet.videoId ? "youtube" : "preview",
-        has_clip_window: Boolean(trackWithSnippet.snippet),
-      });
+      captureGameEvent("song_submitted", gameProperties({
+        code: gameCode,
+        room,
+        session,
+        extra: {
+          source: trackWithSnippet.videoId ? "youtube" : "preview",
+          has_clip_window: Boolean(trackWithSnippet.snippet),
+          clip_window_seconds: trackWithSnippet.snippet
+            ? Math.max(0, Math.round((trackWithSnippet.snippet.endTime || 0) - (trackWithSnippet.snippet.startTime || 0)))
+            : undefined,
+          auto_submitted: Boolean(hasAutoSubmittedRef.current),
+        },
+      }));
       if (trackWithSnippet.snippet) {
         const { startTime = 0, endTime = 0 } = trackWithSnippet.snippet;
-        capture("clip_window_selected", {
-          window_seconds: Math.max(0, Math.round(endTime - startTime)),
-          start_seconds: Math.round(startTime),
-        });
+        captureGameEvent("clip_window_selected", gameProperties({
+          code: gameCode,
+          room,
+          session,
+          extra: {
+            window_seconds: Math.max(0, Math.round(endTime - startTime)),
+            start_seconds: Math.round(startTime),
+          },
+        }));
       }
     } catch (error) {
       console.error("Song submission failed:", error);
@@ -396,6 +474,16 @@ export default function Round() {
         showToast(result.message || "Failed to submit rating.", "warning");
         return;
       }
+      captureGameEvent("rating_submitted", gameProperties({
+        code: gameCode,
+        room,
+        session,
+        extra: {
+          rating_value: rating,
+          rating_index: ratingIndex,
+          total_songs: totalSongs,
+        },
+      }));
       setHasRatingSubmitted(true);
     } catch (e) {
       showToast("Failed to submit rating.", "error");
