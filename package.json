@@ -19,8 +19,10 @@
     "deploy:server": "cd server && railway up"
   },
   "dependencies": {
-    "concurrently": "^9.1.2",
     "convex": "^1.28.0",
     "youtube-search-api": "^2.0.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }
