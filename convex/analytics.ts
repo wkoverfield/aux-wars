@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 /**
@@ -17,6 +17,14 @@ const eventMetadata = v.optional(v.object({
   label: v.optional(v.string()),
   phase: v.optional(v.string()),
 }));
+
+const PUBLIC_EVENT_TYPES = new Set([
+  "pro_cta_viewed",
+  "pro_checkout_started",
+  "search_no_results",
+  "session_start",
+  "vote_listen",
+]);
 
 export const trackEvent = internalMutation({
   args: {
@@ -63,14 +71,18 @@ export const logEvent = mutation({
     metadata: eventMetadata,
   },
   handler: async (ctx, { eventType, metadata }) => {
+    if (!PUBLIC_EVENT_TYPES.has(eventType)) {
+      return { success: false, message: "Unsupported event type" } as const;
+    }
     await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, { eventType, metadata });
+    return { success: true } as const;
   },
 });
 
 /**
  * Get total count of completed games
  */
-export const getTotalGamesCompleted = query({
+export const getTotalGamesCompleted = internalQuery({
   args: {},
   handler: async (ctx) => {
     const events = await ctx.db
@@ -84,7 +96,7 @@ export const getTotalGamesCompleted = query({
 /**
  * Get games per day for the last N days
  */
-export const getGamesPerDay = query({
+export const getGamesPerDay = internalQuery({
   args: { days: v.number() },
   handler: async (ctx, { days }) => {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -107,7 +119,7 @@ export const getGamesPerDay = query({
 /**
  * Get average players per completed game
  */
-export const getAveragePlayersPerGame = query({
+export const getAveragePlayersPerGame = internalQuery({
   args: {},
   handler: async (ctx) => {
     const events = await ctx.db
@@ -128,7 +140,7 @@ export const getAveragePlayersPerGame = query({
 /**
  * Get event counts by type
  */
-export const getEventCounts = query({
+export const getEventCounts = internalQuery({
   args: {},
   handler: async (ctx) => {
     const allEvents = await ctx.db.query("analyticsEvents").collect();
@@ -143,7 +155,7 @@ export const getEventCounts = query({
 /**
  * Get count for a specific event type (uses index, avoids document limit)
  */
-export const getCountByEventType = query({
+export const getCountByEventType = internalQuery({
   args: { eventType: v.string() },
   handler: async (ctx, { eventType }) => {
     const events = await ctx.db
@@ -201,7 +213,7 @@ const STATS_SAMPLE_CAP = 10000;
  * Median/avg time (seconds) players listen before voting — answers "how long do
  * people actually listen?" and sets the right rating clip length.
  */
-export const getListenTimeStats = query({
+export const getListenTimeStats = internalQuery({
   args: { days: v.optional(v.number()) },
   handler: async (ctx, { days = 30 }) => {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -236,7 +248,7 @@ export const getListenTimeStats = query({
  * Searches our iTunes/Deezer sources couldn't fill, most frequent first.
  * The catalog-gap finder (the churn worry made measurable).
  */
-export const getTopMissingSearches = query({
+export const getTopMissingSearches = internalQuery({
   args: { days: v.optional(v.number()), limit: v.optional(v.number()) },
   handler: async (ctx, { days = 30, limit = 30 }) => {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -264,7 +276,7 @@ export const getTopMissingSearches = query({
  * "mystery" into "X% in rating, Y% in songSelection, ..." so you know if there's
  * a real, fixable bottleneck vs. benign drop-off.
  */
-export const getAbandonmentByPhase = query({
+export const getAbandonmentByPhase = internalQuery({
   args: { days: v.optional(v.number()) },
   handler: async (ctx, { days = 30 }) => {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -287,7 +299,7 @@ export const getAbandonmentByPhase = query({
 /**
  * Get a single aggregate count by event type
  */
-export const getAggregateCount = query({
+export const getAggregateCount = internalQuery({
   args: { eventType: v.string() },
   handler: async (ctx, { eventType }) => {
     const agg = await ctx.db
@@ -302,7 +314,7 @@ export const getAggregateCount = query({
  * Backfill aggregate counts from existing events (run once after deployment)
  * Processes in batches to avoid timeout. Call repeatedly until it returns done: true.
  */
-export const backfillAggregates = mutation({
+export const backfillAggregates = internalMutation({
   args: { eventType: v.string(), batchSize: v.optional(v.number()) },
   handler: async (ctx, { eventType, batchSize = 5000 }) => {
     // Count events of this type (up to batch size)
@@ -341,7 +353,7 @@ export const backfillAggregates = mutation({
 /**
  * Set aggregate count directly (for manual correction or initial backfill)
  */
-export const setAggregateCount = mutation({
+export const setAggregateCount = internalMutation({
   args: { eventType: v.string(), count: v.number() },
   handler: async (ctx, { eventType, count }) => {
     const existing = await ctx.db

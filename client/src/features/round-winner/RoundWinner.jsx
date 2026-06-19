@@ -80,10 +80,10 @@ export default function RoundWinner() {
    * Handles the transition to the next round or final results
    */
   const handleNextRound = async () => {
-    if (isTransitioning || !session?.playerId) return;
+    if (isTransitioning || !session?.playerId || !session?.connectionId) return;
     setIsTransitioning(true);
     setGameTransition(true);
-    await nextRoundMutation({ code: gameCode, playerId: session.playerId });
+    await nextRoundMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
   };
 
   // Use state to prevent button text flickering

@@ -170,10 +170,15 @@ export const rejoinGame = mutation({
 });
 
 export const leaveGame = mutation({
-  args: { code: v.string(), playerId: v.string() },
-  handler: async (ctx, { code, playerId }) => {
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return;
+
+    const currentPlayer = await validateConnection(ctx, code, playerId, connectionId);
+    if (!currentPlayer) {
+      return { roomDeleted: false, message: "Connection issue. Please refresh the page." } as const;
+    }
 
     const players = await ctx.db
       .query("players")
@@ -222,16 +227,17 @@ export const kickPlayer = mutation({
   args: {
     code: v.string(),
     hostPlayerId: v.string(),
+    hostConnectionId: v.string(),
     targetPlayerId: v.string()
   },
-  handler: async (ctx, { code, hostPlayerId, targetPlayerId }) => {
+  handler: async (ctx, { code, hostPlayerId, hostConnectionId, targetPlayerId }) => {
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) {
       return { success: false, message: "Room not found" };
     }
 
     // Verify caller is the host
-    const host = await getPlayer(ctx, code, hostPlayerId);
+    const host = await validateConnection(ctx, code, hostPlayerId, hostConnectionId);
     if (!host || !host.isHost) {
       return { success: false, message: "Only the host can kick players" };
     }
@@ -331,6 +337,7 @@ export const updateSettings = mutation({
   args: {
     code: v.string(),
     playerId: v.string(),
+    connectionId: v.string(),
     numberOfRounds: v.number(),
     roundLength: v.number(), // 0 = no limit, else seconds for song selection
     snippetDuration: v.number(), // 0 = full song, else seconds for playback
@@ -338,7 +345,7 @@ export const updateSettings = mutation({
     enablePromptVoting: v.optional(v.boolean()), // default true - let players vote to skip prompts
     anonymousMode: v.optional(v.boolean()), // default false - hide submitter names during rating
   },
-  handler: async (ctx, { code, playerId, numberOfRounds, roundLength, snippetDuration, selectedPrompts, enablePromptVoting, anonymousMode }) => {
+  handler: async (ctx, { code, playerId, connectionId, numberOfRounds, roundLength, snippetDuration, selectedPrompts, enablePromptVoting, anonymousMode }) => {
     // Validate settings
     if (numberOfRounds < 1 || numberOfRounds > 10) {
       return { success: false, message: "Number of rounds must be between 1 and 10" } as const;
@@ -362,7 +369,7 @@ export const updateSettings = mutation({
     }
 
     // Only host can change settings
-    const player = await getPlayer(ctx, code, playerId);
+    const player = await validateConnection(ctx, code, playerId, connectionId);
     if (!player) {
       return { success: false, message: "Player not found" } as const;
     }
@@ -395,17 +402,18 @@ export const getRoomByCode = query({
       .query("players")
       .withIndex("by_room", (q) => q.eq("roomCode", code))
       .collect();
-    return { room, players };
+    return { room: publicRoom(room), players: players.map(publicPlayer) };
   },
 });
 
 export const getPlayers = query({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {
-    return await ctx.db
+    const players = await ctx.db
       .query("players")
       .withIndex("by_room", (q) => q.eq("roomCode", code))
       .collect();
+    return players.map(publicPlayer);
   },
 });
 
@@ -527,10 +535,10 @@ export const addCustomPrompts = mutation({
 });
 
 export const removeCustomPrompt = mutation({
-  args: { code: v.string(), text: v.string(), playerId: v.string() },
-  handler: async (ctx, { code, text, playerId }) => {
+  args: { code: v.string(), text: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, text, playerId, connectionId }) => {
     // Only host can remove custom prompts
-    const player = await getPlayer(ctx, code, playerId);
+    const player = await validateConnection(ctx, code, playerId, connectionId);
     if (!player) {
       throw new Error("Player not found");
     }
@@ -544,6 +552,16 @@ export const removeCustomPrompt = mutation({
       .unique();
     if (existing) {
       await ctx.db.delete(existing._id);
+      const room = await getRoomByCodeInternal(ctx, code);
+      if (room) {
+        await ctx.db.patch(room._id, {
+          settings: {
+            ...room.settings,
+            selectedPrompts: room.settings.selectedPrompts.filter((prompt: string) => prompt !== text),
+          },
+          lastActivityAt: now(),
+        });
+      }
     }
   },
 });
@@ -566,6 +584,29 @@ async function getRoomByCodeInternal(ctx: any, code: string) {
 
 async function touchRoom(ctx: any, roomId: any) {
   await ctx.db.patch(roomId, { lastActivityAt: now() });
+}
+
+function publicPlayer(player: any) {
+  return {
+    _id: player._id,
+    _creationTime: player._creationTime,
+    roomCode: player.roomCode,
+    playerId: player.playerId,
+    name: player.name,
+    isHost: player.isHost,
+    isReady: player.isReady,
+    connectedAt: player.connectedAt,
+    lastSeenAt: player.lastSeenAt,
+    isActive: player.isActive,
+    submittedRounds: player.submittedRounds,
+  };
+}
+
+function publicRoom(room: any) {
+  return {
+    ...room,
+    hostPlayerId: room.hostPlayerId,
+  };
 }
 
 async function includeCustomPromptsInSelectedPool(ctx: any, room: any, prompts: string[]) {

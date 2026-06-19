@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { ADSENSE_CLIENT, adsAllowed, loadAdSenseScript, useConsent } from '../services/ads';
+import { ADSENSE_CLIENT, adsAllowed, getAdSlotId, loadAdSenseScript, useConsent } from '../services/ads';
 import { useRoomOptional } from '../services/RoomProvider';
 
 /**
@@ -20,8 +20,9 @@ export default function AdSlot({ slot, format = 'auto', className = '' }) {
   const roomCtx = useRoomOptional();
   const isProRoom = Boolean(roomCtx?.room?.settings?.hostPro);
   const insRef = useRef(null);
+  const adSlotId = getAdSlotId(slot);
 
-  const enabled = adsAllowed(consent) && !isProRoom;
+  const enabled = adsAllowed(consent) && !isProRoom && Boolean(adSlotId);
 
   useEffect(() => {
     if (!enabled) return;
@@ -42,7 +43,7 @@ export default function AdSlot({ slot, format = 'auto', className = '' }) {
         className="adsbygoogle"
         style={{ display: 'block', width: '100%' }}
         data-ad-client={ADSENSE_CLIENT}
-        data-ad-slot={slot}
+        data-ad-slot={adSlotId}
         data-ad-format={format}
         data-full-width-responsive="true"
       />

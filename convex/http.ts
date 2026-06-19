@@ -22,6 +22,10 @@ async function verifyStripeSignature(
   const timestamp = parts["t"];
   const expected = parts["v1"];
   if (!timestamp || !expected) return false;
+  const timestampMs = Number(timestamp) * 1000;
+  if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
+    return false;
+  }
 
   const key = await crypto.subtle.importKey(
     "raw",
@@ -61,10 +65,10 @@ http.route({
     const secret = process.env.STRIPE_WEBHOOK_SECRET;
     const sigHeader = request.headers.get("stripe-signature") || "";
 
-    if (secret) {
-      const ok = await verifyStripeSignature(payload, sigHeader, secret);
-      if (!ok) return new Response("Invalid signature", { status: 400 });
-    }
+    if (!secret) return new Response("Webhook secret is not configured", { status: 500 });
+
+    const ok = await verifyStripeSignature(payload, sigHeader, secret);
+    if (!ok) return new Response("Invalid signature", { status: 400 });
 
     let event: { type?: string; data?: { object?: { id?: string } } };
     try {

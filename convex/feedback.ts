@@ -5,8 +5,8 @@ import { v } from "convex/values";
  * Get all feedback sorted by upvotes (highest first)
  */
 export const getFeedback = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { visitorId: v.optional(v.string()) },
+  handler: async (ctx, { visitorId }) => {
     const feedback = await ctx.db.query("feedback").collect();
 
     const childrenByParent = new Map<string, typeof feedback>();
@@ -29,12 +29,7 @@ export const getFeedback = query({
           ])
         );
 
-        return {
-          ...item,
-          mergedRequests,
-          upvotes: upvoterIds.length,
-          upvoterIds,
-        };
+        return publicFeedbackItem(item, mergedRequests, upvoterIds, visitorId);
       });
 
     // Sort by upvotes descending, then by createdAt descending.
@@ -44,6 +39,38 @@ export const getFeedback = query({
     });
   },
 });
+
+function publicFeedbackItem(
+  item: any,
+  mergedRequests: any[],
+  upvoterIds: string[],
+  visitorId?: string,
+) {
+  return {
+    _id: item._id,
+    _creationTime: item._creationTime,
+    type: item.type,
+    title: item.title,
+    description: item.description,
+    status: item.status,
+    upvotes: upvoterIds.length,
+    hasUpvoted: visitorId ? upvoterIds.includes(visitorId) : false,
+    authorName: item.authorName,
+    createdAt: item.createdAt,
+    mergedRequests: mergedRequests.map((request) => ({
+      _id: request._id,
+      _creationTime: request._creationTime,
+      type: request.type,
+      title: request.title,
+      description: request.description,
+      status: request.status,
+      upvotes: request.upvoterIds.length,
+      hasUpvoted: visitorId ? request.upvoterIds.includes(visitorId) : false,
+      authorName: request.authorName,
+      createdAt: request.createdAt,
+    })),
+  };
+}
 
 /**
  * Submit new feedback
@@ -121,9 +148,12 @@ export const upvoteFeedback = mutation({
 });
 
 /**
- * Update feedback status (admin only - no auth check for now)
+ * Internal admin helper for marking feedback items.
+ *
+ * Run from CLI/dashboard only, e.g.
+ * npx convex run feedback:updateStatus '{"feedbackId":"...","status":"completed"}' --prod
  */
-export const updateStatus = mutation({
+export const updateStatus = internalMutation({
   args: {
     feedbackId: v.id("feedback"),
     status: v.string(),
