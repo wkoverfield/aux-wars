@@ -123,7 +123,7 @@ export default function CustomPromptInput({
                         className="flex items-center gap-2 rounded-md bg-[#1a1a1a] p-2"
                       >
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-white" data-ph-mask>{pack.name}</div>
+                          <div className="truncate text-sm text-white">{pack.name}</div>
                           <div className="text-xs text-gray-500">{pack.prompts.length} prompts</div>
                         </div>
                         <button
@@ -185,7 +185,7 @@ export default function CustomPromptInput({
                       exit={{ opacity: 0, x: 20 }}
                       className="flex items-center justify-between p-2 bg-[#1a1a1a] rounded-md"
                     >
-                      <span className="text-white text-sm flex-1 mr-2" data-ph-mask>{prompt}</span>
+                      <span className="text-white text-sm flex-1 mr-2">{prompt}</span>
                       {canRemovePrompts && (
                         <button
                           type="button"

@@ -24,7 +24,7 @@ export default function SearchBar({
     return (
       <div className="search-area flex justify-center w-full">
         <div className="search-bar flex items-center justify-center rounded-md">
-          <div className="text-white opacity-50 text-center break-words text-lg md:text-xl w-full" data-ph-mask>
+          <div className="text-white opacity-50 text-center break-words text-lg md:text-xl w-full">
             {value}
           </div>
         </div>

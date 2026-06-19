@@ -245,7 +245,7 @@ const RatingScreen = ({
             {songToRate.artist}
           </p>
           <p className="text-xs text-gray-400 mt-1 text-center">
-            Submitted by: <span data-ph-mask>{anonymousMode ? '???' : (songToRate.player?.name || 'Unknown Player')}</span>
+            Submitted by: <span>{anonymousMode ? '???' : (songToRate.player?.name || 'Unknown Player')}</span>
           </p>
         </div>
 
