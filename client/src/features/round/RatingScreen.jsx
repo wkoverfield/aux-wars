@@ -3,6 +3,7 @@ import { useMutation } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import record from '../../assets/record.svg';
 import SearchBar from '../../components/SearchBar';
+import ScrollFade from '../../components/ScrollFade';
 import TrackPlayer from '../../components/TrackPlayer';
 import { useToast } from '../../contexts/ToastContext';
 import { captureGameEvent } from '../../services/analytics';
@@ -141,14 +142,14 @@ const RatingScreen = ({
   }, [songToRate?.songId]);
 
   return (
-    <div className="flex flex-col items-center w-full min-h-screen box-border px-2 pt-4 pb-24 sm:pt-8 sm:pb-32 bg-transparent">
-      {/* Prompt at the top */}
-      <div className="w-full mb-2 sm:mb-4 overflow-x-auto">
-        <SearchBar value={currentPrompt || ''} readOnly onChange={() => {}} />
-      </div>
+    <ScrollFade className="h-full w-full" contentClassName="min-h-full flex flex-col items-center justify-center w-full py-4 px-2">
+        {/* Prompt at the top */}
+        <div className="w-full mb-2 sm:mb-4 overflow-x-auto">
+          <SearchBar value={currentPrompt || ''} readOnly onChange={() => {}} />
+        </div>
 
-      {/* Main content vertically centered */}
-      <div className="flex flex-col items-center flex-grow justify-center w-full max-w-md mx-auto">
+        {/* Main content */}
+        <div className="flex flex-col items-center w-full max-w-md mx-auto">
         {/* Song counter */}
         <div className="mb-2 sm:mb-4 text-white text-center">
           <p>Rating Song {currentIndex + 1} of {totalSongs}</p>
@@ -273,23 +274,23 @@ const RatingScreen = ({
             <p className="text-gray-400">Waiting for others to rate...</p>
           </div>
         )}
-      </div>
-
-      {/* Submit button fixed at the bottom - hidden in spectator mode */}
-      {!spectatorMode && (
-        <div className="fixed left-0 right-0 bottom-0 flex justify-center pb-4 bg-gradient-to-t from-black/80 to-transparent z-20">
-          <button
-            className={`bg-[#68d570] text-black font-bold w-full max-w-xs h-[52px] rounded-full cursor-pointer transition-all hover:scale-105 hover:bg-[#7de884] ${
-              selectedRating < 0 ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-            onClick={handleSubmit}
-            disabled={selectedRating < 0}
-          >
-            Submit
-          </button>
         </div>
-      )}
-    </div>
+
+        {/* Submit — in-flow at the bottom of the column; never overlaps, always reachable */}
+        {!spectatorMode && (
+          <div className="w-full max-w-xs mx-auto mt-6">
+            <button
+              className={`bg-[#68d570] text-black font-bold w-full h-[52px] rounded-full cursor-pointer transition-all hover:scale-105 hover:bg-[#7de884] ${
+                selectedRating < 0 ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              onClick={handleSubmit}
+              disabled={selectedRating < 0}
+            >
+              Submit
+            </button>
+          </div>
+        )}
+    </ScrollFade>
   );
 };
 

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import SearchBar from "../../components/SearchBar";
 import SongList from "../../components/SongList";
+import ScrollFade from "../../components/ScrollFade";
 
 /**
  * SongSelection component provides a search interface for selecting songs
@@ -68,7 +69,7 @@ export default function SongSelection({
         </div>
       </div>
 
-      <div className="overflow-y-auto flex-1">
+      <ScrollFade className="flex-1 min-h-0">
         <div className="max-w-[100vw] sm:max-w-xl lg:max-w-2xl mx-auto px-4">
           {searchError && (
             <div className="mb-4 p-4 bg-red-500 bg-opacity-20 border border-red-500 rounded-lg text-red-200 text-center">
@@ -107,7 +108,7 @@ export default function SongSelection({
             onConfirmTrack={handleConfirmTrack} 
           />
         </div>
-      </div>
+      </ScrollFade>
 
       <div className="w-full">
         <div className="max-w-[100vw] sm:max-w-xl lg:max-w-2xl mx-auto px-4 pt-4 pb-6">

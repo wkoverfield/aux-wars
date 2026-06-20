@@ -16,6 +16,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { getPackIdsForPrompts } from "../../data/promptCategories";
 import { captureGameEvent, gameProperties } from "../../services/analytics";
 import logo from "../../assets/aux-wars-logo.svg";
+import ScrollFade from "../../components/ScrollFade";
 
 /**
  * Lobby component manages the game lobby where players can join, set their names,
@@ -326,7 +327,7 @@ export default function Lobby() {
                 }}
               />
             </div>
-            <div className="flex-1 w-full overflow-y-auto min-h-0">
+            <ScrollFade className="flex-1 w-full min-h-0">
               <PlayerList
                 players={players}
                 isHost={isHost}
@@ -335,7 +336,7 @@ export default function Lobby() {
               />
               {/* Ad-safe: lobby is a waiting surface; scrolls with the list, ad-free in pro rooms */}
               <AdSlot slot="lobby" />
-            </div>
+            </ScrollFade>
           </div>
           {isHost && allPlayersReady && players.length > 2 && (
             <button

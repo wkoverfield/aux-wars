@@ -1,5 +1,6 @@
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
+import ScrollFade from "./ScrollFade";
 
 function formatDate(ts) {
   try {
@@ -28,7 +29,7 @@ export default function NewsSection() {
   }
 
   return (
-    <div className="space-y-4 max-h-80 overflow-y-auto pr-1">
+    <ScrollFade className="" scrollClassName="max-h-80 w-full" contentClassName="space-y-4 pr-1">
       {news.map((n) => (
         <div key={n.id}>
           <div className="flex items-baseline justify-between gap-2">
@@ -38,6 +39,6 @@ export default function NewsSection() {
           <p className="text-sm text-gray-300 whitespace-pre-line mt-1">{n.body}</p>
         </div>
       ))}
-    </div>
+    </ScrollFade>
   );
 }

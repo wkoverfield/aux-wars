@@ -6,6 +6,7 @@ import { api } from '../../../../convex/_generated/api';
 import { useSession } from '../../hooks/useSession';
 import { useHeartbeat } from '../../hooks/useHeartbeat';
 import PlayerResultWithHover from '../../components/PlayerResultWithHover';
+import ScrollFade from '../../components/ScrollFade';
 import AnimatedLogo from '../../components/AnimatedLogo';
 import AdSlot from '../../components/AdSlot';
 import { captureGameEvent, gameProperties } from '../../services/analytics';
@@ -31,11 +32,19 @@ function buildPlayerStatsFromRounds(results) {
   return Object.values(stats);
 }
 
-const KIND_STYLE = {
-  glory: 'border-[#68d570]/40 bg-[#68d570]/10',
-  roast: 'border-amber-400/30 bg-amber-400/5',
-  judge: 'border-sky-400/30 bg-sky-400/5',
-};
+/** Fisher–Yates pick of up to n items — fresh each game so the superlatives vary. */
+function pickN(arr, n) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, n);
+}
+
+const SUSPENSE_MS = 1300;
+const WINNER_MS = 2600;
+const SUPERLATIVE_MS = 2200;
 
 /** Shared "running it back in 3…2…1" overlay, driven off the room timestamp. */
 function RematchCountdown({ rematchAt, onCancel }) {
@@ -82,18 +91,18 @@ function SetlistModal({ player, onClose }) {
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
     >
       <motion.div
-        className="bg-[#181818] rounded-lg w-full max-w-md max-h-[85vh] overflow-y-auto shadow-2xl"
+        className="bg-[#181818] rounded-lg w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden shadow-2xl"
         initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 bg-[#181818] px-5 pt-5 pb-3 flex items-center justify-between">
+        <div className="shrink-0 px-5 pt-5 pb-3 flex items-center justify-between">
           <div>
             <p className="text-xs text-gray-400">Setlist</p>
             <h3 className="text-xl font-bold text-[#68d570]">{player.playerName}</h3>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl leading-none px-2">×</button>
         </div>
-        <div className="px-5 pb-5 space-y-2">
+        <ScrollFade className="flex-1 min-h-0" contentClassName="px-5 pb-5 space-y-2" fadeColor="#181818" showTop={false}>
           {songs.map((s) => (
             <div key={`${s.round}-${s.songId}`} className="flex items-center gap-3 p-2 rounded-md bg-[#242424]">
               <span className="text-xs text-gray-500 w-5 shrink-0">R{s.round}</span>
@@ -105,7 +114,7 @@ function SetlistModal({ player, onClose }) {
               <span className="text-sm font-semibold text-gray-300 shrink-0">{s.totalRecords}</span>
             </div>
           ))}
-        </div>
+        </ScrollFade>
       </motion.div>
     </motion.div>
   );
@@ -145,13 +154,28 @@ export default function GameWinner() {
     [allRoundResultsQuery, playersQuery, voterAwardsQuery, sortedPlayers]
   );
 
-  // Reveal stage machine: brief suspense → winner held → full standings/awards.
-  const [stage, setStage] = useState('reveal'); // 'reveal' | 'full'
+  // Pick up to 3 superlatives, fresh per game, to animate through after the winner.
+  const reel = useMemo(() => pickN(awards, 3), [awards]);
+
+  // Reveal flow: suspense → winner → superlatives (1 by 1) → final leaderboard.
+  const [stage, setStage] = useState('suspense'); // 'suspense' | 'winner' | 'superlatives' | 'final'
+  const [supIdx, setSupIdx] = useState(0);
+
   useEffect(() => {
     if (!sortedPlayers.length) return undefined;
-    const t = setTimeout(() => setStage('full'), 3200);
+    let t;
+    if (stage === 'suspense') t = setTimeout(() => setStage('winner'), SUSPENSE_MS);
+    else if (stage === 'winner') t = setTimeout(() => setStage(reel.length ? 'superlatives' : 'final'), WINNER_MS);
+    else if (stage === 'superlatives') {
+      t = setTimeout(() => {
+        if (supIdx < reel.length - 1) setSupIdx((i) => i + 1);
+        else setStage('final');
+      }, SUPERLATIVE_MS);
+    }
     return () => clearTimeout(t);
-  }, [sortedPlayers.length]);
+  }, [stage, supIdx, sortedPlayers.length, reel.length]);
+
+  const skipToFinal = () => { if (stage !== 'final') setStage('final'); };
 
   const [setlistPlayer, setSetlistPlayer] = useState(null);
 
@@ -173,7 +197,7 @@ export default function GameWinner() {
 
   if (!allRoundResultsQuery || !playersQuery) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-full">
         <div className="flex flex-col items-center gap-4 text-white text-xl">
           <div className="w-16 h-16 border-4 border-[#1db954] border-t-transparent rounded-full animate-spin" />
           <p>Loading final results…</p>
@@ -184,7 +208,7 @@ export default function GameWinner() {
 
   const winner = sortedPlayers[0];
   const rest = sortedPlayers.slice(1);
-  const revealing = stage === 'reveal';
+  const isFinal = stage === 'final';
 
   const handlePlayAgain = async () => {
     if (!session?.playerId || !session?.connectionId) return;
@@ -204,125 +228,121 @@ export default function GameWinner() {
   };
 
   return (
-    <div className="relative flex flex-col h-screen w-full max-w-7xl mx-auto pt-2 pb-6 px-2 md:p-6 bg-transparent items-center overflow-hidden">
-      <div className="flex justify-center w-full mb-2 md:mb-3 shrink-0">
-        <AnimatedLogo />
-      </div>
+    <div className="relative h-full w-full overflow-hidden bg-transparent">
+      {/* ---------- REVEAL (suspense → winner → superlatives) ---------- */}
+      {!isFinal && (
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center px-4 cursor-pointer"
+          onClick={skipToFinal}
+        >
+          <AnimatePresence mode="wait">
+            {stage === 'suspense' && (
+              <motion.p
+                key="suspense" className="text-white/70 text-lg md:text-2xl text-center"
+                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }}
+              >
+                Tonight’s best taste is…
+              </motion.p>
+            )}
 
-      {/* Tap anywhere to skip the reveal */}
-      <div
-        className="w-full flex-1 flex flex-col items-center overflow-y-auto"
-        onClick={() => revealing && setStage('full')}
-        style={{ minHeight: 0 }}
-      >
-        {/* Suspense headline (reveal only) */}
-        <AnimatePresence>
-          {revealing && (
-            <motion.p
-              key="suspense"
-              className="text-white/70 text-base md:text-lg mt-2 mb-3"
-              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-            >
-              Tonight’s best taste is…
-            </motion.p>
+            {stage === 'winner' && winner && (
+              <motion.div
+                key="winner" className="flex flex-col items-center"
+                initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ opacity: 0, scale: 1.05 }}
+                transition={{ type: 'spring', stiffness: 220, damping: 16 }}
+              >
+                <div className="text-4xl md:text-5xl mb-1">👑</div>
+                <PlayerResultWithHover
+                  playerName={winner.playerName} songs={winner.songs}
+                  wins={winner.wins} totalRecords={winner.totalRecords} isWinner
+                />
+              </motion.div>
+            )}
+
+            {stage === 'superlatives' && reel[supIdx] && (
+              <motion.div
+                key={`sup-${supIdx}`} className="flex flex-col items-center text-center"
+                initial={{ opacity: 0, scale: 0.8, y: 24 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 1.1, y: -24 }}
+                transition={{ type: 'spring', stiffness: 200, damping: 18 }}
+              >
+                <div className="text-6xl md:text-7xl mb-4">{reel[supIdx].emoji}</div>
+                <p className="text-white/55 text-xs md:text-sm uppercase tracking-[0.2em] mb-2">{reel[supIdx].title}</p>
+                <p className="text-3xl md:text-4xl font-bold text-[#68d570] mb-2">{reel[supIdx].playerName}</p>
+                <p className="text-white/70 text-sm md:text-base max-w-xs">{reel[supIdx].detail}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* progress dots while cycling superlatives */}
+          {stage === 'superlatives' && reel.length > 1 && (
+            <div className="absolute bottom-16 flex gap-2">
+              {reel.map((_, i) => (
+                <span key={i} className={`h-1.5 w-1.5 rounded-full ${i === supIdx ? 'bg-[#68d570]' : 'bg-white/25'}`} />
+              ))}
+            </div>
           )}
-        </AnimatePresence>
 
-        {/* Winner */}
-        {winner && (
-          <motion.div
-            className="w-full flex flex-col items-center cursor-pointer"
-            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: 'spring', stiffness: 220, damping: 18, delay: revealing ? 0.6 : 0 }}
-            onClick={(e) => { e.stopPropagation(); if (revealing) setStage('full'); else setSetlistPlayer(winner); }}
-          >
-            <div className="text-3xl md:text-4xl mb-1">👑</div>
-            <PlayerResultWithHover
-              playerName={winner.playerName}
-              songs={winner.songs}
-              wins={winner.wins}
-              totalRecords={winner.totalRecords}
-              isWinner
-            />
-          </motion.div>
-        )}
+          <p className="absolute bottom-6 text-xs text-white/35">tap to skip</p>
+        </div>
+      )}
 
-        {/* Standings + awards (full only) */}
-        <AnimatePresence>
-          {!revealing && (
-            <motion.div
-              key="full"
-              className="w-full flex flex-col items-center gap-2"
-              initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
-            >
+      {/* ---------- FINAL (full leaderboard) ---------- */}
+      {isFinal && (
+        <motion.div
+          className="h-full w-full"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}
+        >
+          <ScrollFade className="h-full w-full" contentClassName="min-h-full flex flex-col items-center w-full max-w-2xl mx-auto px-2 py-4">
+            <AnimatedLogo />
+
+            {winner && (
+              <div
+                className="w-full flex flex-col items-center cursor-pointer mt-2"
+                onClick={() => setSetlistPlayer(winner)}
+              >
+                <div className="text-3xl mb-1">👑</div>
+                <PlayerResultWithHover
+                  playerName={winner.playerName} songs={winner.songs}
+                  wins={winner.wins} totalRecords={winner.totalRecords} isWinner
+                />
+              </div>
+            )}
+
+            <div className="w-full flex flex-col items-center gap-2 mt-2">
               {rest.map((player) => (
                 <div
                   key={player.playerId}
                   className="w-full flex justify-center cursor-pointer"
-                  onClick={(e) => { e.stopPropagation(); setSetlistPlayer(player); }}
+                  onClick={() => setSetlistPlayer(player)}
                 >
                   <PlayerResultWithHover
-                    playerName={player.playerName}
-                    songs={player.songs}
-                    wins={player.wins}
-                    totalRecords={player.totalRecords}
-                    isWinner={false}
+                    playerName={player.playerName} songs={player.songs}
+                    wins={player.wins} totalRecords={player.totalRecords} isWinner={false}
                   />
                 </div>
               ))}
+            </div>
 
-              {sortedPlayers.length > 0 && (
-                <p className="text-xs text-white/40 mt-1">tap anyone to see their setlist</p>
-              )}
+            <p className="text-xs text-white/40 mt-2">tap anyone to see their setlist</p>
 
-              {/* Awards */}
-              {awards.length > 0 && (
-                <div className="w-full max-w-2xl mt-4 px-2">
-                  <h3 className="text-center text-white/80 font-bold mb-3">🏅 Superlatives</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {awards.map((a, i) => (
-                      <motion.div
-                        key={a.id}
-                        className={`flex items-center gap-3 rounded-lg border p-3 ${KIND_STYLE[a.kind] || 'border-white/10 bg-white/5'}`}
-                        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.3, delay: i * 0.07 }}
-                      >
-                        <span className="text-2xl shrink-0">{a.emoji}</span>
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold text-white leading-tight">{a.title}</p>
-                          <p className="text-sm text-[#68d570] truncate">{a.playerName}</p>
-                          <p className="text-xs text-white/50 truncate">{a.detail}</p>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                </div>
-              )}
+            <AdSlot slot="gameover" className="max-w-2xl mx-auto mt-4" />
 
-              <AdSlot slot="gameover" className="max-w-2xl mx-auto mt-4" />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Buttons — everyone, once the reveal settles */}
-      {!revealing && (
-        <motion.div
-          className="shrink-0 w-full max-w-md flex gap-3 pt-3"
-          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}
-        >
-          <button
-            onClick={handleBackToLobby}
-            className="flex-1 py-3 rounded-full font-semibold text-white bg-[#242424] hover:bg-[#2d2d2d] transition-all"
-          >
-            🚪 Back to Lobby
-          </button>
-          <button
-            onClick={handlePlayAgain}
-            className="flex-1 py-3 rounded-full font-bold text-black bg-[#68d570] hover:bg-[#7de884] transition-all"
-          >
-            🔄 Play Again
-          </button>
+            {/* Buttons — pushed to the bottom when there's room, in-flow so they're always reachable */}
+            <div className="w-full max-w-md flex gap-3 mt-auto pt-6">
+              <button
+                onClick={handleBackToLobby}
+                className="flex-1 py-3 rounded-full font-semibold text-white bg-[#242424] hover:bg-[#2d2d2d] transition-all"
+              >
+                🚪 Back to Lobby
+              </button>
+              <button
+                onClick={handlePlayAgain}
+                className="flex-1 py-3 rounded-full font-bold text-black bg-[#68d570] hover:bg-[#7de884] transition-all"
+              >
+                🔄 Play Again
+              </button>
+            </div>
+          </ScrollFade>
         </motion.div>
       )}
 
