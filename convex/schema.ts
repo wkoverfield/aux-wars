@@ -29,6 +29,7 @@ export default defineSchema({
     selectionStartedAt: v.optional(v.number()), // Timestamp when song selection phase started
     promptVotingStartedAt: v.optional(v.number()), // Timestamp when prompt voting started
     skipVotes: v.optional(v.array(v.string())), // Player IDs who voted to skip current prompt
+    rematchStartingAt: v.optional(v.number()), // Timestamp the "Play Again" countdown fires (gameOver → fresh game)
     createdAt: v.number(),
     lastActivityAt: v.number(),
   }).index("by_code", ["code"]),

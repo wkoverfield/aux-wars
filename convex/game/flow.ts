@@ -336,8 +336,11 @@ export const returnToLobby = mutation({
   handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
-    const host = await validateConnection(ctx, code, playerId, connectionId);
-    if (!host || !host.isHost) return;
+    const player = await validateConnection(ctx, code, playerId, connectionId);
+    if (!player) return;
+    // Post-game, ANY player can send the group back to the lobby (decoupled from
+    // the host). Mid-game, keep it host-only.
+    if (room.phase !== "gameOver" && !player.isHost) return;
 
     // Clean up all game data from previous game
     const submissions = await ctx.db
@@ -371,6 +374,169 @@ export const returnToLobby = mutation({
 
     const players = await getPlayers(ctx, code);
     await Promise.all(players.map((p) => ctx.db.patch(p._id, { isReady: false, submittedRounds: [] })));
+  },
+});
+
+// ==================== PLAY AGAIN (REMATCH) ====================
+
+const REMATCH_COUNTDOWN_MS = 3000;
+
+/** Any player can kick off the shared "run it back" countdown from the recap. */
+export const startRematch = mutation({
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
+    const room = await getRoom(ctx, code);
+    if (!room || room.phase !== "gameOver") return;
+    const player = await validateConnection(ctx, code, playerId, connectionId);
+    if (!player) return;
+    if (room.rematchStartingAt) return; // already counting down — double-taps no-op
+
+    await ctx.db.patch(room._id, { rematchStartingAt: now() + REMATCH_COUNTDOWN_MS, lastActivityAt: now() });
+    await ctx.scheduler.runAfter(REMATCH_COUNTDOWN_MS, internal.game.flow.executeRematch, { code });
+  },
+});
+
+/** Any player can abort the countdown (clears the flag; the scheduled job then no-ops). */
+export const cancelRematch = mutation({
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
+    const room = await getRoom(ctx, code);
+    if (!room) return;
+    const player = await validateConnection(ctx, code, playerId, connectionId);
+    if (!player) return;
+    if (!room.rematchStartingAt) return;
+    await ctx.db.patch(room._id, { rematchStartingAt: undefined, lastActivityAt: now() });
+  },
+});
+
+/** Scheduled after the countdown: wipe the old game, keep settings, start fresh. */
+export const executeRematch = internalMutation({
+  args: { code: v.string() },
+  handler: async (ctx, { code }) => {
+    const room = await getRoom(ctx, code);
+    // No-op if cancelled (flag cleared) or the room already moved on.
+    if (!room || room.phase !== "gameOver" || !room.rematchStartingAt) return;
+
+    // Wipe previous game data (same as returnToLobby).
+    const submissions = await ctx.db
+      .query("submissions")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
+      .collect();
+    await Promise.all(submissions.map((s) => ctx.db.delete(s._id)));
+    const ratings = await ctx.db
+      .query("ratings")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
+      .collect();
+    await Promise.all(ratings.map((r) => ctx.db.delete(r._id)));
+    const roundResults = await ctx.db
+      .query("roundResults")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
+      .collect();
+    await Promise.all(roundResults.map((rr) => ctx.db.delete(rr._id)));
+
+    const players = await getPlayers(ctx, code);
+    await Promise.all(players.map((p: any) => ctx.db.patch(p._id, { isReady: false, submittedRounds: [] })));
+
+    // Start a fresh game with the SAME settings (mirrors startGame, minus the ready gate).
+    const chosenPrompt = pickPrompt(room.settings.selectedPrompts, []);
+    const enablePromptVoting = room.settings.enablePromptVoting !== false;
+    if (enablePromptVoting) {
+      await ctx.db.patch(room._id, {
+        phase: "promptVoting",
+        currentRound: 1,
+        currentPrompt: chosenPrompt,
+        usedPrompts: [chosenPrompt],
+        promptVotingStartedAt: now(),
+        skipVotes: [],
+        rematchStartingAt: undefined,
+        lastActivityAt: now(),
+      });
+      await ctx.scheduler.runAfter(15_000, internal.game.flow.endPromptVoting, { code, round: 1 });
+    } else {
+      await ctx.db.patch(room._id, {
+        phase: "songSelection",
+        currentRound: 1,
+        currentPrompt: chosenPrompt,
+        usedPrompts: [chosenPrompt],
+        selectionStartedAt: now(),
+        rematchStartingAt: undefined,
+        lastActivityAt: now(),
+      });
+      if (room.settings.roundLength > 0) {
+        await ctx.scheduler.runAfter(room.settings.roundLength * 1000, internal.game.flow.endSelectionPhase, { code, round: 1 });
+      }
+    }
+
+    await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+      eventType: "game_started",
+      metadata: { roomCode: code, playerCount: players.length, totalRounds: room.settings.numberOfRounds },
+    });
+  },
+});
+
+/**
+ * Per-voter aggregates for the end-game "judge" awards (The Hater / Easy Grader /
+ * Kingmaker). Returns AGGREGATES ONLY — never raw per-song votes — so we don't
+ * reveal exactly how someone rated a specific song.
+ */
+export const getVoterAwards = query({
+  args: { code: v.string() },
+  handler: async (ctx, { code }) => {
+    const ratings = await ctx.db
+      .query("ratings")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
+      .collect();
+    const roundResults = await ctx.db
+      .query("roundResults")
+      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
+      .collect();
+
+    const winnerByRound = new Map<number, any>();
+    for (const rr of roundResults) {
+      if (rr.winnerSongId) winnerByRound.set(rr.round, rr.winnerSongId);
+    }
+
+    const stats = new Map<string, { voterId: string; sum: number; count: number; kingmakerHits: number }>();
+    const ensure = (voterId: string) => {
+      let s = stats.get(voterId);
+      if (!s) { s = { voterId, sum: 0, count: 0, kingmakerHits: 0 }; stats.set(voterId, s); }
+      return s;
+    };
+
+    // Average rating GIVEN (exclude the -1 own-song skips).
+    for (const r of ratings) {
+      if (r.rating > 0) {
+        const s = ensure(r.voterId);
+        s.sum += r.rating;
+        s.count += 1;
+      }
+    }
+
+    // Kingmaker: per voter per round, did their TOP-rated song win that round?
+    const byVoterRound = new Map<string, { songId: any; rating: number }[]>();
+    for (const r of ratings) {
+      if (r.rating <= 0) continue;
+      const key = `${r.voterId}|${r.round}`;
+      const arr = byVoterRound.get(key) || [];
+      arr.push({ songId: r.songId, rating: r.rating });
+      byVoterRound.set(key, arr);
+    }
+    for (const [key, arr] of byVoterRound) {
+      const [voterId, roundStr] = key.split("|");
+      const winner = winnerByRound.get(Number(roundStr));
+      if (!winner) continue;
+      const maxRating = Math.max(...arr.map((a) => a.rating));
+      if (arr.some((a) => a.songId === winner && a.rating === maxRating)) {
+        ensure(voterId).kingmakerHits += 1;
+      }
+    }
+
+    return Array.from(stats.values()).map((s) => ({
+      voterId: s.voterId,
+      avgGiven: s.count > 0 ? s.sum / s.count : 0,
+      count: s.count,
+      kingmakerHits: s.kingmakerHits,
+    }));
   },
 });
 
