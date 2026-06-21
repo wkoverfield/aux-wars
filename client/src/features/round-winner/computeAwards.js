@@ -30,7 +30,27 @@ function variance(nums) {
   return nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length;
 }
 
-export function computeAwards({ playerStats = [], allRounds = [], voterAwards = [], players = [] }) {
+// FNV-1a string hash — used to give each award its own deterministic offset.
+function fnv(str) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i += 1) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+/**
+ * Pick one copy variant deterministically: the same finished game always shows
+ * the same line, but it varies game-to-game (and per award), so back-to-back
+ * games don't repeat the exact phrasing. `seed` is the per-game seed from
+ * GameWinner; `salt` is the award id so different awards rotate independently.
+ */
+function variant(arr, seed, salt) {
+  return arr[(((seed >>> 0) ^ fnv(salt)) >>> 0) % arr.length];
+}
+
+export function computeAwards({ playerStats = [], allRounds = [], voterAwards = [], players = [], seed = 0 }) {
   const names = nameMap(players);
   const awards = [];
   const numRounds = allRounds.length;
@@ -53,7 +73,11 @@ export function computeAwards({ playerStats = [], allRounds = [], voterAwards = 
   awards.push({
     id: "crowd_favorite", emoji: "🔥", kind: "glory", title: "Crowd Favorite",
     playerId: top.playerId, playerName: nameFor(top.playerId, top.player?.name),
-    detail: `"${top.name}" — top-rated song of the night`,
+    detail: variant([
+      `"${top.name}" — top-rated song of the night`,
+      `nobody topped "${top.name}" tonight`,
+      `"${top.name}" had the whole room`,
+    ], seed, "crowd_favorite"),
   });
 
   // 💀 Aux Privileges Revoked — single lowest-scoring song (computed early so Robbed can avoid it)
@@ -68,7 +92,11 @@ export function computeAwards({ playerStats = [], allRounds = [], voterAwards = 
         awards.push({
           id: "robbed", emoji: "💔", kind: "glory", title: "Robbed",
           playerId: robbed.playerId, playerName: nameFor(robbed.playerId, robbed.player?.name),
-          detail: `"${robbed.name}" banged — still didn't take the crown`,
+          detail: variant([
+            `"${robbed.name}" banged — still didn't take the crown`,
+            `"${robbed.name}" deserved way better`,
+            `"${robbed.name}" got snubbed, plain and simple`,
+          ], seed, "robbed"),
         });
       }
     }
@@ -89,7 +117,11 @@ export function computeAwards({ playerStats = [], allRounds = [], voterAwards = 
         awards.push({
           id: "dark_horse", emoji: "🐎", kind: "glory", title: "Dark Horse",
           playerId: winnerId, playerName: winner.playerName,
-          detail: "trailed at the half — took the whole thing",
+          detail: variant([
+            "trailed at the half — took the whole thing",
+            "came from behind and stole it",
+            "down at the midpoint, champion by the end",
+          ], seed, "dark_horse"),
         });
       }
     }
@@ -99,7 +131,11 @@ export function computeAwards({ playerStats = [], allRounds = [], voterAwards = 
   awards.push({
     id: "aux_revoked", emoji: "💀", kind: "roast", title: "Aux Privileges Revoked",
     playerId: bottom.playerId, playerName: nameFor(bottom.playerId, bottom.player?.name),
-    detail: `"${bottom.name}" — lowest-rated pick of the night`,
+    detail: variant([
+      `"${bottom.name}" — lowest-rated pick of the night`,
+      `"${bottom.name}" cleared the room`,
+      `nobody was feeling "${bottom.name}"`,
+    ], seed, "aux_revoked"),
   });
 
   // Per-player song-score lists for the consistency roasts
@@ -121,7 +157,12 @@ export function computeAwards({ playerStats = [], allRounds = [], voterAwards = 
     }
     if (worst) awards.push({
       id: "read_the_room", emoji: "🧊", kind: "roast", title: "Read the Room",
-      playerId: worst, playerName: nameFor(worst), detail: "picks consistently fell flat",
+      playerId: worst, playerName: nameFor(worst),
+      detail: variant([
+        "picks consistently fell flat",
+        "read the room… wrong, every time",
+        "the vibes were never quite right",
+      ], seed, "read_the_room"),
     });
 
     // 🫥 Certified NPC — lowest variance (forgettably mid every round)
@@ -132,7 +173,12 @@ export function computeAwards({ playerStats = [], allRounds = [], voterAwards = 
     }
     if (npc) awards.push({
       id: "npc", emoji: "🫥", kind: "roast", title: "Certified NPC",
-      playerId: npc, playerName: nameFor(npc), detail: "every pick landed dead-center. forgettable.",
+      playerId: npc, playerName: nameFor(npc),
+      detail: variant([
+        "every pick landed dead-center. forgettable.",
+        "mid every round. NPC behavior.",
+        "consistently, aggressively average",
+      ], seed, "npc"),
     });
 
     // 🎭 One-Hit Wonder — highest variance (one peak, rest tanked), excluding the winner
@@ -144,7 +190,12 @@ export function computeAwards({ playerStats = [], allRounds = [], voterAwards = 
     }
     if (ohw) awards.push({
       id: "one_hit_wonder", emoji: "🎭", kind: "roast", title: "One-Hit Wonder",
-      playerId: ohw, playerName: nameFor(ohw), detail: "one banger, then… silence",
+      playerId: ohw, playerName: nameFor(ohw),
+      detail: variant([
+        "one banger, then… silence",
+        "peaked once, ghosted after",
+        "all that hype for one song",
+      ], seed, "one_hit_wonder"),
     });
   }
 
@@ -155,21 +206,33 @@ export function computeAwards({ playerStats = [], allRounds = [], voterAwards = 
     awards.push({
       id: "hater", emoji: "🧂", kind: "judge", title: "The Hater",
       playerId: hater.voterId, playerName: nameFor(hater.voterId),
-      detail: `harshest critic — ${hater.avgGiven.toFixed(1)} avg given`,
+      detail: variant([
+        `harshest critic — ${hater.avgGiven.toFixed(1)} avg given`,
+        `stingy with the records — ${hater.avgGiven.toFixed(1)} avg`,
+        `tough crowd of one — ${hater.avgGiven.toFixed(1)} avg given`,
+      ], seed, "hater"),
     });
 
     const easy = voters.reduce((a, b) => (b.avgGiven > a.avgGiven ? b : a), voters[0]);
     if (easy.voterId !== hater.voterId) awards.push({
       id: "easy_grader", emoji: "❤️", kind: "judge", title: "Easy Grader",
       playerId: easy.voterId, playerName: nameFor(easy.voterId),
-      detail: `handed out 5s like candy — ${easy.avgGiven.toFixed(1)} avg`,
+      detail: variant([
+        `handed out 5s like candy — ${easy.avgGiven.toFixed(1)} avg`,
+        `everybody's a winner — ${easy.avgGiven.toFixed(1)} avg given`,
+        `generous to a fault — ${easy.avgGiven.toFixed(1)} avg`,
+      ], seed, "easy_grader"),
     });
 
     const kingmaker = voters.reduce((a, b) => (b.kingmakerHits > a.kingmakerHits ? b : a), voters[0]);
     if (kingmaker.kingmakerHits > 0) awards.push({
       id: "kingmaker", emoji: "👑", kind: "judge", title: "Kingmaker",
       playerId: kingmaker.voterId, playerName: nameFor(kingmaker.voterId),
-      detail: "kept backing the winners",
+      detail: variant([
+        "kept backing the winners",
+        "always picked the eventual champ",
+        "had an eye for the winners",
+      ], seed, "kingmaker"),
     });
   }
 
