@@ -13,6 +13,7 @@ import nextIcon from "../../assets/next-icon.svg";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { captureGameEvent, gameProperties } from "../../services/analytics";
+import ScrollFade from "../../components/ScrollFade";
 
 /**
  * RoundWinner component displays the results of a completed round.
@@ -234,9 +235,10 @@ export default function RoundWinner() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.5, delay: 0.4 }}
-              className="w-full flex-1 flex flex-col items-center gap-2 pb-4 overflow-y-auto"
+              className="w-full flex-1 min-h-0"
               style={{ minHeight: "0" }}
             >
+              <ScrollFade className="h-full w-full" contentClassName="flex flex-col items-center gap-2 pb-4">
               {roundResults.songs.length > 1 &&
                 roundResults.songs
                   .slice(1)
@@ -259,6 +261,7 @@ export default function RoundWinner() {
                   ))}
               {/* Between-rounds ad (display). The end-game video lives on GameWinner. */}
               <AdSlot slot="results" className="max-w-2xl" />
+              </ScrollFade>
             </motion.div>
           </motion.div>
         )}

@@ -5,6 +5,12 @@
   --default-font-family: "Plus Jakarta Sans";
 }
 
+/* Dark page background so iOS overscroll / safe-area edges never flash white. */
+html,
+body {
+  background-color: #121212;
+}
+
 /* Shared slider thumb styles. Track visuals are scoped per use case. */
 .slider {
   -webkit-appearance: none;

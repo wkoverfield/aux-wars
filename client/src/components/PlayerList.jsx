@@ -13,7 +13,7 @@ import PlayerBox from "./PlayerBox";
 export default function PlayerList({ players, isHost, currentPlayerId, onKick }) {
   return (
     <div
-      className="lobby-players flex flex-col w-full items-center gap-2 pb-8 overflow-y-auto flex-1 min-h-0"
+      className="lobby-players flex flex-col w-full items-center gap-2 pb-8"
     >
       {players.map((player) => (
         <PlayerBox

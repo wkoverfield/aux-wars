@@ -13,7 +13,7 @@ import SongItem from './SongItem';
  */
 const SongList = ({ tracks, selectedTrack, onSelectTrack, onConfirmTrack }) => {
   return (
-    <div className="song-list flex-1 overflow-y-auto px-4">
+    <div className="song-list px-4">
       {tracks && tracks.length > 0 ? (
         tracks.map((track) => (
           <SongItem
