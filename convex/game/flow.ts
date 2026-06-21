@@ -369,6 +369,7 @@ export const returnToLobby = mutation({
       selectionStartedAt: undefined,
       promptVotingStartedAt: undefined,
       skipVotes: [],
+      rematchStartingAt: undefined, // clear any in-flight countdown so a stale flag can't trap a future game
       lastActivityAt: now(),
     });
 
@@ -391,8 +392,11 @@ export const startRematch = mutation({
     if (!player) return;
     if (room.rematchStartingAt) return; // already counting down — double-taps no-op
 
-    await ctx.db.patch(room._id, { rematchStartingAt: now() + REMATCH_COUNTDOWN_MS, lastActivityAt: now() });
-    await ctx.scheduler.runAfter(REMATCH_COUNTDOWN_MS, internal.game.flow.executeRematch, { code });
+    // Tag the countdown with its exact fire time so a cancel→restart can't leave a
+    // stale scheduled job that triggers the rematch early — executeRematch checks it.
+    const startAt = now() + REMATCH_COUNTDOWN_MS;
+    await ctx.db.patch(room._id, { rematchStartingAt: startAt, lastActivityAt: now() });
+    await ctx.scheduler.runAfter(REMATCH_COUNTDOWN_MS, internal.game.flow.executeRematch, { code, startAt });
   },
 });
 
@@ -411,11 +415,12 @@ export const cancelRematch = mutation({
 
 /** Scheduled after the countdown: wipe the old game, keep settings, start fresh. */
 export const executeRematch = internalMutation({
-  args: { code: v.string() },
-  handler: async (ctx, { code }) => {
+  args: { code: v.string(), startAt: v.number() },
+  handler: async (ctx, { code, startAt }) => {
     const room = await getRoom(ctx, code);
-    // No-op if cancelled (flag cleared) or the room already moved on.
-    if (!room || room.phase !== "gameOver" || !room.rematchStartingAt) return;
+    // No-op if cancelled/restarted (timestamp cleared or changed) or the room moved on.
+    // Matching the exact timestamp ignores a stale job from a cancelled countdown.
+    if (!room || room.phase !== "gameOver" || room.rematchStartingAt !== startAt) return;
 
     // Wipe previous game data (same as returnToLobby).
     const submissions = await ctx.db
