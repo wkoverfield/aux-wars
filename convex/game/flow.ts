@@ -916,6 +916,7 @@ export const endSelectionPhase = internalMutation({
         await ctx.db.insert("roundResults", {
           roomCode: code,
           round,
+          prompt: room.currentPrompt,
           winnerSongId: undefined,
           results: [],
           calculatedAt: now(),
@@ -1004,6 +1005,7 @@ export const calculateResultsInternal = internalMutation({
     await ctx.db.insert("roundResults", {
       roomCode: code,
       round: room.currentRound,
+      prompt: room.currentPrompt,
       winnerSongId: sorted[0]?.songId,
       results,
       calculatedAt: now(),

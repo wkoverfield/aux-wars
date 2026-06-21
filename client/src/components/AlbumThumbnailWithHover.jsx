@@ -57,6 +57,10 @@ const AlbumThumbnailWithHover = React.memo(function AlbumThumbnailWithHover({
       }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      // Dismiss the tooltip on tap/click — a click that opens the setlist (or a
+      // touch that emulates hover) would otherwise leave it stuck open. Bubbles,
+      // so the parent's open-setlist onClick still fires.
+      onClick={() => setIsHovered(false)}
     >
       <img
         src={album}

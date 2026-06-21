@@ -9,6 +9,7 @@ import PlayerResultWithHover from '../../components/PlayerResultWithHover';
 import ScrollFade from '../../components/ScrollFade';
 import AnimatedLogo from '../../components/AnimatedLogo';
 import AdSlot from '../../components/AdSlot';
+import recordLogo from '../../components/record-logo.svg';
 import { captureGameEvent, gameProperties } from '../../services/analytics';
 import { computeAwards } from './computeAwards';
 
@@ -24,7 +25,7 @@ function buildPlayerStatsFromRounds(results) {
       if (!stats[playerId]) {
         stats[playerId] = { playerId, playerName: song.player.name, wins: 0, totalRecords: 0, songs: [] };
       }
-      stats[playerId].songs.push({ ...song, round: roundIdx + 1, isRoundWinner: song.songId === winnerSongId });
+      stats[playerId].songs.push({ ...song, round: roundIdx + 1, isRoundWinner: song.songId === winnerSongId, prompt: round.prompt });
       stats[playerId].totalRecords += song.totalRecords || 0;
       if (song.songId === winnerSongId) stats[playerId].wins += 1;
     });
@@ -126,14 +127,20 @@ function SetlistModal({ player, onClose }) {
         </div>
         <ScrollFade className="flex-1 min-h-0" contentClassName="px-5 pb-5 space-y-2" fadeColor="#181818" showTop={false}>
           {songs.map((s) => (
-            <div key={`${s.round}-${s.songId}`} className="flex items-center gap-3 p-2 rounded-md bg-[#242424]">
-              <span className="text-xs text-gray-500 w-5 shrink-0">R{s.round}</span>
+            <div key={`${s.round}-${s.songId}`} className="flex items-center gap-2.5 p-2 rounded-md bg-[#242424]">
+              <span className="text-[11px] text-gray-500 w-5 shrink-0 text-center">R{s.round}</span>
               <img src={s.albumCover} alt="" className="w-11 h-11 rounded object-cover shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-white truncate">{s.name}{s.isRoundWinner ? ' 🏆' : ''}</p>
                 <p className="text-xs text-gray-400 truncate">{s.artist}</p>
+                {s.prompt && (
+                  <p className="text-[11px] text-gray-500 truncate italic mt-0.5">“{s.prompt}”</p>
+                )}
               </div>
-              <span className="text-sm font-semibold text-gray-300 shrink-0">{s.totalRecords}</span>
+              <span className="flex items-center gap-1 text-sm font-semibold text-gray-200 shrink-0">
+                <img src={recordLogo} alt="records" className="w-4 h-4" />
+                {s.totalRecords}
+              </span>
             </div>
           ))}
         </ScrollFade>

@@ -89,6 +89,7 @@ export default defineSchema({
   roundResults: defineTable({
     roomCode: v.string(),
     round: v.number(),
+    prompt: v.optional(v.string()), // the prompt this round was played for (powers the recap setlist)
     winnerSongId: v.optional(v.id("submissions")),
     results: v.array(
       v.object({
