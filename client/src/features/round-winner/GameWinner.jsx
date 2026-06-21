@@ -32,11 +32,33 @@ function buildPlayerStatsFromRounds(results) {
   return Object.values(stats);
 }
 
-/** Fisher–Yates pick of up to n items — fresh each game so the superlatives vary. */
-function pickN(arr, n) {
+/** Tiny deterministic PRNG (mulberry32) + string hash. Seeding the shuffle from a
+ *  per-game value makes the superlative reel STABLE across re-renders, remounts,
+ *  StrictMode double-mounts and reactive query pushes, while still varying
+ *  game-to-game. (Math.random would reshuffle on every reactive re-render.) */
+function hashStr(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i += 1) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return (h ^ (h >>> 16)) >>> 0;
+}
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Fisher–Yates pick of up to n items using a provided RNG (deterministic when seeded). */
+function pickN(arr, n, rng = Math.random) {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a.slice(0, n);
@@ -154,18 +176,17 @@ export default function GameWinner() {
     [allRoundResultsQuery, playersQuery, voterAwardsQuery, sortedPlayers]
   );
 
-  // Pick up to 3 superlatives to animate through after the winner — FROZEN once.
-  // Convex useQuery hands back fresh array refs on every reactive push, so a
-  // useMemo([awards]) would re-run pickN (Math.random) and silently swap the
-  // superlatives mid-reveal. Pin the pick to a ref the first render data is ready.
-  const reelRef = React.useRef(null);
-  if (
-    reelRef.current === null &&
-    allRoundResultsQuery && playersQuery && voterAwardsQuery !== undefined
-  ) {
-    reelRef.current = pickN(awards, 3);
-  }
-  const reel = reelRef.current || [];
+  // Pick up to 3 superlatives to animate through after the winner. The pick is
+  // DETERMINISTIC per game — seeded from this game's round winners — so it's the
+  // identical reel on every render/remount. The heartbeat keeps re-pushing the
+  // players query, StrictMode double-mounts, and Fast Refresh remounts all churn
+  // refs; a Math.random pick (even frozen in a ref) leaks and reshuffles. Seeding
+  // makes it immune: same finished game → same 3, fresh per game.
+  const reelSeed = useMemo(() => {
+    const sig = (allRoundResultsQuery || []).map((r) => r.winnerSongId || r.round).join('|');
+    return hashStr(`${gameCode || ''}|${sig}`);
+  }, [allRoundResultsQuery, gameCode]);
+  const reel = useMemo(() => pickN(awards, 3, mulberry32(reelSeed)), [awards, reelSeed]);
 
   // Reveal flow: suspense → winner → superlatives (1 by 1) → final leaderboard.
   const [stage, setStage] = useState('suspense'); // 'suspense' | 'winner' | 'superlatives' | 'final'
