@@ -142,7 +142,8 @@ const RatingScreen = ({
   }, [songToRate?.songId]);
 
   return (
-    <ScrollFade className="h-full w-full" contentClassName="min-h-full flex flex-col items-center justify-center w-full py-4 px-2">
+    <div className="h-[100svh] w-full flex flex-col">
+    <ScrollFade className="flex-1 min-h-0 w-full" contentClassName="min-h-full flex flex-col items-center justify-center w-full py-4 px-2">
         {/* Prompt at the top */}
         <div className="w-full mb-2 sm:mb-4 overflow-x-auto">
           <SearchBar value={currentPrompt || ''} readOnly onChange={() => {}} />
@@ -155,20 +156,22 @@ const RatingScreen = ({
           <p>Rating Song {currentIndex + 1} of {totalSongs}</p>
         </div>
 
-        {/* Album art — for preview tracks; YouTube tracks show the video instead */}
+        {/* Album art — for preview tracks; YouTube tracks show the video instead.
+            Sizes off viewport HEIGHT so it shrinks on short/landscape screens. */}
         {songToRate?.albumCover && !videoId && (
-          <div className="mb-4 flex justify-center">
+          <div className="mb-3 flex justify-center">
             <img
               src={songToRate.albumCover}
               alt={`${songToRate.name} album art`}
-              className="w-48 h-48 sm:w-56 sm:h-56 rounded-lg object-cover shadow-lg"
+              className="w-[min(13rem,30vh)] h-[min(13rem,30vh)] rounded-lg object-cover shadow-lg"
             />
           </div>
         )}
 
         {/* Player — YouTube window (aspect-video) or audio preview (button) */}
         {hasPlayable && (
-          <div className="w-full mb-4 flex justify-center">
+          <div className="w-full mb-3 flex justify-center">
+            <div className="w-full max-w-[min(28rem,46vh)]">
             <TrackPlayer
               ref={playerRef}
               videoId={videoId}
@@ -185,6 +188,7 @@ const RatingScreen = ({
               }}
               onPlayingChange={setIsPlaying}
             />
+            </div>
           </div>
         )}
 
@@ -240,7 +244,7 @@ const RatingScreen = ({
         )}
 
         {/* Track name and artist name */}
-        <div className="flex flex-col justify-center items-center mb-6">
+        <div className="flex flex-col justify-center items-center mb-3">
           <p className="text-2xl sm:text-3xl font-semibold text-white text-center max-w-[95vw] truncate">{songToRate.name}</p>
           <p className="text-base sm:text-lg text-gray-300 text-center max-w-[95vw] truncate">
             {songToRate.artist}
@@ -252,7 +256,7 @@ const RatingScreen = ({
 
         {/* Rating system - hidden in spectator mode */}
         {!spectatorMode && (
-          <div className="flex flex-row justify-center items-center mb-8">
+          <div className="flex flex-row justify-center items-center mb-4">
             {[...Array(5)].map((_, index) => (
               <img
                 key={index}
@@ -275,10 +279,13 @@ const RatingScreen = ({
           </div>
         )}
         </div>
+    </ScrollFade>
 
-        {/* Submit — in-flow at the bottom of the column; never overlaps, always reachable */}
-        {!spectatorMode && (
-          <div className="w-full max-w-xs mx-auto mt-6">
+      {/* Submit — pinned footer: always visible, content scrolls above it.
+          Lives outside the scroll area so a primary action is never below the fold. */}
+      {!spectatorMode && (
+        <div className="shrink-0 w-full px-2 pt-2 pb-4">
+          <div className="w-full max-w-xs mx-auto">
             <button
               className={`bg-[#68d570] text-black font-bold w-full h-[52px] rounded-full cursor-pointer transition-all hover:scale-105 hover:bg-[#7de884] ${
                 selectedRating < 0 ? 'opacity-50 cursor-not-allowed' : ''
@@ -289,8 +296,9 @@ const RatingScreen = ({
               Submit
             </button>
           </div>
-        )}
-    </ScrollFade>
+        </div>
+      )}
+    </div>
   );
 };
 

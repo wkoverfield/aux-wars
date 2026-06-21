@@ -44,7 +44,7 @@ function pickN(arr, n) {
 
 const SUSPENSE_MS = 1300;
 const WINNER_MS = 2600;
-const SUPERLATIVE_MS = 2200;
+const SUPERLATIVE_MS = 4000;
 
 /** Shared "running it back in 3…2…1" overlay, driven off the room timestamp. */
 function RematchCountdown({ rematchAt, onCancel }) {
@@ -154,8 +154,18 @@ export default function GameWinner() {
     [allRoundResultsQuery, playersQuery, voterAwardsQuery, sortedPlayers]
   );
 
-  // Pick up to 3 superlatives, fresh per game, to animate through after the winner.
-  const reel = useMemo(() => pickN(awards, 3), [awards]);
+  // Pick up to 3 superlatives to animate through after the winner — FROZEN once.
+  // Convex useQuery hands back fresh array refs on every reactive push, so a
+  // useMemo([awards]) would re-run pickN (Math.random) and silently swap the
+  // superlatives mid-reveal. Pin the pick to a ref the first render data is ready.
+  const reelRef = React.useRef(null);
+  if (
+    reelRef.current === null &&
+    allRoundResultsQuery && playersQuery && voterAwardsQuery !== undefined
+  ) {
+    reelRef.current = pickN(awards, 3);
+  }
+  const reel = reelRef.current || [];
 
   // Reveal flow: suspense → winner → superlatives (1 by 1) → final leaderboard.
   const [stage, setStage] = useState('suspense'); // 'suspense' | 'winner' | 'superlatives' | 'final'
@@ -175,7 +185,16 @@ export default function GameWinner() {
     return () => clearTimeout(t);
   }, [stage, supIdx, sortedPlayers.length, reel.length]);
 
-  const skipToFinal = () => { if (stage !== 'final') setStage('final'); };
+  // Tap advances ONE step (Stories-style) so fast readers self-pace
+  // instead of skipping the whole reveal in one tap.
+  const advance = () => {
+    if (stage === 'suspense') setStage('winner');
+    else if (stage === 'winner') setStage(reel.length ? 'superlatives' : 'final');
+    else if (stage === 'superlatives') {
+      if (supIdx < reel.length - 1) setSupIdx(supIdx + 1);
+      else setStage('final');
+    }
+  };
 
   const [setlistPlayer, setSetlistPlayer] = useState(null);
 
@@ -233,7 +252,7 @@ export default function GameWinner() {
       {!isFinal && (
         <div
           className="absolute inset-0 flex flex-col items-center justify-center px-4 cursor-pointer"
-          onClick={skipToFinal}
+          onClick={advance}
         >
           <AnimatePresence mode="wait">
             {stage === 'suspense' && (
@@ -282,7 +301,7 @@ export default function GameWinner() {
             </div>
           )}
 
-          <p className="absolute bottom-6 text-xs text-white/35">tap to skip</p>
+          <p className="absolute bottom-6 text-xs text-white/35">tap to continue</p>
         </div>
       )}
 
