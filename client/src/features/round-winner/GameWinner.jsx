@@ -176,23 +176,23 @@ export default function GameWinner() {
     [allRoundResultsQuery]
   );
 
-  const awards = useMemo(
-    () => (allRoundResultsQuery && playersQuery
-      ? computeAwards({ playerStats: sortedPlayers, allRounds: allRoundResultsQuery, voterAwards: voterAwardsQuery || [], players: playersQuery || [] })
-      : []),
-    [allRoundResultsQuery, playersQuery, voterAwardsQuery, sortedPlayers]
-  );
-
-  // Pick up to 3 superlatives to animate through after the winner. The pick is
-  // DETERMINISTIC per game — seeded from this game's round winners — so it's the
-  // identical reel on every render/remount. The heartbeat keeps re-pushing the
-  // players query, StrictMode double-mounts, and Fast Refresh remounts all churn
-  // refs; a Math.random pick (even frozen in a ref) leaks and reshuffles. Seeding
-  // makes it immune: same finished game → same 3, fresh per game.
+  // DETERMINISTIC per-game seed (from this game's round winners). Drives BOTH the
+  // superlative reel pick and each award's copy variant, so a finished game always
+  // looks identical across renders/remounts (the heartbeat re-pushes the players
+  // query, StrictMode double-mounts, Fast Refresh remounts — all churn refs; a
+  // Math.random pick leaks and reshuffles), while still varying game-to-game.
   const reelSeed = useMemo(() => {
     const sig = (allRoundResultsQuery || []).map((r) => r.winnerSongId || r.round).join('|');
     return hashStr(`${gameCode || ''}|${sig}`);
   }, [allRoundResultsQuery, gameCode]);
+
+  const awards = useMemo(
+    () => (allRoundResultsQuery && playersQuery
+      ? computeAwards({ playerStats: sortedPlayers, allRounds: allRoundResultsQuery, voterAwards: voterAwardsQuery || [], players: playersQuery || [], seed: reelSeed })
+      : []),
+    [allRoundResultsQuery, playersQuery, voterAwardsQuery, sortedPlayers, reelSeed]
+  );
+
   const reel = useMemo(() => pickN(awards, 3, mulberry32(reelSeed)), [awards, reelSeed]);
 
   // Reveal flow: suspense → winner → superlatives (1 by 1) → final leaderboard.
@@ -343,8 +343,10 @@ export default function GameWinner() {
             <AnimatedLogo />
 
             {winner && (
-              <div
-                className="w-full flex flex-col items-center cursor-pointer mt-2"
+              <button
+                type="button"
+                aria-label={`View ${winner.playerName}'s setlist`}
+                className="w-full flex flex-col items-center cursor-pointer mt-2 bg-transparent border-0 p-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#68d570]/60"
                 onClick={() => setSetlistPlayer(winner)}
               >
                 <div className="text-3xl mb-1">👑</div>
@@ -352,21 +354,23 @@ export default function GameWinner() {
                   playerName={winner.playerName} songs={winner.songs}
                   wins={winner.wins} totalRecords={winner.totalRecords} isWinner
                 />
-              </div>
+              </button>
             )}
 
             <div className="w-full flex flex-col items-center gap-2 mt-2">
               {rest.map((player) => (
-                <div
+                <button
+                  type="button"
                   key={player.playerId}
-                  className="w-full flex justify-center cursor-pointer"
+                  aria-label={`View ${player.playerName}'s setlist`}
+                  className="w-full flex justify-center cursor-pointer bg-transparent border-0 p-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#68d570]/60"
                   onClick={() => setSetlistPlayer(player)}
                 >
                   <PlayerResultWithHover
                     playerName={player.playerName} songs={player.songs}
                     wins={player.wins} totalRecords={player.totalRecords} isWinner={false}
                   />
-                </div>
+                </button>
               ))}
             </div>
 
