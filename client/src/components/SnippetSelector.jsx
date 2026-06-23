@@ -31,6 +31,10 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
   const [start, setStart] = useState(0);       // window start (seconds)
   const [previewTime, setPreviewTime] = useState(0); // current time inside the selected window
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const trackRef = useRef(null);
+  const draggingRef = useRef(false);   // synchronous drag flag (state lags a tick)
+  const dragAnchorRef = useRef(0);     // seconds between the pointer and the window start, captured on grab
 
   const maxStart = len > 0 && duration > 0 ? Math.max(0, duration - len) : 0;
   const end = len > 0 ? Math.min(start + len, duration > 0 ? duration : start + len) : 0;
@@ -101,6 +105,48 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
 
   const handleConfirm = () => onConfirm(buildSelection());
 
+  // ----- Draggable clip window (pointer + keyboard) -----
+  // Grab the window and slide it (the grab point stays under the cursor — no jump);
+  // clicking the bare track recenters the window there. Replaces a bare range input
+  // whose click-to-teleport was the #1 source of desktop rage-clicks.
+  const clampStart = (s) => Math.max(0, Math.min(s, maxStart));
+  const pointerToSeconds = (clientX) => {
+    const el = trackRef.current;
+    if (!el || duration <= 0) return 0;
+    const rect = el.getBoundingClientRect();
+    return Math.max(0, Math.min(duration, ((clientX - rect.left) / rect.width) * duration));
+  };
+  const handleWindowPointerDown = (e) => {
+    if (duration <= 0) return;
+    e.preventDefault();
+    const sec = pointerToSeconds(e.clientX);
+    if (sec >= start && sec <= start + len) {
+      dragAnchorRef.current = sec - start;        // grabbed inside the window — keep the offset
+    } else {
+      dragAnchorRef.current = len / 2;            // clicked the bare track — recenter on the click
+      setStart(clampStart(sec - len / 2));
+    }
+    draggingRef.current = true;
+    setDragging(true);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* unsupported */ }
+  };
+  const handleWindowPointerMove = (e) => {
+    if (!draggingRef.current) return;
+    setStart(clampStart(pointerToSeconds(e.clientX) - dragAnchorRef.current));
+  };
+  const handleWindowPointerUp = (e) => {
+    draggingRef.current = false;
+    setDragging(false);
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* unsupported */ }
+  };
+  const handleWindowKeyDown = (e) => {
+    const step = e.shiftKey ? 5 : 1;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); setStart(clampStart(start - step)); }
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); setStart(clampStart(start + step)); }
+    else if (e.key === 'Home') { e.preventDefault(); setStart(0); }
+    else if (e.key === 'End') { e.preventDefault(); setStart(maxStart); }
+  };
+
   return (
     <div className="snippet-modal z-50 fixed inset-0 flex items-center justify-center p-4">
       <motion.div
@@ -113,7 +159,7 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
           {isWindowed ? 'Clip your moment' : 'Preview your pick'}
         </h2>
         <p className="text-sm text-gray-400 mb-5">
-          {isWindowed ? 'Slide to the part you want everyone to hear.' : 'Have a listen, then lock it in.'}
+          {isWindowed ? 'Drag the clip to the part you want everyone to hear.' : 'Have a listen, then lock it in.'}
         </p>
 
         {/* Media: YouTube video (windowed) OR album art + audio preview */}
@@ -170,36 +216,39 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
               </span>
             </div>
 
-            <div className="relative flex h-8 w-full items-center">
-              <div className="absolute left-0 right-0 h-1.5 rounded-full bg-[#333]" />
+            <div
+              ref={trackRef}
+              className="relative h-9 w-full touch-none select-none"
+              onPointerDown={handleWindowPointerDown}
+              onPointerMove={handleWindowPointerMove}
+              onPointerUp={handleWindowPointerUp}
+              onPointerCancel={handleWindowPointerUp}
+            >
+              {/* base track */}
+              <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[#333]" />
               {duration > 0 && (
                 <div
-                  className="absolute h-1.5 overflow-hidden rounded-full bg-[#68d570]"
-                  style={{
-                    left: `${startPercent}%`,
-                    width: `${windowPercent}%`,
-                  }}
+                  role="slider"
+                  tabIndex={0}
+                  aria-label="Clip window position"
+                  aria-valuemin={0}
+                  aria-valuemax={Math.floor(maxStart)}
+                  aria-valuenow={Math.round(Math.min(start, maxStart))}
+                  aria-valuetext={`${formatTime(start)} to ${formatTime(end)}`}
+                  onKeyDown={handleWindowKeyDown}
+                  className={`absolute top-1/2 flex h-7 -translate-y-1/2 items-center justify-between overflow-hidden rounded-md border border-[#68d570] bg-[#68d570]/25 px-1 outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-white/70 ${dragging ? 'cursor-grabbing shadow-lg shadow-[#68d570]/20' : 'cursor-grab'}`}
+                  style={{ left: `${startPercent}%`, width: `${windowPercent}%` }}
                 >
+                  {/* played-progress fill within the window */}
                   <div
-                    className="h-full bg-[#8ee695]"
+                    className="pointer-events-none absolute inset-y-0 left-0 bg-[#68d570]/45"
                     style={{ width: isPreviewing ? `${playedWindowPercent}%` : '0%' }}
                   />
+                  {/* grip handles — signal "drag me" */}
+                  <span className="pointer-events-none z-10 h-4 w-[3px] rounded-full bg-white/90" />
+                  <span className="pointer-events-none z-10 h-4 w-[3px] rounded-full bg-white/90" />
                 </div>
               )}
-              <input
-                type="range"
-                className="slider snippet-window-slider absolute inset-0 h-8 w-full"
-                min={0}
-                max={duration > 0 ? Math.floor(duration) : 0}
-                step={1}
-                value={Math.min(start, maxStart)}
-                disabled={duration === 0}
-                onChange={(e) => {
-                  setStart(Math.min(Number(e.target.value), maxStart));
-                  setPreviewTime(0);
-                }}
-                aria-label="Clip start position"
-              />
             </div>
 
             <div className="mt-1 flex items-center justify-between text-xs tabular-nums text-gray-500">
