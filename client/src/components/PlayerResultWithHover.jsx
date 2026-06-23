@@ -54,7 +54,7 @@ const PlayerResultWithHover = React.memo(function PlayerResultWithHover({ player
   } else {
     // Non-winner: row layout with flexible thumbnail container
     return (
-      <div className="flex items-center w-[95%] max-w-[580px] mx-auto my-4 p-3 rounded-lg text-white gap-4">
+      <div className="flex items-center w-[95%] max-w-[580px] mx-auto my-4 p-3 rounded-lg text-white text-left gap-4">
         <div className="flex items-center">
           {songs?.slice(0, 5).map((song, idx) => (
             <AlbumThumbnailWithHover
