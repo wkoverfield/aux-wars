@@ -30,22 +30,6 @@ body {
   border-radius: 999px;
 }
 
-.snippet-window-slider::-webkit-slider-thumb {
-  width: 18px;
-  height: 18px;
-  background: #68d570;
-  border: 2px solid #f5f5f5;
-  box-shadow: none;
-}
-
-.snippet-window-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  background: #68d570;
-  border: 2px solid #f5f5f5;
-  box-shadow: none;
-}
-
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
