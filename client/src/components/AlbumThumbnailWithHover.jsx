@@ -65,7 +65,7 @@ const AlbumThumbnailWithHover = React.memo(function AlbumThumbnailWithHover({
       <img
         src={album}
         alt={song?.name || "Album Cover"}
-        className={`${sizeClasses[size]} rounded-${size === 'large' ? 'lg' : 'md'} shadow-lg cursor-pointer`}
+        className={`${sizeClasses[size]} object-cover rounded-${size === 'large' ? 'lg' : 'md'} shadow-lg cursor-pointer`}
         style={{
           boxShadow: isHovered 
             ? '0 8px 24px rgba(0,0,0,0.3)' 
