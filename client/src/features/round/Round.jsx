@@ -259,8 +259,14 @@ export default function Round() {
     if (!searchTerm.trim()) {
       setSearchResults([]);
       setSearchError(null);
+      setIsSearching(false);
       return;
     }
+
+    // Instant feedback: show the "Searching…" spinner the moment they type — it
+    // covers the debounce AND the fetch. (Previously setIsSearching(true) was never
+    // called anywhere, so the spinner was dead code and searches felt frozen.)
+    setIsSearching(true);
 
     // Show cached results immediately if available
     const cachedResults = getCachedResults(searchTerm);
@@ -269,6 +275,9 @@ export default function Round() {
       setSearchError(null);
     }
 
+    // Guard against overlapping searches: if a newer keystroke supersedes this one
+    // (it resolves after we've moved on), skip its stale results / spinner toggle.
+    let cancelled = false;
     const delayDebounce = setTimeout(async () => {
       try {
         setSearchError(null);
@@ -282,6 +291,7 @@ export default function Round() {
           },
         }));
         const result = await searchTracks(searchTerm);
+        if (cancelled) return;
 
         if (Array.isArray(result)) {
           setSearchResults(result);
@@ -320,6 +330,7 @@ export default function Round() {
           setSearchResults([]);
         }
       } catch (error) {
+        if (cancelled) return;
         captureGameEvent("song_search_failed", gameProperties({
           code: gameCode,
           room,
@@ -332,11 +343,11 @@ export default function Round() {
           setSearchResults([]);
         }
       } finally {
-        setIsSearching(false);
+        if (!cancelled) setIsSearching(false);
       }
-    }, 800);
+    }, 350);
 
-    return () => clearTimeout(delayDebounce);
+    return () => { cancelled = true; clearTimeout(delayDebounce); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm]);
 
