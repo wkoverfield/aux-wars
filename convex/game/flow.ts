@@ -21,7 +21,7 @@ export const startGame = mutation({
     const players = await getPlayers(ctx, code);
     const host = await validateConnection(ctx, code, playerId, connectionId);
     if (!host || !host.isHost) return; // only active host tab
-    if (players.length < 3) return; // min players
+    if (players.length < 2) return; // min players (2 = 1v1 listening session)
     const allReady = players.every((p) => p.isReady);
     if (!allReady) return;
 

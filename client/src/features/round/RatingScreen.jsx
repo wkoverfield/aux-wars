@@ -46,6 +46,7 @@ const RatingScreen = ({
   const logEvent = useMutation(api.analytics.logEvent);
   const clipStartRef = useRef(Date.now());
   const playerRef = useRef(null);
+  const isSeekingRef = useRef(false); // true while dragging the scrubber, so playback ticks don't fight the thumb
 
   const previewUrl = songToRate?.previewUrl;
   const videoId = songToRate?.videoId;
@@ -183,6 +184,7 @@ const RatingScreen = ({
               showControls={!videoId}
               onReady={(d) => setDuration(d)}
               onTimeUpdate={(t) => {
+                if (isSeekingRef.current) return; // don't yank the thumb back mid-scrub
                 setPlaybackTime(t);
                 setProgress(duration > 0 ? Math.min(1, t / duration) : 0);
               }}
@@ -231,6 +233,9 @@ const RatingScreen = ({
                   step={0.25}
                   value={Math.min(playbackTime, duration)}
                   onChange={(e) => handleSeek(Number(e.target.value))}
+                  onPointerDown={() => { isSeekingRef.current = true; }}
+                  onPointerUp={() => { isSeekingRef.current = false; }}
+                  onPointerCancel={() => { isSeekingRef.current = false; }}
                   className="slider clip-playback-slider h-3 w-full"
                   style={{ '--progress': `${progress * 100}%` }}
                 />

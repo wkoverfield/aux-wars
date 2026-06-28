@@ -259,8 +259,14 @@ export default function Round() {
     if (!searchTerm.trim()) {
       setSearchResults([]);
       setSearchError(null);
+      setIsSearching(false);
       return;
     }
+
+    // Instant feedback: show the "Searching…" spinner the moment they type — it
+    // covers the debounce AND the fetch. (Previously setIsSearching(true) was never
+    // called anywhere, so the spinner was dead code and searches felt frozen.)
+    setIsSearching(true);
 
     // Show cached results immediately if available
     const cachedResults = getCachedResults(searchTerm);
@@ -334,7 +340,7 @@ export default function Round() {
       } finally {
         setIsSearching(false);
       }
-    }, 800);
+    }, 350);
 
     return () => clearTimeout(delayDebounce);
     // eslint-disable-next-line react-hooks/exhaustive-deps

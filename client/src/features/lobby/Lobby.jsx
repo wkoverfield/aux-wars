@@ -232,7 +232,7 @@ export default function Lobby() {
       return;
     }
 
-    if (players.length < 3) {
+    if (players.length < 2) {
       return;
     }
     if (!session?.playerId || !session?.connectionId) return;
@@ -338,7 +338,7 @@ export default function Lobby() {
               <AdSlot slot="lobby" />
             </ScrollFade>
           </div>
-          {isHost && allPlayersReady && players.length > 2 && (
+          {isHost && allPlayersReady && players.length > 1 && (
             <button
               className="green-btn fixed bottom-0 w-full text-black py-3 text-center"
               onClick={handleStartGame}
