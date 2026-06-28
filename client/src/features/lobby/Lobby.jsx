@@ -52,6 +52,19 @@ export default function Lobby() {
   const logPromptPacksUsed = useMutation(api.analytics.logPromptPacksUsed);
   const hasJoinedGame = useRef(false);
 
+  // Streamer-safe display state: lock indicator + hide-code. Both toggles live in
+  // the Settings modal (niche/host-only) — this just reflects their state.
+  const locked = !!room?.locked;
+  const [streamerHide, setStreamerHide] = useState(false);
+  const handleCopyInvite = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      showToast("Invite link copied", "success");
+    } catch {
+      showToast("Couldn't copy — grab the URL from the address bar", "warning");
+    }
+  };
+
   // Initialize game code and name once on mount
   useEffect(() => {
     if (!routeGameCode) {
@@ -286,8 +299,17 @@ export default function Lobby() {
               />
               <div className="lobby-code-count flex gap-5">
                 <div className="lobby-container rounded-md lobby-code flex flex-col gap-2">
-                  <p className="text-xs font-normal">Code</p>
-                  <p className="text-2xl">{gameCode}</p>
+                  <p className="text-xs font-normal">Code{locked ? ' · 🔒' : ''}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-2xl select-none">{streamerHide ? '••••••' : gameCode}</p>
+                    <button
+                      type="button"
+                      onClick={handleCopyInvite}
+                      className="text-[11px] text-gray-400 hover:text-white border border-gray-600 rounded px-2 py-1 transition"
+                    >
+                      Copy link
+                    </button>
+                  </div>
                 </div>
                 <div className="lobby-container rounded-md lobby-count flex flex-col gap-2">
                   <p className="text-xs font-normal">{room?.settings?.hostPro ? 'Players · Pro' : 'Players'}</p>
@@ -355,6 +377,8 @@ export default function Lobby() {
         isHost={isHost}
         playerId={session?.playerId}
         connectionId={session?.connectionId}
+        streamerHide={streamerHide}
+        onToggleStreamerHide={() => setStreamerHide((v) => !v)}
       />
       <SessionTakenOverModal
         show={showTakenOverModal}
