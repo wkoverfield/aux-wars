@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { internal } from "../_generated/api";
+import { containsHateSpeech } from "./contentFilter";
 
 function now() {
   return Date.now();
@@ -66,6 +67,9 @@ export const joinGame = mutation({
     if (!trimmedName || trimmedName.length < 1 || trimmedName.length > 50) {
       return { success: false, message: "Name must be between 1 and 50 characters" };
     }
+    if (containsHateSpeech(trimmedName)) {
+      return { success: false, message: "Please choose a different name" };
+    }
 
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return { success: false, message: "Game code not found" };
@@ -86,6 +90,12 @@ export const joinGame = mutation({
     const playerCap = room.settings?.hostPro ? PRO_PLAYER_CAP : FREE_PLAYER_CAP;
     if (!existing && players.length >= playerCap) {
       return { success: false, message: `Room is full (max ${playerCap} players)` };
+    }
+
+    // Locked room: block NEW joins. Existing players (reconnects) always allowed,
+    // and rejoinGame requires an existing record — so the lock can't be bypassed.
+    if (!existing && room.locked) {
+      return { success: false, message: "This room is locked" };
     }
 
     if (existing) {
@@ -145,6 +155,23 @@ export const joinGame = mutation({
         tookOver: false
       } as const;
     }
+  },
+});
+
+/**
+ * Host seals/unseals the room. Locked = block NEW joins (reconnects still allowed).
+ * Streamer-safe: get your people in, lock it, and a visible code can't be spam-joined.
+ */
+export const setRoomLock = mutation({
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string(), locked: v.boolean() },
+  handler: async (ctx, { code, playerId, connectionId, locked }) => {
+    const room = await getRoomByCodeInternal(ctx, code);
+    if (!room) return { success: false, message: "Game code not found" };
+    const host = await validateConnection(ctx, code, playerId, connectionId);
+    if (!host || !host.isHost) return { success: false, message: "Only the host can lock the room" };
+    await ctx.db.patch(room._id, { locked });
+    await touchRoom(ctx, room._id);
+    return { success: true, locked } as const;
   },
 });
 
@@ -314,6 +341,9 @@ export const updatePlayerName = mutation({
       if (!trimmedName || trimmedName.length < 1 || trimmedName.length > 50) {
         return { code: 'INVALID_NAME', message: 'Name must be between 1 and 50 characters' } as const;
       }
+      if (containsHateSpeech(trimmedName)) {
+        return { code: 'INVALID_NAME', message: 'Please choose a different name' } as const;
+      }
     }
 
     // Validate connection (prevents stale tabs from updating after takeover)
@@ -442,6 +472,9 @@ export const addCustomPrompt = mutation({
     if (!trimmedText || trimmedText.length < 1 || trimmedText.length > 200) {
       return { success: false, message: "Prompt must be between 1 and 200 characters" } as const;
     }
+    if (containsHateSpeech(trimmedText)) {
+      return { success: false, message: "That prompt isn't allowed" } as const;
+    }
 
     // Custom prompt pool cap. Round count stays capped separately, so a larger
     // pool only improves prompt variety across games.
@@ -500,6 +533,10 @@ export const addCustomPrompts = mutation({
     for (const prompt of prompts) {
       const text = prompt.trim();
       if (!text || text.length > 200) {
+        skipped += 1;
+        continue;
+      }
+      if (containsHateSpeech(text)) {
         skipped += 1;
         continue;
       }

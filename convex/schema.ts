@@ -16,6 +16,7 @@ export default defineSchema({
     currentPrompt: v.optional(v.string()),
     currentRatingIndex: v.optional(v.number()),
     hostPlayerId: v.optional(v.id("players")),
+    locked: v.optional(v.boolean()), // host sealed the room — block new joins (streamer-safe)
     settings: v.object({
       numberOfRounds: v.number(),
       roundLength: v.number(),
