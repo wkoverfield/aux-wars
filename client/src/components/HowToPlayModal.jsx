@@ -86,7 +86,7 @@ export default function HowToPlayModal({ showModal, onClose }) {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-11">
                   <div className="bg-[#242424] p-3 rounded-md border border-gray-700">
-                    <p className="text-gray-300 text-sm">👥 A minimum of 3 players is required.</p>
+                    <p className="text-gray-300 text-sm">👥 Just 2+ players to play — 1v1 works too.</p>
                   </div>
                   <div className="bg-[#242424] p-3 rounded-md border border-gray-700">
                     <p className="text-gray-300 text-sm">⏱️ Submit your song before the timer runs out.</p>
