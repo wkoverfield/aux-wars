@@ -58,18 +58,24 @@ function formatDurationLabel(seconds) {
  * @param {string} props.gameCode - Current game code
  * @returns {JSX.Element|null} Rendered component or null if not visible
  */
-export default function SettingsModal({ showModal, onClose, gameCode, playerId, connectionId, isHost = false }) {
+export default function SettingsModal({ showModal, onClose, gameCode, playerId, connectionId, isHost = false, streamerHide = false, onToggleStreamerHide }) {
   const roomQuery = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
   // const socket = useSocket();
   const updateSettingsMutation = useMutation(api.game.rooms.updateSettings);
   const addCustomPromptMutation = useMutation(api.game.rooms.addCustomPrompt);
   const addCustomPromptsMutation = useMutation(api.game.rooms.addCustomPrompts);
   const removeCustomPromptMutation = useMutation(api.game.rooms.removeCustomPrompt);
+  const setRoomLockMutation = useMutation(api.game.rooms.setRoomLock);
   const { showToast } = useToast();
 
   // Extract settings from room data
   const room = roomQuery?.room || roomQuery;
   const roomSettings = room?.settings;
+  const locked = !!room?.locked;
+  const handleToggleLock = async () => {
+    if (!playerId || !connectionId) return;
+    await setRoomLockMutation({ code: gameCode, playerId, connectionId, locked: !locked });
+  };
 
   const [rounds, setRounds] = useState(roomSettings?.numberOfRounds ?? 3);
   const [roundLength, setRoundLength] = useState(roomSettings?.roundLength ?? 60); // Song selection time limit
@@ -559,6 +565,39 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
 	                  </div>
 	                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${anonymousMode ? 'bg-green-600' : 'bg-gray-600'}`}>
 	                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${anonymousMode ? 'translate-x-6' : 'translate-x-0'}`} />
+	                  </div>
+	                </div>
+	              </div>
+
+	              {/* Streamer & room controls — host-only, applied instantly (not part of Save) */}
+	              <div className="mb-6 space-y-4">
+	                <label className="text-sm font-semibold text-white block mb-2">
+	                  Streaming & Room
+	                </label>
+
+	                <div
+	                  className="flex items-center justify-between p-3 bg-[#242424] rounded-md cursor-pointer hover:bg-[#333] transition-colors"
+	                  onClick={handleToggleLock}
+	                >
+	                  <div>
+	                    <p className="text-white font-medium">Lock Room</p>
+	                    <p className="text-xs text-gray-400">Block new players from joining — unlock anytime</p>
+	                  </div>
+	                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${locked ? 'bg-green-600' : 'bg-gray-600'}`}>
+	                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${locked ? 'translate-x-6' : 'translate-x-0'}`} />
+	                  </div>
+	                </div>
+
+	                <div
+	                  className="flex items-center justify-between p-3 bg-[#242424] rounded-md cursor-pointer hover:bg-[#333] transition-colors"
+	                  onClick={onToggleStreamerHide}
+	                >
+	                  <div>
+	                    <p className="text-white font-medium">Streamer Mode</p>
+	                    <p className="text-xs text-gray-400">Hide the room code on screen (this device only)</p>
+	                  </div>
+	                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${streamerHide ? 'bg-green-600' : 'bg-gray-600'}`}>
+	                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${streamerHide ? 'translate-x-6' : 'translate-x-0'}`} />
 	                  </div>
 	                </div>
 	              </div>

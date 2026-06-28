@@ -50,16 +50,12 @@ export default function Lobby() {
   const kickPlayer = useMutation(api.game.rooms.kickPlayer);
   const startGame = useMutation(api.game.flow.startGame);
   const logPromptPacksUsed = useMutation(api.analytics.logPromptPacksUsed);
-  const setRoomLock = useMutation(api.game.rooms.setRoomLock);
   const hasJoinedGame = useRef(false);
 
-  // Streamer-safe controls: lock the room (block new joins) + hide the code on screen.
+  // Streamer-safe display state: lock indicator + hide-code. Both toggles live in
+  // the Settings modal (niche/host-only) — this just reflects their state.
   const locked = !!room?.locked;
   const [streamerHide, setStreamerHide] = useState(false);
-  const handleToggleLock = async () => {
-    if (!session?.playerId || !session?.connectionId) return;
-    await setRoomLock({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId, locked: !locked });
-  };
   const handleCopyInvite = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
@@ -303,19 +299,7 @@ export default function Lobby() {
               />
               <div className="lobby-code-count flex gap-5">
                 <div className="lobby-container rounded-md lobby-code flex flex-col gap-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs font-normal">Code{locked ? ' · 🔒' : ''}</p>
-                    {isHost && (
-                      <button
-                        type="button"
-                        onClick={() => setStreamerHide((v) => !v)}
-                        className="text-[11px] text-gray-400 hover:text-white transition"
-                        aria-label={streamerHide ? 'Show code' : 'Hide code for streaming'}
-                      >
-                        {streamerHide ? '👁 Show' : '🙈 Hide'}
-                      </button>
-                    )}
-                  </div>
+                  <p className="text-xs font-normal">Code{locked ? ' · 🔒' : ''}</p>
                   <div className="flex items-center gap-2">
                     <p className="text-2xl select-none">{streamerHide ? '••••••' : gameCode}</p>
                     <button
@@ -332,15 +316,6 @@ export default function Lobby() {
                   <p className="text-2xl">{players.length}/{room?.settings?.hostPro ? 50 : 8}</p>
                 </div>
               </div>
-              {isHost && (
-                <button
-                  type="button"
-                  onClick={handleToggleLock}
-                  className={`rounded-full py-2 px-6 text-sm font-semibold w-full max-w-md transition ${locked ? 'bg-[#68d570] text-black' : 'bg-[#242424] text-white hover:bg-[#2d2d2d]'}`}
-                >
-                  {locked ? '🔒 Room locked — tap to open' : '🔓 Lock room (block new joins)'}
-                </button>
-              )}
               <div className="flex flex-col items-center gap-5">
                 <motion.div
                   className="w-full flex items-center justify-center"
@@ -402,6 +377,8 @@ export default function Lobby() {
         isHost={isHost}
         playerId={session?.playerId}
         connectionId={session?.connectionId}
+        streamerHide={streamerHide}
+        onToggleStreamerHide={() => setStreamerHide((v) => !v)}
       />
       <SessionTakenOverModal
         show={showTakenOverModal}
