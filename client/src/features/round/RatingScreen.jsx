@@ -236,6 +236,7 @@ const RatingScreen = ({
                   onPointerDown={() => { isSeekingRef.current = true; }}
                   onPointerUp={() => { isSeekingRef.current = false; }}
                   onPointerCancel={() => { isSeekingRef.current = false; }}
+                  onLostPointerCapture={() => { isSeekingRef.current = false; }}
                   className="slider clip-playback-slider h-3 w-full"
                   style={{ '--progress': `${progress * 100}%` }}
                 />

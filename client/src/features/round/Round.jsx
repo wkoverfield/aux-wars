@@ -275,6 +275,9 @@ export default function Round() {
       setSearchError(null);
     }
 
+    // Guard against overlapping searches: if a newer keystroke supersedes this one
+    // (it resolves after we've moved on), skip its stale results / spinner toggle.
+    let cancelled = false;
     const delayDebounce = setTimeout(async () => {
       try {
         setSearchError(null);
@@ -288,6 +291,7 @@ export default function Round() {
           },
         }));
         const result = await searchTracks(searchTerm);
+        if (cancelled) return;
 
         if (Array.isArray(result)) {
           setSearchResults(result);
@@ -326,6 +330,7 @@ export default function Round() {
           setSearchResults([]);
         }
       } catch (error) {
+        if (cancelled) return;
         captureGameEvent("song_search_failed", gameProperties({
           code: gameCode,
           room,
@@ -338,11 +343,11 @@ export default function Round() {
           setSearchResults([]);
         }
       } finally {
-        setIsSearching(false);
+        if (!cancelled) setIsSearching(false);
       }
     }, 350);
 
-    return () => clearTimeout(delayDebounce);
+    return () => { cancelled = true; clearTimeout(delayDebounce); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm]);
 
