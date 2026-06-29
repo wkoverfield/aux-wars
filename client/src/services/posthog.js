@@ -56,7 +56,12 @@ export function initPostHog() {
     bootstrap: { distinctID: getVisitorId() },
     person_profiles: "identified_only", // no anonymous-person bloat
     capture_pageview: "history_change", // SPA pageviews on route change
-    autocapture: true,
+    // Autocapture OFF: it fired $autocapture/$rageclick/$dead_click on every
+    // click/drag/change across a click-heavy realtime game (~1.4k events per
+    // session), which blew past PostHog's 1M-event free tier. Our explicit
+    // funnel events (captureGameEvent) are the signal we actually want; this
+    // was pure noise. Re-enable only with a config'd allowlist if ever needed.
+    autocapture: false,
     before_send: sanitizeEvent,
     disable_session_recording: false,
     session_recording: {
@@ -66,7 +71,10 @@ export function initPostHog() {
       // that one input. data-ph-mask stays as a hook for future sensitive text.
       maskAllInputs: false,
       maskTextSelector: "[data-ph-mask]",
-      sampleRate: 1, // record every session (was 0.5 → only half captured)
+      // Sample at 20%: full recording isn't needed and a viral spike would
+      // otherwise blow the 5k-recording/mo replay free tier the same way
+      // autocapture blew the event tier.
+      sampleRate: 0.2,
     },
   });
 
