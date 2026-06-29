@@ -76,4 +76,4 @@ React, Convex, Express/Railway, Vercel, Tailwind CSS, YouTube search, iTunes Sea
 
 ---
 
-Built by [Wilson Overfield](https://github.com/woverfield).
+Built by [Wilson Overfield](https://github.com/wkoverfield).

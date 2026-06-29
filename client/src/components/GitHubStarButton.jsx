@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-const REPO_URL = "https://github.com/woverfield/aux-wars";
-const API_URL = "https://api.github.com/repos/woverfield/aux-wars";
+const REPO_URL = "https://github.com/wkoverfield/aux-wars";
+const API_URL = "https://api.github.com/repos/wkoverfield/aux-wars";
 const CACHE_KEY = "github_stars_aux_wars";
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour — keeps us well under GitHub's 60 req/hr unauth limit
 
