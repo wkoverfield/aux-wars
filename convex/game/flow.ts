@@ -5,6 +5,35 @@ import { internalMutation, mutation, query } from "../_generated/server";
 
 function now() { return Date.now(); }
 
+type RateLimitField = "lastSubmissionAttempt" | "lastRatingAttempt" | "lastVoteSkipAttempt";
+
+/**
+ * Check and stamp a per-player rate limit in one step. Returns true when the
+ * player's last attempt for this action is inside the window. Stamps live in
+ * playerRateLimits, not on the player document, so an attempt never
+ * invalidates the room queries that read players.
+ */
+async function rateLimited(
+  ctx: any,
+  playerId: string,
+  roomCode: string,
+  field: RateLimitField,
+  windowMs: number
+): Promise<boolean> {
+  const row = await ctx.db
+    .query("playerRateLimits")
+    .withIndex("by_player", (q: any) => q.eq("playerId", playerId).eq("roomCode", roomCode))
+    .first();
+  const last = row?.[field];
+  if (last && now() - last < windowMs) return true;
+  if (row) {
+    await ctx.db.patch(row._id, { [field]: now() });
+  } else {
+    await ctx.db.insert("playerRateLimits", { playerId, roomCode, [field]: now() });
+  }
+  return false;
+}
+
 function submitSongFailure(code: string, message: string) {
   return { success: false, code, message };
 }
@@ -113,16 +142,10 @@ export const submitSong = mutation({
     }
 
     // Rate limiting: Prevent rapid submission attempts (max 1 per second)
-    const lastAttempt = player.lastSubmissionAttempt;
-    if (lastAttempt && now() - lastAttempt < 1000) {
+    if (await rateLimited(ctx, playerId, code, "lastSubmissionAttempt", 1000)) {
       console.log(`[submitSong] Rate limit: Player ${playerId} attempting too quickly`);
       return submitSongFailure("rate_limited", "Please wait a second before submitting again.");
     }
-
-    // Update last attempt timestamp
-    await ctx.db.patch(player._id, {
-      lastSubmissionAttempt: now()
-    });
 
     const players = await getPlayers(ctx, code);
 
@@ -204,8 +227,7 @@ export const submitRating = mutation({
     }
 
     // Rate limiting: Prevent rapid rating attempts (max 1 per second)
-    const lastAttempt = player.lastRatingAttempt;
-    if (lastAttempt && now() - lastAttempt < 1000) {
+    if (await rateLimited(ctx, playerId, code, "lastRatingAttempt", 1000)) {
       console.log(`[submitRating] Rate limit: Player ${playerId} attempting too quickly`);
       return submitRatingFailure("rate_limited", "Please wait a second before rating again.");
     }
@@ -226,11 +248,6 @@ export const submitRating = mutation({
     if (rating === -1 && current.playerId !== playerId) {
       return submitRatingFailure("invalid_skip", "Only the submitter can skip rating their own song.");
     }
-
-    // Update last attempt timestamp
-    await ctx.db.patch(player._id, {
-      lastRatingAttempt: now()
-    });
 
     // Check if player already rated this song (prevents duplicate ratings)
     const existingRatings = await ctx.db
@@ -563,16 +580,10 @@ export const voteSkipPrompt = mutation({
     }
 
     // Rate limiting: Prevent rapid vote attempts (max 1 per 2 seconds)
-    const lastAttempt = player.lastVoteSkipAttempt;
-    if (lastAttempt && now() - lastAttempt < 2000) {
+    if (await rateLimited(ctx, playerId, code, "lastVoteSkipAttempt", 2000)) {
       console.log(`[voteSkipPrompt] Rate limit: Player ${playerId} attempting too quickly`);
       return { success: false, message: "Please wait before voting again" };
     }
-
-    // Update last attempt timestamp
-    await ctx.db.patch(player._id, {
-      lastVoteSkipAttempt: now()
-    });
 
     // Check if player already voted
     const currentVotes = room.skipVotes || [];

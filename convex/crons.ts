@@ -28,6 +28,12 @@ crons.daily(
   internal.siteStats.pruneVisits
 );
 
+crons.interval(
+  "refresh-live-stats",
+  { seconds: 60 }, // homepage counters; writes only when a number changed
+  internal.analytics.refreshLiveStats
+);
+
 crons.daily(
   "daily metric snapshot",
   { hourUTC: 8, minuteUTC: 10 }, // stable once-daily capture of cumulative counters

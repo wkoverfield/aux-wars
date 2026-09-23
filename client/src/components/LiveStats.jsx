@@ -6,11 +6,12 @@ function fmt(n) {
 }
 
 /**
- * Live social-proof counters for the homepage. Reactive — the numbers tick up
- * in real time as games are played. Reads the all-time analytics aggregates.
+ * Social-proof counters for the homepage. Reads a single row that a cron
+ * rewrites once a minute from the analytics aggregates, so the numbers tick
+ * up about once a minute rather than on every tracked event.
  */
 export default function LiveStats() {
-  const stats = useQuery(api.analytics.getAllAggregates);
+  const stats = useQuery(api.analytics.getLiveStats);
   if (!stats) return null;
 
   const items = [

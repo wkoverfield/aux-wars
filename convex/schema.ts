@@ -49,12 +49,29 @@ export default defineSchema({
     lastSeenAt: v.optional(v.number()),
     isActive: v.optional(v.boolean()), // Is this the currently active connection for this playerId?
     submittedRounds: v.optional(v.array(v.number())), // Tracks which rounds this player has submitted for (prevents race conditions)
-    lastSubmissionAttempt: v.optional(v.number()), // Rate limiting: timestamp of last submission attempt
-    lastRatingAttempt: v.optional(v.number()), // Rate limiting: timestamp of last rating attempt
-    lastVoteSkipAttempt: v.optional(v.number()), // Rate limiting: timestamp of last vote skip attempt
+    // DEPRECATED: rate-limit stamps. No longer written; they live in
+    // playerRateLimits so a vote does not rewrite a document every room
+    // query reads. Optional so existing rows stay valid.
+    lastSubmissionAttempt: v.optional(v.number()),
+    lastRatingAttempt: v.optional(v.number()),
+    lastVoteSkipAttempt: v.optional(v.number()),
   })
     .index("by_room", ["roomCode"])
     .index("by_player", ["playerId", "roomCode"]),
+
+  // Per-player rate-limit stamps, one row per (player, room). Kept off the
+  // players table: every room query collects the room's players, so a stamp
+  // written there on each vote re-ran every subscribed query for every player
+  // in the room. Deleted with the room.
+  playerRateLimits: defineTable({
+    playerId: v.string(),
+    roomCode: v.string(),
+    lastSubmissionAttempt: v.optional(v.number()),
+    lastRatingAttempt: v.optional(v.number()),
+    lastVoteSkipAttempt: v.optional(v.number()),
+  })
+    .index("by_player", ["playerId", "roomCode"])
+    .index("by_room", ["roomCode"]),
 
   submissions: defineTable({
     roomCode: v.string(),
@@ -152,6 +169,16 @@ export default defineSchema({
     count: v.number(),
     lastUpdated: v.number(),
   }).index("by_type", ["eventType"]),
+
+  // Homepage counters, one row, rewritten by a cron once a minute from
+  // analyticsAggregates. The homepage subscribes to this row instead of the
+  // aggregates, which change on every tracked event.
+  liveStats: defineTable({
+    gameStarted: v.number(),
+    playerJoined: v.number(),
+    ratingSubmitted: v.number(),
+    updatedAt: v.number(),
+  }),
 
   // Pro pack purchases. A proToken is issued after a verified Stripe payment and
   // stored on the buyer's device; hosting with it flags the room as hostPro

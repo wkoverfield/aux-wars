@@ -205,6 +205,61 @@ export const getAllAggregates = query({
   },
 });
 
+/**
+ * Rewrite the homepage counters from analyticsAggregates. Runs on a cron once
+ * a minute; writes only when a number changed, so subscribers re-run at most
+ * once a minute and never on a quiet minute.
+ */
+export const refreshLiveStats = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const count = async (eventType: string) => {
+      const row = await ctx.db
+        .query("analyticsAggregates")
+        .withIndex("by_type", (q) => q.eq("eventType", eventType))
+        .first();
+      return row?.count ?? 0;
+    };
+    const next = {
+      gameStarted: await count("game_started"),
+      playerJoined: await count("player_joined"),
+      ratingSubmitted: await count("rating_submitted"),
+    };
+    const existing = await ctx.db.query("liveStats").first();
+    if (
+      existing &&
+      existing.gameStarted === next.gameStarted &&
+      existing.playerJoined === next.playerJoined &&
+      existing.ratingSubmitted === next.ratingSubmitted
+    ) {
+      return { action: "unchanged" };
+    }
+    if (existing) {
+      await ctx.db.patch(existing._id, { ...next, updatedAt: Date.now() });
+      return { action: "patched" };
+    }
+    await ctx.db.insert("liveStats", { ...next, updatedAt: Date.now() });
+    return { action: "inserted" };
+  },
+});
+
+/**
+ * Homepage counters. Reads the single liveStats row (see refreshLiveStats);
+ * null until the first refresh has run.
+ */
+export const getLiveStats = query({
+  args: {},
+  handler: async (ctx) => {
+    const row = await ctx.db.query("liveStats").first();
+    if (!row) return null;
+    return {
+      game_started: row.gameStarted,
+      player_joined: row.playerJoined,
+      rating_submitted: row.ratingSubmitted,
+    };
+  },
+});
+
 // Bounds how many recent events the analysis queries below scan (keeps reads safe
 // for high-volume events like vote_listen; a recent sample is plenty for stats).
 const STATS_SAMPLE_CAP = 10000;
