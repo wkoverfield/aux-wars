@@ -182,6 +182,11 @@ async function deleteRoomAndData(ctx: any, room: any) {
     await ctx.db.delete(prompt._id);
   }
 
+  const rateLimits = await ctx.db.query("playerRateLimits").withIndex("by_room", (q: any) => q.eq("roomCode", code)).collect();
+  for (const row of rateLimits) {
+    await ctx.db.delete(row._id);
+  }
+
   // Track where games die (room emptied out before finishing)
   if (room.phase !== "gameOver") {
     await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
