@@ -5,6 +5,7 @@ import { api, internal } from "./_generated/api";
 import presenceComponent from "@convex-dev/presence/test";
 import {
   ACTIVE_ROOM_WINDOW_MS,
+  MAX_ROOMS_SCANNED,
   hourStartOf,
   mergeMax,
   recordSample,
@@ -155,4 +156,50 @@ test("sampleAndRecord counts online players by room phase", async () => {
   // Same moment again: the record is not rewritten.
   const again = await t.mutation(internal.concurrency.sampleAndRecord, {});
   expect(again).toMatchObject({ allTime: "unchanged" });
+});
+
+test("sampleAndRecord finds live rooms past the scan cap", async () => {
+  const t = setup();
+  const now = Date.now();
+  const settings = { numberOfRounds: 3, roundLength: 60, snippetDuration: 30, selectedPrompts: ["a"] };
+  // Oldest by creation: more stale rooms than the cap, all outside the window.
+  // Then more in-window rooms than the cap, the most recently active last.
+  const stale = MAX_ROOMS_SCANNED + 20;
+  const inWindow = MAX_ROOMS_SCANNED + 10;
+  await t.run(async (ctx) => {
+    for (let i = 0; i < stale; i++) {
+      const at = now - ACTIVE_ROOM_WINDOW_MS - HOUR - i * 1000;
+      await ctx.db.insert("rooms", {
+        code: `QS${i}`,
+        phase: "lobby",
+        currentRound: 1,
+        settings,
+        createdAt: at,
+        lastActivityAt: at,
+      });
+    }
+    for (let i = 0; i < inWindow; i++) {
+      const at = now - ACTIVE_ROOM_WINDOW_MS + 60_000 + i * 1000;
+      await ctx.db.insert("rooms", {
+        code: `QW${i}`,
+        phase: "lobby",
+        currentRound: 1,
+        settings,
+        createdAt: at,
+        lastActivityAt: at,
+      });
+    }
+  });
+  await insertRoom(t, "QALIVE", "rating", now);
+  await joinOnline(t, "QALIVE", "a");
+  await joinOnline(t, "QALIVE", "b");
+  await joinOnline(t, "QW0", "c"); // least recently active in-window room: past the cap
+
+  const result = await t.mutation(internal.concurrency.sampleAndRecord, {});
+  expect(result).toMatchObject({
+    playersOnline: 2,
+    playersInGame: 2,
+    activeRooms: 1,
+    activeGames: 1,
+  });
 });

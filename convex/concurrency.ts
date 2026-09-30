@@ -17,8 +17,9 @@ import { presence } from "./presence";
 // per-sample cost to recently used rooms. A game in progress touches
 // lastActivityAt every phase, so only long-idle lobbies fall outside it.
 export const ACTIVE_ROOM_WINDOW_MS = 2 * 60 * 60 * 1000;
-// Hard cap on rooms read per sample.
-const MAX_ROOMS_SCANNED = 500;
+// Hard cap on rooms read per sample. Rooms are read newest-activity first, so
+// hitting the cap drops the longest-idle rooms in the window, never the live ones.
+export const MAX_ROOMS_SCANNED = 500;
 // Above the pro player cap (50), so a full room is never truncated.
 const PRESENCE_LIMIT = 64;
 
@@ -51,7 +52,11 @@ export async function sampleConcurrency(
   now: number
 ): Promise<ConcurrencySample> {
   const cutoff = now - ACTIVE_ROOM_WINDOW_MS;
-  const rooms = await ctx.db.query("rooms").take(MAX_ROOMS_SCANNED);
+  const rooms = await ctx.db
+    .query("rooms")
+    .withIndex("by_lastActivityAt", (q) => q.gte("lastActivityAt", cutoff))
+    .order("desc")
+    .take(MAX_ROOMS_SCANNED);
   const sample: ConcurrencySample = {
     playersOnline: 0,
     playersInGame: 0,
@@ -59,7 +64,6 @@ export async function sampleConcurrency(
     activeGames: 0,
   };
   for (const room of rooms) {
-    if (room.lastActivityAt < cutoff) continue;
     const online = await presence.listRoom(ctx, room.code, true, PRESENCE_LIMIT);
     if (online.length === 0) continue;
     sample.playersOnline += online.length;

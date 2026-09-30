@@ -80,7 +80,9 @@ export default defineSchema({
     rematchStartingAt: v.optional(v.number()), // Timestamp the "Play Again" countdown fires (gameOver → fresh game)
     createdAt: v.number(),
     lastActivityAt: v.number(),
-  }).index("by_code", ["code"]),
+  })
+    .index("by_code", ["code"])
+    .index("by_lastActivityAt", ["lastActivityAt"]),
 
   players: defineTable({
     roomCode: v.string(),
