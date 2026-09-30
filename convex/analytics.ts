@@ -16,6 +16,7 @@ const eventMetadata = v.optional(v.object({
   value: v.optional(v.number()),
   label: v.optional(v.string()),
   phase: v.optional(v.string()),
+  visitorId: v.optional(v.string()), // opaque client visitor id (retention linkage)
 }));
 
 const PUBLIC_EVENT_TYPES = new Set([

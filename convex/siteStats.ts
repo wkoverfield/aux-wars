@@ -1,8 +1,54 @@
-import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
+import { mutation, query, internalQuery, internalMutation, type MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const dstr = (ms: number) => new Date(ms).toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+
+/**
+ * Normalizes a client-supplied visitor id. Returns null for missing ids and
+ * for the shared "anon" fallback, which would merge unrelated visitors.
+ */
+export function cleanVisitorId(raw: string | undefined | null): string | null {
+  // Same truncation as the pageviewVisits key, so retention lookups match.
+  const id = (raw ?? "").slice(0, 64);
+  if (!id.trim() || id === "anon") return null;
+  return id;
+}
+
+/**
+ * Records the first day a visitor was seen. Inserts only when the visitor has
+ * no row yet; an existing row is never rewritten here.
+ */
+export async function recordVisitorSeen(ctx: MutationCtx, visitorId: string, date: string) {
+  const existing = await ctx.db
+    .query("visitorFirstSeen")
+    .withIndex("by_visitor", (q) => q.eq("visitorId", visitorId))
+    .unique();
+  if (existing) return;
+  await ctx.db.insert("visitorFirstSeen", { visitorId, firstSeenDate: date });
+}
+
+/**
+ * Records the first day a visitor played (joined a room). Writes only when
+ * firstPlayedDate is unset, so repeat joins cost one indexed read.
+ */
+export async function recordVisitorPlayed(ctx: MutationCtx, visitorId: string, date: string) {
+  const existing = await ctx.db
+    .query("visitorFirstSeen")
+    .withIndex("by_visitor", (q) => q.eq("visitorId", visitorId))
+    .unique();
+  if (!existing) {
+    await ctx.db.insert("visitorFirstSeen", {
+      visitorId,
+      firstSeenDate: date,
+      firstPlayedDate: date,
+    });
+    return;
+  }
+  if (existing.firstPlayedDate) return;
+  await ctx.db.patch(existing._id, { firstPlayedDate: date });
+}
 
 function sanitizePath(raw: string): string | null {
   let p = (raw || "").split("?")[0].split("#")[0].trim();
@@ -49,7 +95,53 @@ export const recordPageview = mutation({
     if (!seen) {
       await ctx.db.insert("pageviewVisits", { date, visitorId: vId });
       await bump(`uvday:${date}`);
+      // First visit of the day: the only time the visitor can be new.
+      const firstSeenId = cleanVisitorId(visitorId);
+      if (firstSeenId) await recordVisitorSeen(ctx, firstSeenId, date);
     }
+  },
+});
+
+/**
+ * Internal, one-off: seeds visitorFirstSeen from the per-day pageviewVisits
+ * rows still on hand (about 120 days). Walks pageviewVisits in date order, so
+ * the first row met for a visitor is its earliest; a row that already exists
+ * is moved earlier only. Reschedules itself page by page until done.
+ * Run before dailyMetrics:backfillDailyMetrics so new/returning and retention
+ * have history to work with.
+ */
+export const backfillVisitorFirstSeen = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())), pageSize: v.optional(v.number()) },
+  handler: async (ctx, { cursor, pageSize }) => {
+    const numItems = Math.min(Math.max(pageSize ?? 1000, 1), 2000);
+    const page = await ctx.db
+      .query("pageviewVisits")
+      .withIndex("by_date_and_visitor")
+      .paginate({ cursor: cursor ?? null, numItems });
+    let inserted = 0;
+    let movedEarlier = 0;
+    for (const visit of page.page) {
+      const visitorId = cleanVisitorId(visit.visitorId);
+      if (!visitorId) continue;
+      const existing = await ctx.db
+        .query("visitorFirstSeen")
+        .withIndex("by_visitor", (q) => q.eq("visitorId", visitorId))
+        .unique();
+      if (!existing) {
+        await ctx.db.insert("visitorFirstSeen", { visitorId, firstSeenDate: visit.date });
+        inserted++;
+      } else if (visit.date < existing.firstSeenDate) {
+        await ctx.db.patch(existing._id, { firstSeenDate: visit.date });
+        movedEarlier++;
+      }
+    }
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.siteStats.backfillVisitorFirstSeen, {
+        cursor: page.continueCursor,
+        pageSize: numItems,
+      });
+    }
+    return { scanned: page.page.length, inserted, movedEarlier, done: page.isDone };
   },
 });
 

@@ -3,6 +3,7 @@ import { mutation, query } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { containsHateSpeech } from "./contentFilter";
 import { presence } from "../presence";
+import { cleanVisitorId, recordVisitorPlayed } from "../siteStats";
 
 function now() {
   return Date.now();
@@ -17,8 +18,9 @@ const MAX_SELECTED_PROMPTS = 50;
 const MAX_CUSTOM_PROMPTS = 50;
 
 export const hostGame = mutation({
-  args: { proToken: v.optional(v.string()) },
-  handler: async (ctx, { proToken }) => {
+  // visitorId: opaque client visitor id (optional; older clients omit it).
+  args: { proToken: v.optional(v.string()), visitorId: v.optional(v.string()) },
+  handler: async (ctx, { proToken, visitorId }) => {
     const code = await generateUniqueCode(ctx);
 
     // Pro pack: validate the buyer's token and flag the room (ad-free + raised cap).
@@ -51,9 +53,10 @@ export const hostGame = mutation({
     });
 
     // Track game creation
+    const hostVisitorId = cleanVisitorId(visitorId);
     await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
       eventType: "game_created",
-      metadata: { roomCode: code },
+      metadata: { roomCode: code, ...(hostVisitorId ? { visitorId: hostVisitorId } : {}) },
     });
 
     return { code };
@@ -61,8 +64,15 @@ export const hostGame = mutation({
 });
 
 export const joinGame = mutation({
-  args: { code: v.string(), playerId: v.string(), connectionId: v.string(), name: v.string() },
-  handler: async (ctx, { code, playerId, connectionId, name }) => {
+  // visitorId: opaque client visitor id (optional; older clients omit it).
+  args: {
+    code: v.string(),
+    playerId: v.string(),
+    connectionId: v.string(),
+    name: v.string(),
+    visitorId: v.optional(v.string()),
+  },
+  handler: async (ctx, { code, playerId, connectionId, name, visitorId }) => {
     // Validate player name
     const trimmedName = name.trim();
     if (!trimmedName || trimmedName.length < 1 || trimmedName.length > 50) {
@@ -136,11 +146,16 @@ export const joinGame = mutation({
         await ctx.db.patch(room._id, { hostPlayerId: playerDocId });
       }
 
-      // Track player joined
+      // Track player joined. visitorFirstSeen is its own table, read by no
+      // room or player query, so this write invalidates no game subscription.
+      const joinVisitorId = cleanVisitorId(visitorId);
       await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
         eventType: "player_joined",
-        metadata: { roomCode: code, playerId },
+        metadata: { roomCode: code, playerId, ...(joinVisitorId ? { visitorId: joinVisitorId } : {}) },
       });
+      if (joinVisitorId) {
+        await recordVisitorPlayed(ctx, joinVisitorId, new Date(now()).toISOString().slice(0, 10));
+      }
 
       await touchRoom(ctx, room._id);
       return {

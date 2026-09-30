@@ -15,6 +15,18 @@ crons.interval(
   internal.game.scheduler.cleanupStaleRooms
 );
 
+crons.interval(
+  "sample-concurrency",
+  { seconds: 60 }, // peak players online / in game; writes only on a new hour max or record
+  internal.concurrency.sampleAndRecord
+);
+
+crons.daily(
+  "rollup-daily-metrics",
+  { hourUTC: 0, minuteUTC: 20 }, // yesterday's permanent row, well before the 4am raw-event prune
+  internal.dailyMetrics.rollupYesterday
+);
+
 crons.daily(
   "cleanup-old-analytics",
   { hourUTC: 4, minuteUTC: 0 },  // Run daily at 4am UTC

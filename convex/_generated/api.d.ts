@@ -9,7 +9,9 @@
  */
 
 import type * as analytics from "../analytics.js";
+import type * as concurrency from "../concurrency.js";
 import type * as crons from "../crons.js";
+import type * as dailyMetrics from "../dailyMetrics.js";
 import type * as feedback from "../feedback.js";
 import type * as game_contentFilter from "../game/contentFilter.js";
 import type * as game_flow from "../game/flow.js";
@@ -20,6 +22,7 @@ import type * as metricsRollup from "../metricsRollup.js";
 import type * as news from "../news.js";
 import type * as presence from "../presence.js";
 import type * as siteStats from "../siteStats.js";
+import type * as stats from "../stats.js";
 import type * as stripe from "../stripe.js";
 import type * as youtube from "../youtube.js";
 
@@ -31,7 +34,9 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   analytics: typeof analytics;
+  concurrency: typeof concurrency;
   crons: typeof crons;
+  dailyMetrics: typeof dailyMetrics;
   feedback: typeof feedback;
   "game/contentFilter": typeof game_contentFilter;
   "game/flow": typeof game_flow;
@@ -42,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   news: typeof news;
   presence: typeof presence;
   siteStats: typeof siteStats;
+  stats: typeof stats;
   stripe: typeof stripe;
   youtube: typeof youtube;
 }>;
