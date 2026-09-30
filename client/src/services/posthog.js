@@ -2,7 +2,8 @@
  * Client-side PostHog (product analytics).
  *
  * Gives us the things the server-side `posthog-node` setup can't: pageviews,
- * autocapture, the real game funnel, and web analytics. No-ops when no key is
+ * the game funnel, sampled session replays, and web analytics. Usage counts
+ * live in Convex, not here. No-ops when no key is
  * configured (local dev without VITE_POSTHOG_KEY) so nothing breaks or spams.
  *
  * Consent: the cookie banner is dark until AdSense is configured, so there's
@@ -23,9 +24,15 @@ function sanitizeUrl(value) {
   return value.replace(/\/lobby\/[^/?#]+/g, "/lobby/[room]");
 }
 
-function sanitizeEvent(event) {
+function isStatsPage(path) {
+  return typeof path === "string" && (path === "/stats" || path.startsWith("/stats/"));
+}
+
+export function sanitizeEvent(event) {
   if (!event?.properties) return event;
   const props = event.properties;
+  // The private /stats dashboard is not product usage; send nothing from it.
+  if (isStatsPage(props.$pathname)) return null;
   props.$current_url = sanitizeUrl(props.$current_url);
   props.$pathname = sanitizeUrl(props.$pathname);
   props.$referrer = sanitizeUrl(props.$referrer);
@@ -68,7 +75,7 @@ export function initPostHog() {
     // Autocapture OFF: it fired $autocapture/$rageclick/$dead_click on every
     // click/drag/change across a click-heavy realtime game (~1.4k events per
     // session), which blew past PostHog's 1M-event free tier. Our explicit
-    // funnel events (captureGameEvent) are the signal we actually want; this
+    // funnel events (POSTHOG_EVENTS) are the signal we actually want; this
     // was pure noise. Re-enable only with a config'd allowlist if ever needed.
     autocapture: false,
     before_send: sanitizeEvent,
@@ -96,9 +103,37 @@ export function initPostHog() {
   });
 }
 
-/** Fire-and-forget event capture; no-ops until initialized, never throws. */
+/**
+ * The only custom events sent to PostHog: the game funnel. Every other count
+ * (ratings, submissions, searches, settings, prompt packs) is recorded by
+ * Convex, so PostHog is billed for funnel steps and sampled replays only.
+ * An event missing from this list is dropped by `capture`.
+ */
+export const POSTHOG_EVENTS = Object.freeze([
+  "session_start",
+  "host_game_clicked",
+  "game_created",
+  "player_joined",
+  "game_started",
+  "round_completed",
+  "game_completed_viewed",
+  "play_again_clicked",
+  "song_search_no_results",
+  "lobby_left",
+]);
+
+const ALLOWED_EVENTS = new Set(POSTHOG_EVENTS);
+
+export function isAllowedEvent(event) {
+  return ALLOWED_EVENTS.has(event);
+}
+
+/**
+ * Fire-and-forget event capture; no-ops until initialized, drops events not in
+ * POSTHOG_EVENTS, never throws.
+ */
 export function capture(event, properties) {
-  if (!started) return;
+  if (!started || !isAllowedEvent(event)) return;
   try {
     posthog.capture(event, properties);
   } catch {

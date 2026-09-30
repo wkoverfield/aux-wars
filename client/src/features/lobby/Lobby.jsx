@@ -199,7 +199,6 @@ export default function Lobby() {
     });
 
     if (result.success) {
-      captureGameEvent("player_kicked", gameProperties({ code: gameCode, room, players, session }));
       showToast("Player removed from lobby", "success");
     } else {
       showToast(result.message || "Failed to kick player", "error");
@@ -221,13 +220,6 @@ export default function Lobby() {
     }
     const nextReady = !isReady;
     setIsReady(nextReady);
-    captureGameEvent("player_ready_toggled", gameProperties({
-      code: gameCode,
-      room,
-      players,
-      session,
-      extra: { ready: nextReady },
-    }));
     // The useEffect will handle emitting the update
   };
 
@@ -342,10 +334,7 @@ export default function Lobby() {
               <SettingsPreview
                 settings={room?.settings}
                 isHost={isHost}
-                onEdit={() => {
-                  captureGameEvent("settings_opened", gameProperties({ code: gameCode, room, players, session }));
-                  setShowModal(true);
-                }}
+                onEdit={() => setShowModal(true)}
               />
             </div>
             <ScrollFade className="flex-1 w-full min-h-0">

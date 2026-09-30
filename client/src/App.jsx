@@ -1,4 +1,5 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import AppDisplay from "./components/AppDisplay";
 import PageTransition from "./components/PageTransition";
 import Home from "./features/lobby/Home";
@@ -17,6 +18,27 @@ import ProRestore from "./features/legal/ProRestore";
 import { ToastProvider } from "./contexts/ToastContext";
 import { RoomProvider } from "./services/RoomProvider";
 import ErrorBoundary from "./components/ErrorBoundary";
+
+// Private admin dashboard: lazy so its code never ships in the main bundle.
+const StatsPage = lazy(() => import("./features/stats/StatsPage"));
+
+function isStatsPath(pathname) {
+  return pathname === "/stats" || pathname.startsWith("/stats/");
+}
+
+/** Site pageview counting, skipped on /stats so admin visits are not counted as players. */
+function SitePageviews() {
+  const { pathname } = useLocation();
+  return isStatsPath(pathname) ? null : <PageviewTracker />;
+}
+
+function StatsRoute() {
+  return (
+    <Suspense fallback={<div className="min-h-svh w-full bg-[#121212]" />}>
+      <StatsPage />
+    </Suspense>
+  );
+}
 
 function RoomProviderOutlet() {
   return (
@@ -38,10 +60,11 @@ export default function App() {
       <Router>
         <ToastProvider>
           <NavigationBlocker />
-          <PageviewTracker />
+          <SitePageviews />
           <ConnectionStatus />
           <CookieConsent />
           <Routes>
+              <Route path="/stats" element={<StatsRoute />} />
               <Route path="/" element={<AppDisplay />}>
                 <Route index element={<PageTransition><Home /></PageTransition>} />
                 <Route path="privacy" element={<PageTransition><PrivacyPolicy /></PageTransition>} />

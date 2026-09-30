@@ -15,6 +15,15 @@ import { getProToken, useIsPro } from "../../services/pro";
 import { adsConfigured } from "../../services/ads";
 import { capture } from "../../services/posthog";
 import { captureGameEvent, hashRoomCode } from "../../services/analytics";
+import { getVisitorId } from "../../utils/visitorId";
+
+// Opaque visitor id sent on host/join so retention can link a visit to a play.
+// getVisitorId() falls back to a shared "anon" when storage is unavailable;
+// that value would merge unrelated visitors, so it is not sent.
+function joinVisitorId() {
+  const id = getVisitorId();
+  return id && id !== "anon" ? id : undefined;
+}
 
 const HOW_TO_PLAY = [
   { n: 1, title: "Host a game", text: "Create a room and share the code with your friends." },
@@ -67,10 +76,11 @@ export default function Home() {
     clearSession();
     captureGameEvent("host_game_clicked", { host_pro: isPro });
     try {
-      const { code } = await hostGame({ proToken: getProToken() || undefined });
+      const visitorId = joinVisitorId();
+      const { code } = await hostGame({ proToken: getProToken() || undefined, visitorId });
       const playerId = crypto.randomUUID();
       const tempName = "Host";
-      const joinResp = await joinGame({ code, name: tempName, playerId, connectionId });
+      const joinResp = await joinGame({ code, name: tempName, playerId, connectionId, visitorId });
       if (joinResp?.success) {
         captureGameEvent("game_created", {
           room_code_hash: hashRoomCode(code),
@@ -111,14 +121,8 @@ export default function Home() {
       return;
     }
     const code = joinCode.trim().toUpperCase();
-    captureGameEvent("join_game_attempted", {
-      room_code_hash: hashRoomCode(code),
-      code_length: code.length,
-      returning_to_session: Boolean(session?.gameCode === code && session?.playerId && isSessionValid()),
-    });
 
     if (session?.gameCode === code && session?.playerId && isSessionValid()) {
-      captureGameEvent("join_game_resumed", { room_code_hash: hashRoomCode(code) });
       navigate(`/lobby/${code}`);
       return;
     }
@@ -128,7 +132,7 @@ export default function Home() {
     const tempName = `Player ${Math.floor(Math.random() * 100) + 1}`;
 
     try {
-      const resp = await joinGame({ code, name: tempName, playerId, connectionId });
+      const resp = await joinGame({ code, name: tempName, playerId, connectionId, visitorId: joinVisitorId() });
       if (resp?.success) {
         captureGameEvent("player_joined", {
           room_code_hash: hashRoomCode(code),

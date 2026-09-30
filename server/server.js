@@ -89,6 +89,31 @@ app.get('/', (req, res) => {
   });
 });
 
+// `music_searched` fires on every successful search, so it is sampled: 1 in 5
+// is sent, carrying `sample_rate` so PostHog counts can be scaled back up
+// (true count ~= sampled count / sample_rate). `music_search_no_results` and
+// exceptions are rare and always sent.
+export const MUSIC_SEARCHED_SAMPLE_RATE = 0.2;
+
+export function shouldSample(rate, random = Math.random) {
+  if (!(rate > 0)) return false;
+  if (rate >= 1) return true;
+  return random() < rate;
+}
+
+function captureMusicSearched(distinctId, properties) {
+  if (!shouldSample(MUSIC_SEARCHED_SAMPLE_RATE)) return;
+  posthog.capture({
+    distinctId,
+    event: 'music_searched',
+    properties: {
+      ...properties,
+      sample_rate: MUSIC_SEARCHED_SAMPLE_RATE,
+      $process_person_profile: false,
+    },
+  });
+}
+
 const SEARCH_LIMIT = 20;
 const FETCH_TIMEOUT_MS = 8000;
 // Keep the YouTube budget short so a slow/broken scraper falls back fast.
@@ -122,15 +147,10 @@ async function handleSearch(req, res) {
     });
     if (ytTracks.length > 0) {
       const resultTracks = ytTracks.slice(0, SEARCH_LIMIT);
-      posthog.capture({
-        distinctId,
-        event: 'music_searched',
-        properties: {
-          query_length: term.length,
-          source: 'youtube',
-          result_count: resultTracks.length,
-          $process_person_profile: false,
-        },
+      captureMusicSearched(distinctId, {
+        query_length: term.length,
+        source: 'youtube',
+        result_count: resultTracks.length,
       });
       return res.json({ tracks: resultTracks });
     }
@@ -160,15 +180,10 @@ async function handleSearch(req, res) {
         },
       });
     } else {
-      posthog.capture({
-        distinctId,
-        event: 'music_searched',
-        properties: {
-          query_length: term.length,
-          source: 'itunes_deezer_fallback',
-          result_count: tracks.length,
-          $process_person_profile: false,
-        },
+      captureMusicSearched(distinctId, {
+        query_length: term.length,
+        source: 'itunes_deezer_fallback',
+        result_count: tracks.length,
       });
     }
 
