@@ -17,7 +17,7 @@ crons.interval(
 
 crons.interval(
   "sample-concurrency",
-  { seconds: 60 }, // peak players online / in game; writes only on a new hour max or record
+  { seconds: 60 }, // action: read-only sample query, then a concurrencyStats-only write
   internal.concurrency.sampleAndRecord
 );
 

@@ -59,18 +59,64 @@ describe("stats queries", () => {
     await expect(t.query(api.stats.getDashboard, { adminKey: "", days: 30 })).rejects.toThrow(/Unauthorized/);
   });
 
-  test("getLive returns the contract shape", async () => {
+  test("getLive returns nulls before the first sample", async () => {
     const t = setup();
     vi.stubEnv("STATS_ADMIN_KEY", KEY);
     const live = await t.query(api.stats.getLive, { adminKey: KEY });
-    expect(live).toMatchObject({
-      playersOnline: 0,
-      playersInGame: 0,
-      activeRooms: 0,
-      activeGames: 0,
+    expect(live).toEqual({
+      playersOnline: null,
+      playersInGame: null,
+      activeRooms: null,
+      activeGames: null,
+      sampledAt: null,
       allTimePeak: null,
     });
-    expect(typeof live.sampledAt).toBe("number");
+  });
+
+  test("getLive reads the stored rows and never samples rooms itself", async () => {
+    const t = setup();
+    vi.stubEnv("STATS_ADMIN_KEY", KEY);
+    const sampledAt = Date.UTC(2026, 8, 30, 20, 5);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("concurrencyStats", {
+        kind: "latest",
+        hourStart: 0,
+        playersOnline: 7,
+        playersInGame: 5,
+        activeRooms: 2,
+        activeGames: 1,
+        updatedAt: sampledAt,
+      });
+      await ctx.db.insert("concurrencyStats", {
+        kind: "allTime",
+        hourStart: 0,
+        playersOnline: 30,
+        playersInGame: 22,
+        activeRooms: 6,
+        activeGames: 4,
+        playersOnlineAt: sampledAt - 5000,
+        updatedAt: sampledAt - 5000,
+      });
+      // A live room with seated players: getLive must not count it.
+      await ctx.db.insert("rooms", {
+        code: "QALIVE",
+        phase: "rating",
+        currentRound: 1,
+        settings: { numberOfRounds: 3, roundLength: 60, snippetDuration: 30, selectedPrompts: ["a"] },
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      await ctx.db.insert("players", { roomCode: "QALIVE", playerId: "p", name: "QA-p", isHost: true, isReady: false });
+    });
+    const live = await t.query(api.stats.getLive, { adminKey: KEY });
+    expect(live).toEqual({
+      playersOnline: 7,
+      playersInGame: 5,
+      activeRooms: 2,
+      activeGames: 1,
+      sampledAt,
+      allTimePeak: { playersOnline: 30, playersInGame: 22, at: sampledAt - 5000, playersInGameAt: null },
+    });
   });
 
   test("getDashboard aggregates rollup rows over the window", async () => {

@@ -1,27 +1,47 @@
+import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { presence } from "./presence";
+import { internal } from "./_generated/api";
+import {
+  internalAction,
+  internalMutation,
+  internalQuery,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server";
 
 /**
  * Concurrency sampling.
  *
- * A 60s cron (see crons.ts) counts who is on right now and folds the sample
- * into concurrencyStats: one max row per UTC hour plus one all-time record row.
- * A row is written only when the sample beats what it holds, so a quiet or
- * steady minute writes nothing. concurrencyStats is read only by the key-gated
- * stats queries, never by homepage or gameplay subscriptions.
+ * A 60s cron (see crons.ts) runs sampleAndRecord, an internal action that:
+ *   1. runs sampleNow, a read-only internal query over rooms and players, then
+ *   2. runs recordSampleRows, a mutation that reads and writes only
+ *      concurrencyStats.
+ * Keeping the rooms/players reads out of the writing transaction means the
+ * sampler can never conflict with (or be retried because of) gameplay writes.
+ *
+ * concurrencyStats holds one "latest" row (rewritten every sample), one max
+ * row per UTC hour, and one all-time record row. Hour and record rows are
+ * written only when a sample beats what they hold. The table is read only by
+ * the key-gated stats queries, never by homepage or gameplay subscriptions.
+ *
+ * "Online" here means seated: a player row in a room with a real game action
+ * in the last ACTIVE_ROOM_WINDOW_MS. Connectedness itself lives in the
+ * presence component, which can only be listed one room at a time; counting
+ * seats instead keeps the sample to plain indexed reads. A player who closes
+ * the tab stays seated until cleanupInactivePlayers removes them or the room
+ * goes quiet for the window, whichever comes first.
  */
 
-// Rooms whose last real game action is older than this are not probed for
-// presence. Every probe is a presence component call, so this bounds the
-// per-sample cost to recently used rooms. A game in progress touches
-// lastActivityAt every phase, so only long-idle lobbies fall outside it.
-export const ACTIVE_ROOM_WINDOW_MS = 2 * 60 * 60 * 1000;
+// Only rooms with a game action this recent are counted. A game in progress
+// touches lastActivityAt on every phase change, so live games always qualify;
+// a room everyone walked away from drops out once it has been quiet this long.
+export const ACTIVE_ROOM_WINDOW_MS = 15 * 60 * 1000;
 // Hard cap on rooms read per sample. Rooms are read newest-activity first, so
 // hitting the cap drops the longest-idle rooms in the window, never the live ones.
-export const MAX_ROOMS_SCANNED = 500;
-// Above the pro player cap (50), so a full room is never truncated.
-const PRESENCE_LIMIT = 64;
+export const MAX_ROOMS_SCANNED = 200;
+// Above the pro player cap (50), so a full room is never truncated. With the
+// room cap this bounds a sample to 200 + 200 * 64 document reads.
+const PLAYERS_PER_ROOM_LIMIT = 64;
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -41,16 +61,14 @@ export function isInGamePhase(phase: Doc<"rooms">["phase"]): boolean {
 }
 
 /**
- * Counts the current moment from rooms and presence only (bounded).
- * playersOnline: users with an online presence session in any recent room.
- * playersInGame: those online users whose room is past the lobby and not over.
- * activeRooms: rooms with at least one online user.
+ * Counts the current moment from rooms and players only (bounded, no
+ * component calls).
+ * playersOnline: players seated in any recently active room.
+ * playersInGame: those seated in a room past the lobby and not over.
+ * activeRooms: recently active rooms with at least one seated player.
  * activeGames: active rooms whose phase is in game.
  */
-export async function sampleConcurrency(
-  ctx: QueryCtx | MutationCtx,
-  now: number
-): Promise<ConcurrencySample> {
+export async function sampleConcurrency(ctx: QueryCtx, now: number): Promise<ConcurrencySample> {
   const cutoff = now - ACTIVE_ROOM_WINDOW_MS;
   const rooms = await ctx.db
     .query("rooms")
@@ -64,12 +82,15 @@ export async function sampleConcurrency(
     activeGames: 0,
   };
   for (const room of rooms) {
-    const online = await presence.listRoom(ctx, room.code, true, PRESENCE_LIMIT);
-    if (online.length === 0) continue;
-    sample.playersOnline += online.length;
+    const seated = await ctx.db
+      .query("players")
+      .withIndex("by_room", (q) => q.eq("roomCode", room.code))
+      .take(PLAYERS_PER_ROOM_LIMIT);
+    if (seated.length === 0) continue;
+    sample.playersOnline += seated.length;
     sample.activeRooms += 1;
     if (isInGamePhase(room.phase)) {
-      sample.playersInGame += online.length;
+      sample.playersInGame += seated.length;
       sample.activeGames += 1;
     }
   }
@@ -112,8 +133,9 @@ function pickMaxes(row: Doc<"concurrencyStats">): Maxes {
 }
 
 /**
- * Folds one sample into the hour row and the all-time row. Writes only the
- * rows the sample beats. Exported for tests.
+ * Folds one sample into concurrencyStats: always refreshes the latest row;
+ * writes the hour and all-time rows only when the sample beats them.
+ * Exported for tests.
  */
 export async function recordSample(
   ctx: MutationCtx,
@@ -144,10 +166,7 @@ export async function recordSample(
     hour = "inserted";
   }
 
-  const recordRow = await ctx.db
-    .query("concurrencyStats")
-    .withIndex("by_kind_and_hourStart", (q) => q.eq("kind", "allTime").eq("hourStart", 0))
-    .unique();
+  const recordRow = await readAllTimeRow(ctx);
   const recordNext = mergeMax(recordRow ? pickMaxes(recordRow) : null, sample);
   let allTime: "inserted" | "patched" | "unchanged" = "unchanged";
   if (recordNext && recordRow) {
@@ -172,16 +191,67 @@ export async function recordSample(
     allTime = "inserted";
   }
 
+  const latestRow = await readLatestRow(ctx);
+  const latest = { ...sample, updatedAt: now };
+  if (latestRow) {
+    await ctx.db.patch(latestRow._id, latest);
+  } else {
+    await ctx.db.insert("concurrencyStats", { kind: "latest", hourStart: 0, ...latest });
+  }
+
   return { hour, allTime };
 }
 
-/** Cron entry point: sample now and fold it into concurrencyStats. */
-export const sampleAndRecord = internalMutation({
+/** The most recent sample (updatedAt is when it was taken), or null. */
+export async function readLatestRow(ctx: QueryCtx) {
+  return await ctx.db
+    .query("concurrencyStats")
+    .withIndex("by_kind_and_hourStart", (q) => q.eq("kind", "latest").eq("hourStart", 0))
+    .unique();
+}
+
+/** The all-time record row, or null before the first non-zero sample. */
+export async function readAllTimeRow(ctx: QueryCtx) {
+  return await ctx.db
+    .query("concurrencyStats")
+    .withIndex("by_kind_and_hourStart", (q) => q.eq("kind", "allTime").eq("hourStart", 0))
+    .unique();
+}
+
+const sampleValidator = v.object({
+  playersOnline: v.number(),
+  playersInGame: v.number(),
+  activeRooms: v.number(),
+  activeGames: v.number(),
+});
+
+/** Read-only: the current sample from rooms and players. */
+export const sampleNow = internalQuery({
+  args: { now: v.number() },
+  handler: async (ctx, { now }) => await sampleConcurrency(ctx, now),
+});
+
+/** Writes one sample. Touches only concurrencyStats. */
+export const recordSampleRows = internalMutation({
+  args: { sample: sampleValidator, sampledAt: v.number() },
+  handler: async (ctx, { sample, sampledAt }) => await recordSample(ctx, sample, sampledAt),
+});
+
+type SampleResult = ConcurrencySample & {
+  hour: "inserted" | "patched" | "unchanged";
+  allTime: "inserted" | "patched" | "unchanged";
+};
+
+/** Cron entry point: sample now (query), then fold it into concurrencyStats (mutation). */
+export const sampleAndRecord = internalAction({
   args: {},
-  handler: async (ctx) => {
+  handler: async (ctx): Promise<SampleResult> => {
     const now = Date.now();
-    const sample = await sampleConcurrency(ctx, now);
-    const result = await recordSample(ctx, sample, now);
+    const sample: ConcurrencySample = await ctx.runQuery(internal.concurrency.sampleNow, { now });
+    const result = await ctx.runMutation(internal.concurrency.recordSampleRows, {
+      sample,
+      sampledAt: now,
+    });
     return { ...sample, ...result };
   },
 });

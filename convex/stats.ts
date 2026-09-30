@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { query, type QueryCtx } from "./_generated/server";
-import { sampleConcurrency } from "./concurrency";
+import { readAllTimeRow, readLatestRow } from "./concurrency";
 import {
   COUNT_EVENT_TYPES,
   DETAIL_EVENT_TYPES,
@@ -61,24 +61,24 @@ export const checkKey = query({
   },
 });
 
-async function readAllTimeRecord(ctx: QueryCtx) {
-  return await ctx.db
-    .query("concurrencyStats")
-    .withIndex("by_kind_and_hourStart", (q) => q.eq("kind", "allTime").eq("hourStart", 0))
-    .unique();
-}
-
-/** Who is on right now, plus the all-time peak. */
+/**
+ * The latest stored concurrency sample plus the all-time peak. Reads two
+ * concurrencyStats rows and never samples rooms itself, so keeping it
+ * subscribed costs one re-run per cron sample. Values are null before the
+ * sampler has run once.
+ */
 export const getLive = query({
   args: { adminKey: v.string() },
   handler: async (ctx, { adminKey }) => {
     requireAdminKey(adminKey);
-    const now = Date.now();
-    const sample = await sampleConcurrency(ctx, now);
-    const record = await readAllTimeRecord(ctx);
+    const latest = await readLatestRow(ctx);
+    const record = await readAllTimeRow(ctx);
     return {
-      ...sample,
-      sampledAt: now,
+      playersOnline: latest?.playersOnline ?? null,
+      playersInGame: latest?.playersInGame ?? null,
+      activeRooms: latest?.activeRooms ?? null,
+      activeGames: latest?.activeGames ?? null,
+      sampledAt: latest?.updatedAt ?? null,
       allTimePeak: record
         ? {
             playersOnline: record.playersOnline,

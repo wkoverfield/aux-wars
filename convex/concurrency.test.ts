@@ -1,7 +1,7 @@
 import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
 import schema from "./schema";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import presenceComponent from "@convex-dev/presence/test";
 import {
   ACTIVE_ROOM_WINDOW_MS,
@@ -55,7 +55,8 @@ describe("recordSample", () => {
 
     let r = await t.run((ctx) => recordSample(ctx, s(0, 0, 0, 0), t0));
     expect(r).toEqual({ hour: "unchanged", allTime: "unchanged" });
-    expect(await allRows(t)).toHaveLength(0);
+    // Only the latest-sample row exists after an all-zero sample.
+    expect((await allRows(t)).map((x) => x.kind)).toEqual(["latest"]);
 
     r = await t.run((ctx) => recordSample(ctx, s(4, 2, 2, 1), t0 + 60_000));
     expect(r).toEqual({ hour: "inserted", allTime: "inserted" });
@@ -69,6 +70,8 @@ describe("recordSample", () => {
     expect(r).toEqual({ hour: "patched", allTime: "patched" });
 
     const rows = await allRows(t);
+    expect(rows.filter((x) => x.kind === "latest")).toHaveLength(1);
+    expect(rows.find((x) => x.kind === "latest")).toMatchObject({ playersOnline: 3, playersInGame: 3, updatedAt: t0 + 180_000 });
     const hour = rows.find((x) => x.kind === "hour") as Doc<"concurrencyStats">;
     const record = rows.find((x) => x.kind === "allTime") as Doc<"concurrencyStats">;
     expect(hour).toMatchObject({ date: "2026-09-01", hourUTC: 14, playersOnline: 4, playersInGame: 3 });
@@ -112,7 +115,7 @@ async function insertRoom(
   });
 }
 
-async function joinOnline(t: ReturnType<typeof setup>, code: string, playerId: string) {
+async function seat(t: ReturnType<typeof setup>, code: string, playerId: string) {
   await t.run(async (ctx) => {
     await ctx.db.insert("players", {
       roomCode: code,
@@ -122,28 +125,23 @@ async function joinOnline(t: ReturnType<typeof setup>, code: string, playerId: s
       isReady: false,
     });
   });
-  await t.mutation(api.presence.heartbeat, {
-    roomId: code,
-    userId: playerId,
-    sessionId: `session-${playerId}`,
-    interval: 30000,
-  });
 }
 
-test("sampleAndRecord counts online players by room phase", async () => {
+test("sampleAndRecord counts seated players by room phase", async () => {
   const t = setup();
   const now = Date.now();
   await insertRoom(t, "QALOBY", "lobby", now);
   await insertRoom(t, "QAGAME", "rating", now);
   await insertRoom(t, "QAOVER", "gameOver", now);
   await insertRoom(t, "QAOLD1", "rating", now - ACTIVE_ROOM_WINDOW_MS - HOUR);
-  await joinOnline(t, "QALOBY", "a");
-  await joinOnline(t, "QAGAME", "b");
-  await joinOnline(t, "QAGAME", "c");
-  await joinOnline(t, "QAOVER", "d");
-  await joinOnline(t, "QAOLD1", "e"); // outside the probe window: not counted
+  await seat(t, "QALOBY", "a");
+  await seat(t, "QAGAME", "b");
+  await seat(t, "QAGAME", "c");
+  await seat(t, "QAOVER", "d");
+  await seat(t, "QAOLD1", "e"); // quiet longer than the window: not counted
+  await insertRoom(t, "QAEMPT", "rating", now); // no seated players: not an active room
 
-  const result = await t.mutation(internal.concurrency.sampleAndRecord, {});
+  const result = await t.action(internal.concurrency.sampleAndRecord, {});
   expect(result).toMatchObject({
     playersOnline: 4,
     playersInGame: 2,
@@ -154,8 +152,11 @@ test("sampleAndRecord counts online players by room phase", async () => {
   });
 
   // Same moment again: the record is not rewritten.
-  const again = await t.mutation(internal.concurrency.sampleAndRecord, {});
-  expect(again).toMatchObject({ allTime: "unchanged" });
+  const again = await t.action(internal.concurrency.sampleAndRecord, {});
+  expect(again).toMatchObject({ hour: "unchanged", allTime: "unchanged" });
+  const latest = (await allRows(t)).filter((x) => x.kind === "latest");
+  expect(latest).toHaveLength(1);
+  expect(latest[0]).toMatchObject({ playersOnline: 4, playersInGame: 2, activeRooms: 3, activeGames: 1 });
 });
 
 test("sampleAndRecord finds live rooms past the scan cap", async () => {
@@ -191,11 +192,11 @@ test("sampleAndRecord finds live rooms past the scan cap", async () => {
     }
   });
   await insertRoom(t, "QALIVE", "rating", now);
-  await joinOnline(t, "QALIVE", "a");
-  await joinOnline(t, "QALIVE", "b");
-  await joinOnline(t, "QW0", "c"); // least recently active in-window room: past the cap
+  await seat(t, "QALIVE", "a");
+  await seat(t, "QALIVE", "b");
+  await seat(t, "QW0", "c"); // least recently active in-window room: past the cap
 
-  const result = await t.mutation(internal.concurrency.sampleAndRecord, {});
+  const result = await t.action(internal.concurrency.sampleAndRecord, {});
   expect(result).toMatchObject({
     playersOnline: 2,
     playersInGame: 2,

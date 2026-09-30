@@ -285,13 +285,16 @@ export default defineSchema({
   }).index("by_date", ["date"]),
 
   // --- Concurrency (see convex/concurrency.ts) ---
-  // Written by a 60s internal cron, only when a sample beats the stored max.
-  // kind "hour": one row per UTC hour holding that hour's max of each value.
+  // Written by a 60s internal cron. Never read by homepage or gameplay queries.
+  // kind "latest": a single row (hourStart 0) with the most recent sample,
+  // rewritten every run; updatedAt is when it was taken.
+  // kind "hour": one row per UTC hour holding that hour's max of each value,
+  // written only when a sample beats it.
   // kind "allTime": a single row (hourStart 0) holding the all-time record and
-  // when each value was set. Never read by homepage or gameplay queries.
+  // when each value was set, written only when a sample beats it.
   concurrencyStats: defineTable({
-    kind: v.union(v.literal("hour"), v.literal("allTime")),
-    hourStart: v.number(), // UTC ms at the start of the hour; 0 for allTime
+    kind: v.union(v.literal("hour"), v.literal("allTime"), v.literal("latest")),
+    hourStart: v.number(), // UTC ms at the start of the hour; 0 for allTime and latest
     date: v.optional(v.string()), // hour rows: UTC "YYYY-MM-DD"
     hourUTC: v.optional(v.number()), // hour rows: 0-23
     playersOnline: v.number(),
