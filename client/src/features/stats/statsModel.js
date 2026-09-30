@@ -359,15 +359,19 @@ export function fmtPct(value) {
   return `${pct < 10 && pct > 0 ? pct.toFixed(1) : Math.round(pct)}%`;
 }
 
+/** Absolute timestamp in UTC, matching the UTC-keyed rollups. */
 export function fmtDateTime(ms) {
   if (num(ms) === null) return EMPTY;
-  return new Date(ms).toLocaleString(undefined, {
+  const text = new Date(ms).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "UTC",
   });
+  return `${text} UTC`;
 }
 
 export function fmtShortDate(date) {

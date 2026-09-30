@@ -51,13 +51,24 @@ class StatsBoundary extends Component {
   }
 }
 
+/** How long a key check may take before the service counts as unreachable. */
+export const CHECK_TIMEOUT_MS = 10_000;
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("timeout")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 const MESSAGES = {
   rejected: "That key was not accepted.",
   expired: "The saved key stopped working. Paste the current one.",
   error: "Could not reach the stats service. Try again.",
 };
 
-function KeyPrompt({ onSubmit, checking, message }) {
+function KeyPrompt({ onSubmit, checking, checkingSaved, message }) {
   const [value, setValue] = useState("");
   const submit = (e) => {
     e.preventDefault();
@@ -90,6 +101,11 @@ function KeyPrompt({ onSubmit, checking, message }) {
           {checking ? "Checking…" : "Unlock"}
         </button>
       </div>
+      {checkingSaved && (
+        <p role="status" className="text-sm mt-4 text-gray-400">
+          Checking saved key…
+        </p>
+      )}
       {message && (
         <p role="alert" className={`text-sm mt-4 ${message === "error" ? "text-red-400" : "text-amber-400"}`}>
           {MESSAGES[message]}
@@ -113,13 +129,16 @@ export default function StatsPage() {
   const [adminKey, setAdminKey] = useState(null);
   const [message, setMessage] = useState(null);
   const [attempt, setAttempt] = useState(0);
+  const [checkingSaved, setCheckingSaved] = useState(Boolean(initialKey));
 
   const verify = useCallback(
     async (key, { fromStorage = false } = {}) => {
       setStatus("checking");
+      setCheckingSaved(fromStorage);
       setMessage(null);
       try {
-        const result = await convex.query(api.stats.checkKey, { adminKey: key });
+        const result = await withTimeout(convex.query(api.stats.checkKey, { adminKey: key }), CHECK_TIMEOUT_MS);
+        setCheckingSaved(false);
         if (result?.ok === true) {
           writeStoredKey(key);
           setAdminKey(key);
@@ -129,6 +148,7 @@ export default function StatsPage() {
         clearStoredKey();
         setMessage(fromStorage ? "expired" : "rejected");
       } catch {
+        setCheckingSaved(false);
         setMessage("error");
       }
       setStatus("prompt");
@@ -158,7 +178,7 @@ export default function StatsPage() {
     const key = adminKey;
     setStatus("checking");
     try {
-      const result = await convex.query(api.stats.checkKey, { adminKey: key });
+      const result = await withTimeout(convex.query(api.stats.checkKey, { adminKey: key }), CHECK_TIMEOUT_MS);
       if (result?.ok !== true) {
         clearStoredKey();
         setAdminKey(null);
@@ -185,7 +205,7 @@ export default function StatsPage() {
             <header className="flex items-center justify-between gap-3 mb-6">
               <div>
                 <h1 className="text-3xl font-bold">Aux Wars stats</h1>
-                <p className="text-sm text-gray-400">Counts from Convex rollups. Days are UTC.</p>
+                <p className="text-sm text-gray-400">Counts from Convex rollups. All days and times are UTC.</p>
               </div>
               <button
                 type="button"
@@ -214,7 +234,12 @@ export default function StatsPage() {
           </>
         ) : (
           <>
-            <KeyPrompt onSubmit={(key) => verify(key)} checking={status === "checking"} message={message} />
+            <KeyPrompt
+              onSubmit={(key) => verify(key)}
+              checking={status === "checking"}
+              checkingSaved={status === "checking" && checkingSaved}
+              message={message}
+            />
             <div className="text-center mt-8">
               <Link to="/" className="text-gray-400 underline text-sm">Back to Aux Wars</Link>
             </div>

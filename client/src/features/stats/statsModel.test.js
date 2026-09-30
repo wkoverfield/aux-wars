@@ -3,6 +3,7 @@ import {
   STATS_KEY_STORAGE,
   alignToWindow,
   clearStoredKey,
+  fmtDateTime,
   fmtInt,
   fmtPct,
   normalizeCounts,
@@ -223,6 +224,11 @@ describe("formatting", () => {
   it("never renders an em dash for empty values", () => {
     expect(fmtInt(null)).not.toContain("—");
     expect(fmtPct(undefined)).not.toContain("—");
+  });
+
+  it("formats timestamps in UTC and says so", () => {
+    expect(fmtDateTime(Date.parse("2026-09-30T20:05:00Z"))).toBe("Sep 30, 2026, 20:05 UTC");
+    expect(fmtDateTime(null)).not.toContain("UTC");
   });
 
   it("formats percentages", () => {

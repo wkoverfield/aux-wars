@@ -12,7 +12,7 @@ vi.mock("convex/react", () => ({
   useQuery: (...args) => useQuery(...args),
 }));
 
-const { default: StatsPage } = await import("./StatsPage");
+const { default: StatsPage, CHECK_TIMEOUT_MS } = await import("./StatsPage");
 
 function renderPage() {
   return render(
@@ -103,8 +103,8 @@ describe("StatsPage key gate", () => {
     renderPage();
 
     await screen.findByText("No peak recorded yet. The first sample lands within a minute of someone playing.");
-    expect(screen.getByText("Nothing recorded today yet.")).toBeTruthy();
-    expect(screen.getByText("No hourly samples yet.")).toBeTruthy();
+    expect(await screen.findByText("Nothing recorded today yet.")).toBeTruthy();
+    expect(await screen.findByText("No hourly samples yet.")).toBeTruthy();
     expect(document.body.textContent).not.toContain("—");
   });
 
@@ -141,5 +141,32 @@ describe("StatsPage key gate", () => {
     });
     expect(screen.getByText("Trends")).toBeTruthy();
     spy.mockRestore();
+  });
+
+  it("says a saved key is being checked", async () => {
+    localStorage.setItem(STATS_KEY_STORAGE, "right");
+    convexQuery.mockReturnValue(new Promise(() => {}));
+    renderPage();
+
+    expect(screen.getByText("Checking saved key…")).toBeTruthy();
+  });
+
+  it("shows the service error when the key check never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      convexQuery.mockReturnValue(new Promise(() => {}));
+      renderPage();
+      submitKey("right");
+      expect(screen.getByRole("button", { name: "Checking…" })).toBeTruthy();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CHECK_TIMEOUT_MS + 1);
+      });
+      expect(screen.getByText("Could not reach the stats service. Try again.")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Unlock" })).toBeTruthy();
+      expect(useQuery).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
