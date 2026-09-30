@@ -193,6 +193,7 @@ describe("convex/stats.ts payloads", () => {
         retention: { d1: 0.2, d7: null, d30: null, cohortSize: 50, cohorts: { d1: 50, d7: 0, d30: 0 } },
         funnel: { visited: 100, joined: 30, started: 20, completed: 12 },
         topNoResultSearches: [{ query: "obscure song", count: 2 }],
+        searches: { noResults: 2, failed: 5, failedByReason: [{ reason: "network", count: 4 }, { reason: "http_503", count: 1 }] },
         abandonmentByPhase: [{ phase: "lobby", count: 3 }],
       },
       7,
@@ -206,6 +207,14 @@ describe("convex/stats.ts payloads", () => {
     expect(d.retention.d7).toBeNull();
     expect(d.funnel.map((s) => s.value)).toEqual([100, 30, 20, 12]);
     expect(d.noResultSearches).toEqual([{ label: "obscure song", count: 2 }]);
+    expect(d.searches).toEqual({
+      noResults: 2,
+      failed: 5,
+      failedByReason: [
+        { label: "network", count: 4 },
+        { label: "http_503", count: 1 },
+      ],
+    });
     expect(d.abandonment).toEqual([{ label: "lobby", count: 3 }]);
   });
 });
@@ -216,6 +225,7 @@ describe("normalizeDashboard", () => {
     expect(d.days).toHaveLength(30);
     expect(d.hourly).toEqual([]);
     expect(d.noResultSearches).toEqual([]);
+    expect(d.searches).toEqual({ noResults: null, failed: null, failedByReason: [] });
     expect(d.abandonment).toEqual([]);
   });
 });

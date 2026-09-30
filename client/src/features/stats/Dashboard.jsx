@@ -214,14 +214,50 @@ function Funnel({ funnel, windowDays }) {
   );
 }
 
-function NoResultSearches({ rows }) {
+const FAIL_REASON_LABELS = {
+  network: "Network",
+  timeout: "Timed out",
+  bad_payload: "Bad response",
+  unknown: "Unknown",
+};
+
+function failReasonLabel(reason) {
+  if (FAIL_REASON_LABELS[reason]) return FAIL_REASON_LABELS[reason];
+  const http = /^http_(\d{3})$/.exec(reason);
+  return http ? `HTTP ${http[1]}` : reason;
+}
+
+function Searches({ searches, noResultRows, windowDays }) {
+  const { failed, failedByReason } = searches;
   return (
-    <Card title="Top searches with no results">
-      <RankedBars
-        rows={rows.slice(0, 10).map((r) => ({ key: r.label, label: r.label, value: r.count }))}
-        format={fmtInt}
-        emptyText="No empty searches in this window."
-      />
+    <Card title="Searches" aside={`last ${windowDays} days`}>
+      <div className="grid grid-cols-2 gap-5 mb-5">
+        <Stat label="No results" value={fmtInt(searches.noResults)} detail="Search worked, nothing matched" />
+        <Stat label="Failed" value={fmtInt(failed)} detail="Search service unreachable or errored" />
+      </div>
+      <div className="space-y-5">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-gray-300 mb-3">Failures by reason</h3>
+          <RankedBars
+            rows={failedByReason.map((r) => ({
+              key: r.label,
+              label: failReasonLabel(r.label),
+              value: r.count,
+              note: failed ? fmtPct(r.count / failed) : null,
+            }))}
+            format={fmtInt}
+            emptyText="No failed searches in this window."
+          />
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-gray-300 mb-3">Top searches with no results</h3>
+          <RankedBars
+            rows={noResultRows.slice(0, 10).map((r) => ({ key: r.label, label: r.label, value: r.count }))}
+            format={fmtInt}
+            emptyText="No empty searches in this window."
+          />
+        </div>
+      </div>
     </Card>
   );
 }
@@ -303,7 +339,7 @@ export default function Dashboard({ adminKey }) {
             <Funnel funnel={dashboard.funnel} windowDays={windowDays} />
             <Retention retention={dashboard.retention} />
             <Abandonment rows={dashboard.abandonment} />
-            <NoResultSearches rows={dashboard.noResultSearches} />
+            <Searches searches={dashboard.searches} noResultRows={dashboard.noResultSearches} windowDays={windowDays} />
           </div>
         </>
       )}

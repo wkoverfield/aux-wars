@@ -128,6 +128,7 @@ export function normalizeDay(row) {
     peakPlayersInGame: num(row.peakPlayersInGame),
     peakHourUTC: num(row.peakHourUTC),
     searchNoResults: num(row.searchNoResults),
+    searchFailed: num(row.searchFailed),
   };
 }
 
@@ -332,7 +333,18 @@ export function normalizeDashboard(raw, windowDays, nowMs = Date.now()) {
       src.topNoResultSearches ?? src.noResultSearches ?? src.searchNoResults,
       ["term", "label", "query"],
     ),
+    searches: normalizeSearches(src.searches),
     abandonment: normalizeCounts(src.abandonmentByPhase ?? src.abandonment, ["phase", "label"]),
+  };
+}
+
+/** Window totals of empty vs failed searches, with failures by reason. */
+export function normalizeSearches(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  return {
+    noResults: num(src.noResults),
+    failed: num(src.failed),
+    failedByReason: normalizeCounts(src.failedByReason, ["reason", "label"]),
   };
 }
 

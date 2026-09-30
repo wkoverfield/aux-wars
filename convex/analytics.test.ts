@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import presenceComponent from "@convex-dev/presence/test";
-import { LISTEN_MS_SAMPLES, LISTEN_MS_TOTAL } from "./analytics";
+import { LISTEN_MS_SAMPLES, LISTEN_MS_TOTAL, searchFailReason } from "./analytics";
 
 const modules = import.meta.glob(["./**/*.ts", "./**/*.js", "!./**/*.test.ts", "!./**/*.d.ts"]);
 const DAY = 24 * 60 * 60 * 1000;
@@ -144,6 +144,38 @@ describe("vote_listen", () => {
       });
       const stats = await t.query(internal.analytics.getListenTimeStats, {});
       expect(stats).toMatchObject({ count: 0, allTimeSamples: 3, allTimeAvgSec: 204 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("search_failed", () => {
+  test("searchFailReason keeps known classes only", () => {
+    for (const r of ["timeout", "network", "bad_payload", "http_503", "http_404"]) {
+      expect(searchFailReason(r)).toBe(r);
+    }
+    for (const r of [undefined, "", "http_5", "http_abc", "my song title", "network "]) {
+      expect(searchFailReason(r)).toBe("unknown");
+    }
+  });
+
+  test("logEvent stores only the sanitized reason", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup();
+      await t.mutation(api.analytics.logEvent, {
+        eventType: "search_failed",
+        metadata: { reason: "http_503", label: "query text must not be stored" },
+      });
+      await t.mutation(api.analytics.logEvent, { eventType: "search_failed", metadata: { reason: "<script>" } });
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+      const raw = await t.run(async (ctx) => ctx.db.query("analyticsEvents").collect());
+      expect(raw.map((e) => [e.eventType, e.metadata])).toEqual([
+        ["search_failed", { reason: "http_503" }],
+        ["search_failed", { reason: "unknown" }],
+      ]);
     } finally {
       vi.useRealTimers();
     }

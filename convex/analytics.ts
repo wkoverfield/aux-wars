@@ -17,13 +17,25 @@ const eventMetadata = v.optional(v.object({
   label: v.optional(v.string()),
   phase: v.optional(v.string()),
   visitorId: v.optional(v.string()), // opaque client visitor id (retention linkage)
+  reason: v.optional(v.string()), // search_failed: see searchFailReason
 }));
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const SEARCH_FAIL_REASON_RE = /^(timeout|network|bad_payload|http_\d{3})$/;
+
+/**
+ * Failure class of a client music search: "timeout", "network",
+ * "bad_payload" or "http_<status>". Anything else reads "unknown".
+ */
+export function searchFailReason(reason: unknown): string {
+  return typeof reason === "string" && SEARCH_FAIL_REASON_RE.test(reason) ? reason : "unknown";
+}
+
 const PUBLIC_EVENT_TYPES = new Set([
   "pro_cta_viewed",
   "pro_checkout_started",
+  "search_failed",
   "search_no_results",
   "session_start",
   "vote_listen",
@@ -91,6 +103,10 @@ export const logEvent = mutation({
   handler: async (ctx, { eventType, metadata }) => {
     if (!PUBLIC_EVENT_TYPES.has(eventType)) {
       return { success: false, message: "Unsupported event type" } as const;
+    }
+    if (eventType === "search_failed") {
+      // Only the failure class is kept: never query text or other fields.
+      metadata = { reason: searchFailReason(metadata?.reason) };
     }
     await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, { eventType, metadata });
     return { success: true } as const;

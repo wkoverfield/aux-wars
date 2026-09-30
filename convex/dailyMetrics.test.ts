@@ -31,6 +31,7 @@ function emptyEvents(): DayEvents {
       game_abandoned: [],
       player_joined: [],
       search_no_results: [],
+      search_failed: [],
     },
     counts: { game_created: 0, song_submitted: 0, rating_submitted: 0, pro_purchased: 0 },
   };
@@ -139,6 +140,29 @@ describe("computeDayMetrics", () => {
       newVisitors: 8,
       returningVisitors: 12,
     });
+  });
+
+  test("counts failed searches by reason, separately from empty results", () => {
+    const ev = emptyEvents();
+    ev.detail.search_no_results = [{ label: "a" }];
+    ev.detail.search_failed = [
+      { reason: "network" },
+      { reason: "network" },
+      { reason: "timeout" },
+      { reason: "http_503" },
+      { reason: "junk value" },
+      {},
+    ];
+    const row = computeDayMetrics(inputs({ events: ev }));
+    expect(row.searchNoResults).toBe(1);
+    expect(row.searchFailed).toBe(6);
+    expect(row.searchFailedByReason).toEqual({ network: 2, timeout: 1, http_503: 1, unknown: 2 });
+  });
+
+  test("no failed searches reads zero with an empty breakdown", () => {
+    const row = computeDayMetrics(inputs());
+    expect(row.searchFailed).toBe(0);
+    expect(row.searchFailedByReason).toEqual({});
   });
 
   test("completion rate is capped at 1 when games started the day before finish", () => {

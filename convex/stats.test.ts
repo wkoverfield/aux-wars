@@ -159,6 +159,8 @@ describe("stats queries", () => {
         date: addDays(today, -2),
         abandonedByPhase: { rating: 1 },
         topNoResultSearches: [{ query: "song a", count: 2 }],
+        searchFailed: 3,
+        searchFailedByReason: { network: 2, timeout: 1 },
         hourlyPeaks: [{ hourUTC: 20, playersOnline: 2, playersInGame: 2 }],
         retention: { d1: { cohort: 3, returned: 1 } },
       });
@@ -170,6 +172,8 @@ describe("stats queries", () => {
           { query: "song a", count: 1 },
           { query: "song b", count: 5 },
         ],
+        searchFailed: 1,
+        searchFailedByReason: { http_503: 1 },
         hourlyPeaks: [{ hourUTC: 20, playersOnline: 4, playersInGame: 1 }],
         retention: { d1: { cohort: 1, returned: 1 } },
       });
@@ -193,6 +197,16 @@ describe("stats queries", () => {
       { query: "song b", count: 5 },
       { query: "song a", count: 3 },
     ]);
+    // Rows without the optional search-failure fields count as zero.
+    expect(d.searches).toEqual({
+      noResults: 2,
+      failed: 4,
+      failedByReason: [
+        { reason: "network", count: 2 },
+        { reason: "http_503", count: 1 },
+        { reason: "timeout", count: 1 },
+      ],
+    });
     expect(d.abandonmentByPhase).toEqual([
       { phase: "rating", count: 3 },
       { phase: "lobby", count: 1 },

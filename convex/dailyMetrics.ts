@@ -9,6 +9,7 @@ import {
 import { internal } from "./_generated/api";
 import { dailyMetricsFields } from "./schema";
 import { readCounter } from "./siteStats";
+import { searchFailReason } from "./analytics";
 
 /**
  * Permanent daily rollups.
@@ -48,6 +49,7 @@ export const DETAIL_EVENT_TYPES = [
   "game_abandoned",
   "player_joined",
   "search_no_results",
+  "search_failed",
 ] as const;
 export const COUNT_EVENT_TYPES = [
   "game_created",
@@ -66,6 +68,7 @@ export type SlimEvent = {
   playerCount?: number;
   phase?: string;
   label?: string;
+  reason?: string;
 };
 
 export function slimEvent(metadata: unknown): SlimEvent {
@@ -77,6 +80,7 @@ export function slimEvent(metadata: unknown): SlimEvent {
   if (typeof m.playerCount === "number") out.playerCount = m.playerCount;
   if (typeof m.phase === "string") out.phase = m.phase;
   if (typeof m.label === "string") out.label = m.label;
+  if (typeof m.reason === "string") out.reason = m.reason;
   return out;
 }
 
@@ -190,6 +194,12 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
     .slice(0, TOP_SEARCHES_PER_DAY)
     .map(([query, count]) => ({ query, count }));
 
+  const searchFailedByReason: Record<string, number> = {};
+  for (const e of detail.search_failed) {
+    const k = searchFailReason(e.reason);
+    searchFailedByReason[k] = (searchFailedByReason[k] ?? 0) + 1;
+  }
+
   let peakPlayersOnline: number | null = null;
   let peakPlayersInGame: number | null = null;
   let peakHourUTC: number | null = null;
@@ -243,6 +253,8 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
     proPurchases: counts.pro_purchased,
     searchNoResults: detail.search_no_results.length,
     topNoResultSearches,
+    searchFailed: detail.search_failed.length,
+    searchFailedByReason,
     hourlyPeaks,
   };
 }

@@ -203,6 +203,20 @@ export const getDashboard = query({
         phases.set(phase, (phases.get(phase) ?? 0) + count);
       }
     }
+    let searchNoResults = 0;
+    let searchFailed = 0;
+    const failReasons = new Map<string, number>();
+    for (const r of rows) {
+      searchNoResults += r.searchNoResults;
+      searchFailed += r.searchFailed ?? 0;
+      for (const [reason, count] of Object.entries(r.searchFailedByReason ?? {})) {
+        failReasons.set(reason, (failReasons.get(reason) ?? 0) + count);
+      }
+    }
+    const searchFailedByReason = [...failReasons.entries()]
+      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+      .map(([reason, count]) => ({ reason, count }));
+
     const topNoResultSearches = [...searches.entries()]
       .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
       .slice(0, 15)
@@ -224,6 +238,7 @@ export const getDashboard = query({
       },
       funnel,
       topNoResultSearches,
+      searches: { noResults: searchNoResults, failed: searchFailed, failedByReason: searchFailedByReason },
       abandonmentByPhase,
     };
   },

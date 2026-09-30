@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 // import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { searchTracks, getCachedResults } from "../../services/musicSearch";
+import { searchTracks, getCachedResults, SearchError } from "../../services/musicSearch";
 import { captureGameEvent, gameProperties } from "../../services/analytics";
 import { useToast } from "../../contexts/ToastContext";
 import RoundStart from "./RoundStart";
@@ -262,33 +262,31 @@ export default function Round() {
         const result = await searchTracks(searchTerm);
         if (cancelled) return;
 
-        if (Array.isArray(result)) {
-          setSearchResults(result);
-          if (result.length === 0) {
-            setSearchError("No songs found. Try different keywords.");
-            // Catalog-gap signal: which searches our sources can't fill.
-            if (searchTerm.trim().length >= 3) {
-              logEvent({ eventType: "search_no_results", metadata: { label: searchTerm.trim().slice(0, 80) } });
-              captureGameEvent("song_search_no_results", gameProperties({
-                code: gameCode,
-                room,
-                session,
-                extra: { query_length: searchTerm.trim().length },
-              }));
-            }
-          } else {
-            setSearchError(null);
+        setSearchResults(result);
+        if (result.length === 0) {
+          setSearchError("No songs found. Try different keywords.");
+          // Catalog-gap signal: which searches our sources can't fill. Only a
+          // well-formed empty answer counts; failures are logged below.
+          if (searchTerm.trim().length >= 3) {
+            logEvent({ eventType: "search_no_results", metadata: { label: searchTerm.trim().slice(0, 80) } });
+            captureGameEvent("song_search_no_results", gameProperties({
+              code: gameCode,
+              room,
+              session,
+              extra: { query_length: searchTerm.trim().length },
+            }));
           }
         } else {
-          setSearchError("Search service temporarily unavailable. Please try again.");
-          setSearchResults([]);
+          setSearchError(null);
         }
-      } catch {
+      } catch (err) {
         if (cancelled) return;
-        setSearchError("Connection issue. Please check your internet and try again.");
-        // Keep existing results if we have cached ones
-        if (!cachedResults || cachedResults.length === 0) {
-          setSearchResults([]);
+        // The search itself failed (timeout, network, HTTP error, bad payload)
+        // and nothing was cached for this query.
+        setSearchError("Search service temporarily unavailable. Please try again.");
+        setSearchResults([]);
+        if (err instanceof SearchError && !err.fromBackoff) {
+          logEvent({ eventType: "search_failed", metadata: { reason: err.reason } });
         }
       } finally {
         if (!cancelled) setIsSearching(false);

@@ -35,6 +35,11 @@ export const dailyMetricsFields = {
   proPurchases: v.number(),
   searchNoResults: v.number(),
   topNoResultSearches: v.array(v.object({ query: v.string(), count: v.number() })),
+  // Client searches that failed (timeout, network, HTTP error, bad payload),
+  // distinct from searchNoResults. Optional: rows rolled up before
+  // search_failed existed do not have them.
+  searchFailed: v.optional(v.number()),
+  searchFailedByReason: v.optional(v.record(v.string(), v.number())),
   // That day's per-UTC-hour concurrency maxes (hours with no players omitted).
   hourlyPeaks: v.array(
     v.object({ hourUTC: v.number(), playersOnline: v.number(), playersInGame: v.number() })
