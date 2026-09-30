@@ -8,6 +8,7 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { dailyMetricsFields } from "./schema";
+import { readCounter } from "./siteStats";
 
 /**
  * Permanent daily rollups.
@@ -330,14 +331,10 @@ export async function readEventsCapped(
 }
 
 export async function readPageviewDay(ctx: QueryCtx, date: string) {
-  const read = async (key: string) =>
-    (
-      await ctx.db
-        .query("pageviewCounters")
-        .withIndex("by_key", (q) => q.eq("key", key))
-        .first()
-    )?.count ?? 0;
-  return { pageviews: await read(`day:${date}`), uniqueVisitors: await read(`uvday:${date}`) };
+  return {
+    pageviews: await readCounter(ctx, `day:${date}`),
+    uniqueVisitors: await readCounter(ctx, `uvday:${date}`),
+  };
 }
 
 /**
@@ -612,10 +609,12 @@ export const rollupYesterday = internalAction({
 });
 
 /**
- * One-off backfill: schedules rollupDay for every full date still covered by
- * raw analyticsEvents, oldest first, up to yesterday. The oldest date on hand
- * is skipped because the 90-day prune cuts it mid-day. Dates older than the
- * raw window are left absent rather than estimated.
+ * One-off backfill: schedules rollupDay for every date that still has raw
+ * analyticsEvents, oldest first, up to yesterday. Run it BEFORE the raw-event
+ * cleanup drains old rows (the cleanup also refuses to delete days without a
+ * rollup row). The oldest date may be partial if an earlier prune cut it
+ * mid-day; its row reflects the events on hand. Dates with no raw events are
+ * left absent rather than estimated.
  * Run siteStats:backfillVisitorFirstSeen first so visitor history exists.
  */
 export const backfillDailyMetrics = internalMutation({
@@ -628,7 +627,7 @@ export const backfillDailyMetrics = internalMutation({
     const oldest = await ctx.db.query("analyticsEvents").withIndex("by_timestamp").order("asc").first();
     if (!oldest) return { scheduled: 0, from: null, to: null };
     const now = Date.now();
-    const firstFull = addDays(dstr(oldest.timestamp), 1);
+    const firstFull = dstr(oldest.timestamp);
     const yesterday = dstr(now - DAY_MS);
     const start = from && DATE_RE.test(from) && from > firstFull ? from : firstFull;
     const end = to && DATE_RE.test(to) && to < yesterday ? to : yesterday;

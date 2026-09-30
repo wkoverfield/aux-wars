@@ -1,0 +1,151 @@
+import { convexTest } from "convex-test";
+import { describe, expect, test, vi } from "vitest";
+import schema from "./schema";
+import { api, internal } from "./_generated/api";
+import presenceComponent from "@convex-dev/presence/test";
+import { LISTEN_MS_SAMPLES, LISTEN_MS_TOTAL } from "./analytics";
+
+const modules = import.meta.glob(["./**/*.ts", "./**/*.js", "!./**/*.test.ts", "!./**/*.d.ts"]);
+const DAY = 24 * 60 * 60 * 1000;
+
+function setup() {
+  const t = convexTest(schema, modules);
+  presenceComponent.register(t, "presence");
+  return t;
+}
+
+const dateOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const dayStart = (ms: number) => Math.floor(ms / DAY) * DAY;
+
+async function insertEvents(t: ReturnType<typeof setup>, timestamps: number[]) {
+  await t.run(async (ctx) => {
+    for (const timestamp of timestamps) {
+      await ctx.db.insert("analyticsEvents", { eventType: "rating_submitted", timestamp });
+    }
+  });
+}
+
+async function markRolledUp(t: ReturnType<typeof setup>, dates: string[]) {
+  await t.run(async (ctx) => {
+    for (const date of dates) {
+      await ctx.db.insert("dailyMetrics", {
+        date,
+        computedAt: 0,
+        gamesCreated: 0,
+        gamesStarted: 0,
+        gamesCompleted: 0,
+        gamesAbandoned: 0,
+        abandonedByPhase: {},
+        completionRate: null,
+        playerJoins: 0,
+        uniquePlayers: 0,
+        joinsWithVisitorId: 0,
+        playersInStartedGames: 0,
+        playersInCompletedGames: 0,
+        playerSeatsCompleted: 0,
+        avgPlayersPerGame: null,
+        p90PlayersPerGame: null,
+        maxPlayersPerGame: null,
+        songsSubmitted: 0,
+        ratingsSubmitted: 0,
+        pageviews: 0,
+        uniqueVisitors: 0,
+        newVisitors: null,
+        returningVisitors: null,
+        newVisitorsPlayed: null,
+        newPlayers: null,
+        peakPlayersOnline: null,
+        peakPlayersInGame: null,
+        peakHourUTC: null,
+        proPurchases: 0,
+        searchNoResults: 0,
+        topNoResultSearches: [],
+        hourlyPeaks: [],
+      });
+    }
+  });
+}
+
+const remaining = (t: ReturnType<typeof setup>) =>
+  t.run(async (ctx) => (await ctx.db.query("analyticsEvents").collect()).map((e) => e.timestamp).sort());
+
+describe("cleanupOldEvents", () => {
+  test("drains a backlog in batches until nothing old is left", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup();
+      const now = Date.now();
+      const oldDay1 = dayStart(now - 100 * DAY);
+      const oldDay2 = oldDay1 + DAY;
+      const old = [
+        ...Array.from({ length: 13 }, (_, i) => oldDay1 + i * 1000),
+        ...Array.from({ length: 12 }, (_, i) => oldDay2 + i * 1000),
+      ];
+      const fresh = [now - DAY, now - 2 * DAY];
+      await insertEvents(t, [...old, ...fresh]);
+      await markRolledUp(t, [dateOf(oldDay1), dateOf(oldDay2)]);
+
+      const first = await t.mutation(internal.analytics.cleanupOldEvents, { retentionDays: 90, batchSize: 10 });
+      expect(first).toMatchObject({ deleted: 10, more: true });
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+      expect(await remaining(t)).toEqual([...fresh].sort());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("never deletes a day that has no rollup row", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup();
+      const now = Date.now();
+      const d1 = dayStart(now - 100 * DAY);
+      const d2 = d1 + DAY; // not rolled up
+      const d3 = d1 + 2 * DAY; // rolled up, but after the gap
+      await insertEvents(t, [d1 + 5, d2 + 5, d3 + 5]);
+      await markRolledUp(t, [dateOf(d1), dateOf(d3)]);
+
+      const res = await t.mutation(internal.analytics.cleanupOldEvents, { retentionDays: 90 });
+      expect(res).toMatchObject({ deleted: 1, before: d2, more: false });
+      expect(await remaining(t)).toEqual([d2 + 5, d3 + 5]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("with no rollups at all it deletes nothing", async () => {
+    const t = setup();
+    await insertEvents(t, [Date.now() - 200 * DAY]);
+    const res = await t.mutation(internal.analytics.cleanupOldEvents, { retentionDays: 90 });
+    expect(res.deleted).toBe(0);
+  });
+});
+
+describe("vote_listen", () => {
+  test("counts in aggregates without writing raw rows", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup();
+      await t.mutation(api.analytics.logEvent, { eventType: "vote_listen", metadata: { value: 4000 } });
+      await t.mutation(api.analytics.logEvent, { eventType: "vote_listen", metadata: { value: 8000 } });
+      await t.mutation(api.analytics.logEvent, { eventType: "vote_listen", metadata: { value: 1e12 } });
+      await t.mutation(api.analytics.logEvent, { eventType: "vote_listen" });
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+      const raw = await t.run(async (ctx) => ctx.db.query("analyticsEvents").collect());
+      expect(raw).toHaveLength(0);
+      const aggs = await t.run(async (ctx) => ctx.db.query("analyticsAggregates").collect());
+      const byType = Object.fromEntries(aggs.map((a) => [a.eventType, a.count]));
+      expect(byType).toEqual({
+        vote_listen: 4,
+        [LISTEN_MS_TOTAL]: 4000 + 8000 + 600000, // third value clamped to 10 minutes
+        [LISTEN_MS_SAMPLES]: 3,
+      });
+      const stats = await t.query(internal.analytics.getListenTimeStats, {});
+      expect(stats).toMatchObject({ count: 0, allTimeSamples: 3, allTimeAvgSec: 204 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

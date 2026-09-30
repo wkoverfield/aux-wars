@@ -251,10 +251,18 @@ export default defineSchema({
 
   // --- Site stats (pageview analytics) ---
   // Cumulative counters keyed by "total" | "path:<p>" | "day:<YYYY-MM-DD>" | "uvday:<YYYY-MM-DD>".
+  // Sharded: a key's value is the SUM of its rows. Each write lands on one of
+  // PAGEVIEW_SHARDS rows chosen at random, so concurrent pageviews do not all
+  // conflict on one document. Rows without `shard` predate sharding and count
+  // as shard 0 (folded by siteStats:migratePageviewShards). Read through
+  // readCounter / readAllCounters in siteStats.ts, never with .first().
   pageviewCounters: defineTable({
     key: v.string(),
     count: v.number(),
-  }).index("by_key", ["key"]),
+    shard: v.optional(v.number()),
+  })
+    .index("by_key", ["key"])
+    .index("by_key_and_shard", ["key", "shard"]),
 
   // Per-day unique-visitor dedup rows (pruned > 120 days by cron).
   pageviewVisits: defineTable({

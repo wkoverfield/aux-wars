@@ -1,4 +1,5 @@
 import { internalMutation, internalQuery } from "./_generated/server";
+import { readCounter as readShardedCounter } from "./siteStats";
 
 const dstr = (ms: number) => new Date(ms).toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 
@@ -30,13 +31,7 @@ export const snapshotDailyMetrics = internalMutation({
     }
 
     // Permanent pageview counters: all-time total plus today's views/uniques.
-    const readCounter = async (key: string) => {
-      const row = await ctx.db
-        .query("pageviewCounters")
-        .withIndex("by_key", (q) => q.eq("key", key))
-        .first();
-      return row?.count ?? 0;
-    };
+    const readCounter = (key: string) => readShardedCounter(ctx, key);
     metrics["pageviews:total"] = await readCounter("total");
     metrics["pageviews:day"] = await readCounter(`day:${date}`);
     metrics["pageviews:uvday"] = await readCounter(`uvday:${date}`);

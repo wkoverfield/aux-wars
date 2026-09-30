@@ -190,8 +190,10 @@ describe("rollupDay", () => {
       await ev("game_started", at(D, 0) - 1, { roomCode: "QABFOR", playerCount: 9 });
       await ev("game_started", at(D, 24), { roomCode: "QAAFTR", playerCount: 9 });
 
-      await ctx.db.insert("pageviewCounters", { key: `day:${D}`, count: 12 });
-      await ctx.db.insert("pageviewCounters", { key: `uvday:${D}`, count: 3 });
+      // day: split across a legacy row and a shard; uvday: one shard.
+      await ctx.db.insert("pageviewCounters", { key: `day:${D}`, count: 5 });
+      await ctx.db.insert("pageviewCounters", { key: `day:${D}`, count: 7, shard: 3 });
+      await ctx.db.insert("pageviewCounters", { key: `uvday:${D}`, count: 3, shard: 0 });
 
       // Visitor history: v-old first seen long before D; v-new and v-bounce new on D.
       await ctx.db.insert("visitorFirstSeen", { visitorId: "v-old", firstSeenDate: addDays(D, -40), firstPlayedDate: addDays(D, -40) });
@@ -316,23 +318,24 @@ describe("rollupDay", () => {
     await expect(t.action(internal.dailyMetrics.rollupDay, { date: "2026-13-40" })).rejects.toThrow();
   });
 
-  test("backfill schedules every full raw-window day up to yesterday", async () => {
+  test("backfill schedules every day with raw events up to yesterday", async () => {
     // Fake timers keep the scheduled rollups from running after the test.
     vi.useFakeTimers();
     try {
       const t = setup();
-      const oldest = dayStartMs(addDays(dstr(Date.now()), -5)) + 12 * HOUR; // mid-day: partial
+      const oldest = dayStartMs(addDays(dstr(Date.now()), -5)) + 12 * HOUR;
       await t.run(async (ctx) => {
         await ctx.db.insert("analyticsEvents", { eventType: "game_created", timestamp: oldest });
       });
       const res = await t.mutation(internal.dailyMetrics.backfillDailyMetrics, { spacingMs: 0 });
       expect(res).toEqual({
-        scheduled: 4,
-        from: addDays(dstr(Date.now()), -4),
+        scheduled: 5,
+        from: addDays(dstr(Date.now()), -5),
         to: addDays(dstr(Date.now()), -1),
       });
       const scheduled = await t.run(async (ctx) => ctx.db.system.query("_scheduled_functions").collect());
       expect(scheduled.map((s) => s.args[0].date)).toEqual([
+        addDays(dstr(Date.now()), -5),
         addDays(dstr(Date.now()), -4),
         addDays(dstr(Date.now()), -3),
         addDays(dstr(Date.now()), -2),
