@@ -3,7 +3,7 @@ import { internal } from "../_generated/api";
 import { presence } from "../presence";
 import { removePublicPlayer, settlePublicRoom } from "./publicRooms";
 import { gameEpochOf } from "./roomOps";
-import { PUBLIC_WAITING_TIMEOUT_MS } from "./quickPlayRules";
+import { PUBLIC_IN_GAME_OFFLINE_MS, PUBLIC_WAITING_TIMEOUT_MS } from "./quickPlayRules";
 
 function now() { return Date.now(); }
 
@@ -82,13 +82,16 @@ export const cleanupInactivePlayers = internalMutation({
       const entries = await presence.listRoom(ctx, roomCode, false);
       const presenceByUser = new Map(entries.map((e) => [e.userId, e]));
 
-      // Quick Play rooms that are waiting (lobby, or game over before the
-      // auto-rematch) drop offline players much sooner: strangers rarely come
-      // back, and a ghost would hold a seat and count toward the countdown.
-      const roomCutoff =
-        room.isPublic && (room.phase === "lobby" || room.phase === "gameOver")
+      // Quick Play rooms drop offline players much sooner: strangers rarely
+      // come back. A waiting room (lobby, or game over before the
+      // auto-rematch) allows for tab switching while waiting for a match; a
+      // running game removes a ghost quickly so the game re-settles (back to
+      // the lobby when under 2 remain).
+      const roomCutoff = !room.isPublic
+        ? cutoff
+        : room.phase === "lobby" || room.phase === "gameOver"
           ? now() - PUBLIC_WAITING_TIMEOUT_MS
-          : cutoff;
+          : now() - PUBLIC_IN_GAME_OFFLINE_MS;
 
       const stalePlayers = roomPlayers.filter((player) => {
         const entry = presenceByUser.get(player.playerId);

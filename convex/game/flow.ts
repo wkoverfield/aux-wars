@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
-import { internalMutation, mutation, query } from "../_generated/server";
+import { internalMutation, mutation, query, type MutationCtx } from "../_generated/server";
+import type { Doc } from "../_generated/dataModel";
 import {
   PROMPT_VOTING_MS,
   advanceToNextRound,
@@ -10,7 +11,7 @@ import {
   pickPrompt,
   wipeGameData,
 } from "./roomOps";
-import { startPublicRematch } from "./publicRooms";
+import { pendingPlayers, startPublicRematch } from "./publicRooms";
 import { AUTO_ADVANCE_MS, AUTO_REMATCH_MS } from "./quickPlayRules";
 // Note: internal.analytics.trackEvent is used for fire-and-forget analytics tracking
 // Public (Quick Play) rooms have no host: their start, round advance and
@@ -153,24 +154,7 @@ export const submitSong = mutation({
       metadata: { roomCode: code, roundNumber: room.currentRound },
     });
 
-    const subs = await ctx.db
-      .query("submissions")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
-      .order("asc")
-      .collect();
-
-    // Robust unique-submitter check
-    const submittedPlayerIds = new Set(subs.map((s) => s.playerId));
-    const allSubmitted = players.every((p: any) => submittedPlayerIds.has(p.playerId));
-
-    if (allSubmitted) {
-      // Use scheduler to avoid direct mutation-to-mutation call
-      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, {
-        code,
-        round: room.currentRound,
-        epoch: gameEpochOf(room),
-      });
-    }
+    await startRatingIfAllSubmitted(ctx, room, players);
 
     return { success: true };
   },
@@ -1038,38 +1022,90 @@ export const advanceRating = internalMutation({
       timedOut: true,
       epoch: gameEpochOf(room),
     });
+    // In a public game nobody present may be left to rate this song (everyone
+    // else dropped out); move on now rather than waiting out the timer.
+    if (room.isPublic) await advanceIfAllRated(ctx, room);
   },
 });
 
+/**
+ * Moves to the next song once every player the room still waits on (see
+ * pendingPlayers: everyone in a private room, present players in a public
+ * one) has rated the current song. The submitter does not rate their own.
+ */
+async function advanceIfAllRated(ctx: MutationCtx, room: Doc<"rooms">) {
+  const code = room.code;
+  const subs = await ctx.db
+    .query("submissions")
+    .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+    .order("asc")
+    .collect();
+  const idx = room.currentRatingIndex ?? 0;
+  const current = subs[idx];
+  if (!current) return;
+  const ratings = await ctx.db
+    .query("ratings")
+    .withIndex("by_song", (q) => q.eq("songId", current._id))
+    .collect();
+  const rated = new Set(ratings.filter((r) => r.rating > 0).map((r) => r.voterId));
+  const voters = (await getPlayers(ctx, code)).filter((p: any) => p.playerId !== current.playerId);
+  const { pending, recheckAt } = await pendingPlayers(ctx, room, voters, (p) => rated.has(p.playerId));
+  if (pending.length === 0) {
+    await ctx.db.patch(room._id, { currentRatingIndex: idx + 1, lastActivityAt: now() });
+    await ctx.scheduler.runAfter(200, internal.game.flow.advanceRating, {
+      code,
+      round: room.currentRound,
+      ratingIndex: idx + 1,
+      timedOut: false,
+      epoch: gameEpochOf(room),
+    });
+  } else if (recheckAt !== undefined) {
+    await ctx.scheduler.runAfter(Math.max(0, recheckAt - now()), internal.game.flow.maybeAdvanceOnAllVotes, { code });
+  }
+}
+
+/**
+ * Starts rating once every player the room still waits on (see
+ * pendingPlayers) has submitted for the current round.
+ */
+async function startRatingIfAllSubmitted(ctx: MutationCtx, room: Doc<"rooms">, players: Doc<"players">[]) {
+  const subs = await ctx.db
+    .query("submissions")
+    .withIndex("by_room_round", (q) => q.eq("roomCode", room.code).eq("round", room.currentRound))
+    .collect();
+  if (subs.length === 0) return; // the selection timer handles an empty round
+  const submitted = new Set(subs.map((s) => s.playerId));
+  const { pending, recheckAt } = await pendingPlayers(ctx, room, players, (p) => submitted.has(p.playerId));
+  const args = { code: room.code, round: room.currentRound, epoch: gameEpochOf(room) };
+  if (pending.length === 0) {
+    await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, args);
+  } else if (recheckAt !== undefined) {
+    await ctx.scheduler.runAfter(
+      Math.max(0, recheckAt - now()),
+      internal.game.flow.maybeStartRatingOnAllSubmitted,
+      args
+    );
+  }
+}
+
+/** Re-runs the "everyone rated" check (after a rating, a departure, or a lapsed grace). */
 export const maybeAdvanceOnAllVotes = internalMutation({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {
     const room = await getRoom(ctx, code);
     if (!room || room.phase !== "rating") return;
-    const players = await getPlayers(ctx, code);
-    const subs = await ctx.db
-      .query("submissions")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
-      .collect();
-    const idx = room.currentRatingIndex ?? 0;
-    const current = subs[idx];
-    if (!current) return;
-    const ratings = await ctx.db
-      .query("ratings")
-      .withIndex("by_song", (q) => q.eq("songId", current._id))
-      .collect();
-    const eligibleVoters = players.length - 1; // submitter doesn't vote
-    const validVotes = ratings.filter((r) => r.rating > 0).length;
-    if (validVotes >= eligibleVoters) {
-      await ctx.db.patch(room._id, { currentRatingIndex: idx + 1, lastActivityAt: now() });
-      await ctx.scheduler.runAfter(200, internal.game.flow.advanceRating, {
-        code,
-        round: room.currentRound,
-        ratingIndex: idx + 1,
-        timedOut: false,
-        epoch: gameEpochOf(room),
-      });
-    }
+    await advanceIfAllRated(ctx, room);
+  },
+});
+
+/** Re-runs the "everyone submitted" check for this round of this game. */
+export const maybeStartRatingOnAllSubmitted = internalMutation({
+  args: { code: v.string(), round: v.number(), epoch: v.optional(v.number()) },
+  handler: async (ctx, { code, round, epoch }) => {
+    const room = await getRoom(ctx, code);
+    if (!room || room.phase !== "songSelection" || room.currentRound !== round) return;
+    if (!isCurrentGame(room, epoch)) return;
+    await startRatingIfAllSubmitted(ctx, room, await getPlayers(ctx, code));
   },
 });
 

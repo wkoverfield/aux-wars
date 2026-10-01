@@ -34,6 +34,20 @@ export const JOIN_REMATCH_MARGIN_MS = 3_000;
  * tabs while waiting for a match.
  */
 export const PUBLIC_WAITING_TIMEOUT_MS = 3 * 60 * 1000;
+/**
+ * In a running Quick Play game, a player the presence component has reported
+ * offline for longer than this is no longer waited on: "everyone submitted"
+ * and "everyone rated" are judged without them, so the game moves on instead
+ * of running out each timer. Long enough to cover a page refresh or a quick
+ * tab switch (presence flips a hidden or closed tab offline at once).
+ */
+export const PUBLIC_IN_GAME_GRACE_MS = 20_000;
+/**
+ * A player in a running Quick Play game the presence component has reported
+ * offline for longer than this is removed by the cleanup cron (instead of the
+ * private-room grace window).
+ */
+export const PUBLIC_IN_GAME_OFFLINE_MS = 90_000;
 
 /** Fixed settings of every Quick Play room. */
 export function quickPlaySettings() {

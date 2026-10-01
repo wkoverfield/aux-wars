@@ -11,6 +11,8 @@ import {
   AUTO_REMATCH_MS,
   COUNTDOWN_MS,
   ONE_V_ONE_OFFER_MS,
+  PUBLIC_IN_GAME_GRACE_MS,
+  PUBLIC_IN_GAME_OFFLINE_MS,
   PUBLIC_WAITING_TIMEOUT_MS,
   generateFunName,
   quickPlaySettings,
@@ -827,5 +829,190 @@ describe("disconnected players", () => {
     await advance(t, COUNTDOWN_MS);
     expect((await room(t, code))!.phase).toBe("promptVoting");
     expect(await players(t, code)).toHaveLength(3);
+  });
+});
+
+describe("dropouts in a running public game", () => {
+  const track = (playerId: string) => ({
+    trackId: `qa-${playerId}`,
+    trackDetails: { name: `QA ${playerId}`, artist: "QA Artist", albumCover: "", previewUrl: "https://example.test/a.mp3" },
+  });
+
+  /** Registers (or refreshes) a presence session, so the player counts as online. */
+  const online = (t: T, code: string, playerId: string) =>
+    t.mutation(api.presence.heartbeat, { roomId: code, userId: playerId, sessionId: `s-${playerId}`, interval: 30_000 });
+
+  /** The player's tab closes: presence reports them offline from now. */
+  async function dropOut(t: T, code: string, playerId: string) {
+    const tokens = await online(t, code, playerId);
+    await t.mutation(api.presence.disconnect, { sessionToken: tokens.sessionToken });
+  }
+
+  /** A room rating round 1 of game 1, with a submission per `submitters` (rated in that order). */
+  async function ratingRoom(t: T, code: string, playerIds: string[], submitters: string[], isPublic = true) {
+    await insertRoom(t, code, {
+      isPublic,
+      phase: "rating",
+      currentRound: 1,
+      currentRatingIndex: 0,
+      gameEpoch: 1,
+      currentPrompt: CURATED_PROMPTS[0],
+      usedPrompts: [CURATED_PROMPTS[0]],
+      playerIds,
+    });
+    await t.run(async (ctx) => {
+      for (const playerId of submitters) {
+        await ctx.db.insert("submissions", { roomCode: code, round: 1, playerId, ...track(playerId), submittedAt: Date.now() });
+      }
+    });
+  }
+
+  async function currentSongId(t: T, code: string) {
+    const r = (await room(t, code))!;
+    const subs = await t.run(async (ctx) =>
+      ctx.db.query("submissions").withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", 1)).collect()
+    );
+    return subs[r.currentRatingIndex ?? 0]._id;
+  }
+
+  const rate = async (t: T, code: string, playerId: string) =>
+    t.mutation(api.game.flow.submitRating, {
+      code,
+      playerId,
+      connectionId: conn(playerId),
+      songId: await currentSongId(t, code),
+      rating: 4,
+    });
+
+  test("a song moves on once everyone still present has rated, not after the 60s timeout", async () => {
+    const t = setup();
+    await ratingRoom(t, "QADROP", ["p1", "p2", "p3", "p4"], ["p1", "p2", "p3"]);
+    for (const id of ["p1", "p2", "p3"]) await online(t, "QADROP", id);
+    await dropOut(t, "QADROP", "p4");
+    await advance(t, PUBLIC_IN_GAME_GRACE_MS);
+
+    const start = Date.now();
+    expect((await rate(t, "QADROP", "p2")).success).toBe(true);
+    await advance(t, 0);
+    expect((await room(t, "QADROP"))!.currentRatingIndex).toBe(0); // p3 is online and still rating
+    expect((await rate(t, "QADROP", "p3")).success).toBe(true);
+    await advance(t, 0);
+    expect((await room(t, "QADROP"))!.currentRatingIndex).toBe(1);
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  test("a player who just closed their tab holds the song only for the grace window", async () => {
+    const t = setup();
+    await ratingRoom(t, "QAGRCE", ["p1", "p2", "p3", "p4"], ["p1", "p2", "p3"]);
+    for (const id of ["p1", "p2", "p3"]) await online(t, "QAGRCE", id);
+    await dropOut(t, "QAGRCE", "p4");
+
+    await rate(t, "QAGRCE", "p2");
+    await rate(t, "QAGRCE", "p3");
+    await advance(t, 0);
+    expect((await room(t, "QAGRCE"))!.currentRatingIndex).toBe(0); // could still be a page refresh
+    await advance(t, PUBLIC_IN_GAME_GRACE_MS - 1000);
+    expect((await room(t, "QAGRCE"))!.currentRatingIndex).toBe(0);
+    await advance(t, 1000); // the grace runs out: nobody else to wait for
+    expect((await room(t, "QAGRCE"))!.currentRatingIndex).toBe(1);
+  });
+
+  test("a player who comes back inside the grace window is still waited for", async () => {
+    const t = setup();
+    await ratingRoom(t, "QABACK", ["p1", "p2", "p3"], ["p1", "p2"]);
+    for (const id of ["p1", "p2"]) await online(t, "QABACK", id);
+    await dropOut(t, "QABACK", "p3");
+    await advance(t, 5000);
+    await online(t, "QABACK", "p3"); // refreshed
+
+    await rate(t, "QABACK", "p2");
+    await advance(t, PUBLIC_IN_GAME_GRACE_MS);
+    expect((await room(t, "QABACK"))!.currentRatingIndex).toBe(0);
+    await rate(t, "QABACK", "p3");
+    await advance(t, 0);
+    expect((await room(t, "QABACK"))!.currentRatingIndex).toBe(1);
+  });
+
+  test("a song nobody present can rate moves on at once", async () => {
+    const t = setup();
+    await ratingRoom(t, "QAALON", ["p1", "p2", "p3"], ["p1", "p2"]);
+    await online(t, "QAALON", "p1");
+    await dropOut(t, "QAALON", "p2");
+    await dropOut(t, "QAALON", "p3");
+    await advance(t, PUBLIC_IN_GAME_GRACE_MS);
+
+    await t.mutation(internal.game.flow.advanceRating, {
+      code: "QAALON",
+      round: 1,
+      ratingIndex: 0,
+      timedOut: false,
+      epoch: 1,
+    });
+    expect((await room(t, "QAALON"))!.currentRatingIndex).toBe(1);
+    // p2's song: p1 rates it, and the round is over.
+    await advance(t, 500);
+    expect((await rate(t, "QAALON", "p1")).success).toBe(true);
+    await advance(t, 0); // the "everyone rated" check moves to the end of the list...
+    await advance(t, 500); // ...and the next step totals the round
+    expect((await room(t, "QAALON"))!.phase).toBe("results");
+  });
+
+  test("private rooms still wait for every player", async () => {
+    const t = setup();
+    await ratingRoom(t, "QAPRVR", ["p1", "p2", "p3", "p4"], ["p1", "p2", "p3"], false);
+    for (const id of ["p1", "p2", "p3"]) await online(t, "QAPRVR", id);
+    await dropOut(t, "QAPRVR", "p4");
+    await advance(t, PUBLIC_IN_GAME_GRACE_MS);
+
+    await rate(t, "QAPRVR", "p2");
+    await rate(t, "QAPRVR", "p3");
+    await advance(t, PUBLIC_IN_GAME_GRACE_MS);
+    expect((await room(t, "QAPRVR"))!.currentRatingIndex).toBe(0);
+  });
+
+  test("song selection ends once everyone still present has submitted", async () => {
+    const t = setup();
+    await insertRoom(t, "QASELX", {
+      phase: "songSelection",
+      currentRound: 1,
+      gameEpoch: 1,
+      currentPrompt: CURATED_PROMPTS[0],
+      usedPrompts: [CURATED_PROMPTS[0]],
+      selectionStartedAt: Date.now(),
+      playerIds: ["p1", "p2", "p3"],
+    });
+    for (const id of ["p1", "p2"]) await online(t, "QASELX", id);
+    await dropOut(t, "QASELX", "p3");
+
+    for (const id of ["p1", "p2"]) {
+      const res = await t.mutation(api.game.flow.submitSong, { code: "QASELX", playerId: id, connectionId: conn(id), ...track(id) });
+      expect(res.success).toBe(true);
+    }
+    await advance(t, 0);
+    expect((await room(t, "QASELX"))!.phase).toBe("songSelection"); // p3 might be refreshing
+    await advance(t, PUBLIC_IN_GAME_GRACE_MS);
+    expect((await room(t, "QASELX"))!.phase).toBe("rating");
+  });
+
+  test("the cron removes a player gone from a running game after the short in-game cutoff", async () => {
+    const t = setup();
+    await ratingRoom(t, "QAGONE", ["p1", "p2", "p3"], ["p1", "p2"]);
+    await ratingRoom(t, "QAPRVG", ["v1", "v2"], ["v1"], false);
+    for (const [code, id] of [["QAGONE", "p1"], ["QAGONE", "p2"], ["QAPRVG", "v1"]] as const) await online(t, code, id);
+    await dropOut(t, "QAGONE", "p3");
+    await dropOut(t, "QAPRVG", "v2");
+
+    await advance(t, PUBLIC_IN_GAME_OFFLINE_MS - 5000);
+    for (const [code, id] of [["QAGONE", "p1"], ["QAGONE", "p2"], ["QAPRVG", "v1"]] as const) await online(t, code, id);
+    await t.mutation(internal.game.scheduler.cleanupInactivePlayers, {});
+    expect(await players(t, "QAGONE")).toHaveLength(3);
+
+    await advance(t, 10_000);
+    for (const [code, id] of [["QAGONE", "p1"], ["QAGONE", "p2"], ["QAPRVG", "v1"]] as const) await online(t, code, id);
+    await t.mutation(internal.game.scheduler.cleanupInactivePlayers, {});
+    expect((await players(t, "QAGONE")).map((p) => p.playerId).sort()).toEqual(["p1", "p2"]);
+    expect((await room(t, "QAGONE"))!.phase).toBe("rating");
+    // Private rooms keep their long grace window.
+    expect(await players(t, "QAPRVG")).toHaveLength(2);
   });
 });

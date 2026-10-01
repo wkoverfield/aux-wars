@@ -19,6 +19,7 @@ import {
   COUNTDOWN_MIN_PLAYERS,
   COUNTDOWN_MS,
   ONE_V_ONE_OFFER_MS,
+  PUBLIC_IN_GAME_GRACE_MS,
   PUBLIC_WAITING_TIMEOUT_MS,
   QUICK_PLAY_CAP,
 } from "./quickPlayRules";
@@ -111,6 +112,52 @@ export async function dropKnownOffline(ctx: MutationCtx, room: Room, players: Pl
     }
   }
   return kept;
+}
+
+/**
+ * The players an "has everyone acted?" check still waits on, among `players`,
+ * where `done` says who already acted.
+ *
+ * Private rooms wait on every player. A running public game skips anyone the
+ * presence component has reported offline for longer than
+ * PUBLIC_IN_GAME_GRACE_MS (their last sign of life is the later of their
+ * presence disconnect and their join, so a player who never heartbeated
+ * counts from the join). Strangers who close the tab would otherwise hold
+ * every song and selection window to its full timer.
+ *
+ * `recheckAt` is set when everyone still pending is offline inside that
+ * grace: no action of theirs will re-run the check, so the caller schedules
+ * it for when the first grace runs out.
+ */
+export async function pendingPlayers(
+  ctx: MutationCtx,
+  room: Room,
+  players: Player[],
+  done: (p: Player) => boolean
+): Promise<{ pending: Player[]; recheckAt?: number }> {
+  const notDone = players.filter((p) => !done(p));
+  if (!room.isPublic || notDone.length === 0) return { pending: notDone };
+
+  const entries = await presence.listRoom(ctx, room.code, false);
+  const byUser = new Map(entries.map((e) => [e.userId, e]));
+  const t = now();
+  const pending: Player[] = [];
+  let recheckAt: number | undefined;
+  let anyOnline = false;
+  for (const p of notDone) {
+    const entry = byUser.get(p.playerId);
+    if (entry?.online) {
+      pending.push(p);
+      anyOnline = true;
+      continue;
+    }
+    const lastSeen = Math.max(entry?.lastDisconnected ?? 0, p.connectedAt ?? p._creationTime);
+    const graceEnds = lastSeen + PUBLIC_IN_GAME_GRACE_MS;
+    if (graceEnds <= t) continue; // gone: not waited on
+    pending.push(p);
+    recheckAt = recheckAt === undefined ? graceEnds : Math.min(recheckAt, graceEnds);
+  }
+  return anyOnline ? { pending } : { pending, recheckAt };
 }
 
 /**
@@ -291,18 +338,11 @@ export async function settlePublicRoom(
   }
 
   if (room.phase === "songSelection") {
-    const subs = await ctx.db
-      .query("submissions")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
-      .collect();
-    const submitted = new Set(subs.map((s) => s.playerId));
-    if (subs.length > 0 && players.every((p) => submitted.has(p.playerId))) {
-      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, {
-        code,
-        round: room.currentRound,
-        epoch: gameEpochOf(room),
-      });
-    }
+    await ctx.scheduler.runAfter(0, internal.game.flow.maybeStartRatingOnAllSubmitted, {
+      code,
+      round: room.currentRound,
+      epoch: gameEpochOf(room),
+    });
   } else if (room.phase === "rating") {
     await ctx.scheduler.runAfter(0, internal.game.flow.maybeAdvanceOnAllVotes, { code });
   }
