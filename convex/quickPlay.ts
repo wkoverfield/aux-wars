@@ -159,7 +159,7 @@ export const join = mutation({
       if (!(await mayTakeOverSeat(room, m, seatKey))) {
         return { success: false, message: "This player is already in a Quick Play game" } as const;
       }
-      await ctx.db.patch(m._id, { connectionId, connectedAt: now(), isActive: true });
+      await ctx.db.patch(m._id, { connectionId, connectedAt: now(), isActive: true, closingAt: undefined });
       await ctx.db.patch(room._id, { lastActivityAt: now() });
       return { success: true, code: room.code, name: m.name, playerId, rejoined: true } as const;
     }
@@ -443,21 +443,36 @@ export const fireOneVOneOffer = internalMutation({
 
 /**
  * A public-room tab closed (leaveGame with onClose) a few seconds ago. Release
- * the seat unless the player came back: presence online again (the "close"
- * was a reload) or the seat moved to another connection.
+ * the seat unless the page came back since (resumeSeat or a rejoin cleared or
+ * replaced closingAt).
  */
 export const leaveAfterClose = internalMutation({
-  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
-  handler: async (ctx, { code, playerId, connectionId }) => {
+  args: { code: v.string(), playerId: v.string(), closingAt: v.number() },
+  handler: async (ctx, { code, playerId, closingAt }) => {
     const room = await getRoom(ctx, code);
     if (!room || !room.isPublic) return;
     const player = await ctx.db
       .query("players")
       .withIndex("by_player", (q) => q.eq("playerId", playerId).eq("roomCode", code))
       .unique();
-    if (!player || player.connectionId !== connectionId) return;
-    const entry = (await presenceByUser(ctx, code)).get(playerId);
-    if (entry?.online) return;
+    if (!player || player.closingAt !== closingAt) return;
     await leavePublicRoom(ctx, room, player);
+  },
+});
+
+/**
+ * The page is (still or again) open: cancel a pending close-leave. Called by
+ * the client when a game route mounts and when a page returns from the
+ * back/forward cache. Writes only when a close is pending.
+ */
+export const resumeSeat = mutation({
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
+    const found = await publicRoomAndPlayer(ctx, code, playerId, connectionId);
+    if ("error" in found) return { success: false, message: found.error } as const;
+    if (found.player.closingAt !== undefined) {
+      await ctx.db.patch(found.player._id, { closingAt: undefined });
+    }
+    return { success: true } as const;
   },
 });

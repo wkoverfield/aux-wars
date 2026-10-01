@@ -1298,15 +1298,35 @@ describe("ghosts (closed or abandoned tabs)", () => {
     expect(await events(t, "quickplay_left_waiting")).toHaveLength(1);
   });
 
-  test("a reload keeps the seat: presence came back before the delay ran out", async () => {
+  test("a reload keeps the seat: the page came back and resumed it", async () => {
     const t = setup();
     const { code } = await join(t, "p1");
     await join(t, "p2");
-    await goOffline(t, code, "p2");
     await t.mutation(api.game.rooms.leaveGame, { code, playerId: "p2", connectionId: conn("p2"), onClose: true });
-    await heartbeat(t, code, "p2"); // the reloaded page heartbeats
+    expect(await t.mutation(api.quickPlay.resumeSeat, { code, playerId: "p2", connectionId: conn("p2") })).toEqual({
+      success: true,
+    });
     await advance(t, CLOSE_LEAVE_DELAY_MS);
     expect(await players(t, code)).toHaveLength(2);
+    expect((await players(t, code)).every((p) => p.closingAt === undefined)).toBe(true);
+  });
+
+  test("a close is not cancelled by a stale online presence session", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    await join(t, "p2");
+    await heartbeat(t, code, "p2"); // a leftover session still reports online
+    await t.mutation(api.game.rooms.leaveGame, { code, playerId: "p2", connectionId: conn("p2"), onClose: true });
+    await advance(t, CLOSE_LEAVE_DELAY_MS);
+    expect((await players(t, code)).map((p) => p.playerId)).toEqual(["p1"]);
+  });
+
+  test("only the seat's own connection can resume it", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    expect(
+      await t.mutation(api.quickPlay.resumeSeat, { code, playerId: "p1", connectionId: "conn-stranger" })
+    ).toMatchObject({ success: false });
   });
 
   test("a stale close does nothing once the seat moved to another tab", async () => {

@@ -24,19 +24,40 @@ export function sendLeaveBeacon({ convexUrl, code, playerId, connectionId, nav =
   return nav.sendBeacon(`${convexUrl}/api/mutation`, blob);
 }
 
+/** Re-sends the resume a little after mount, in case the close beacon of a reload lands late. */
+const RESUME_RETRY_MS = 3000;
+
 /**
- * Quick Play: a closed tab gives its seat up right away instead of holding it
- * through the presence grace. Listens for pagehide only: a hidden tab
- * (visibilitychange) keeps its seat and gets the server's grace period.
+ * Quick Play: a closed tab gives its seat up within seconds instead of
+ * holding it through the presence grace. Listens for pagehide only: a hidden
+ * tab (visibilitychange) keeps its seat and gets the server's grace period.
+ *
+ * The server releases the seat a few seconds after the beacon unless the page
+ * comes back, so this also calls `resume` (quickPlay.resumeSeat) on mount
+ * (a reload) and when the page is restored from the back/forward cache.
  */
-export function useLeaveOnClose({ enabled, code, playerId, connectionId }) {
+export function useLeaveOnClose({ enabled, code, playerId, connectionId, resume }) {
   useEffect(() => {
     if (!enabled || !code || !playerId || !connectionId) return undefined;
     const convexUrl = import.meta.env.VITE_CONVEX_URL;
-    const onPageHide = () => {
-      sendLeaveBeacon({ convexUrl, code, playerId, connectionId });
+    const creds = { code, playerId, connectionId };
+    const resumeSeat = () => {
+      if (resume) Promise.resolve(resume(creds)).catch(() => {});
     };
+    const onPageHide = () => {
+      sendLeaveBeacon({ convexUrl, ...creds });
+    };
+    const onPageShow = (e) => {
+      if (e.persisted) resumeSeat();
+    };
+    resumeSeat();
+    const retry = setTimeout(resumeSeat, RESUME_RETRY_MS);
     window.addEventListener("pagehide", onPageHide);
-    return () => window.removeEventListener("pagehide", onPageHide);
-  }, [enabled, code, playerId, connectionId]);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      clearTimeout(retry);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [enabled, code, playerId, connectionId, resume]);
 }

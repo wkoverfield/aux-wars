@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation, useParams, Outlet } from 'react-router-dom';
 // import { useSocket, useSocketConnection } from '../services/SocketProvider';
-import { useQuery } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { useSession } from '../hooks/useSession';
 import { useLeaveOnClose } from '../features/quickplay/useQuickPlay';
@@ -23,7 +23,9 @@ export default function GameRouteGuard() {
   const roomData = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
 
   // Quick Play: closing the tab gives the seat up (every game route).
+  const resumeSeat = useMutation(api.quickPlay.resumeSeat);
   useLeaveOnClose({
+    resume: resumeSeat,
     enabled: Boolean((roomData?.room || roomData)?.isPublic) && session?.gameCode === gameCode,
     code: gameCode,
     playerId: session?.playerId,

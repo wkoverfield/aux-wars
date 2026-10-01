@@ -51,9 +51,9 @@ export const PUBLIC_IN_GAME_GRACE_MS = 45_000;
 export const PLACEMENT_RECENT_MS = 60_000;
 /**
  * A tab that closes calls leaveGame with onClose. A public seat is then
- * released after this delay unless the player's presence came back online
- * (a reload fires the same pagehide event as a close, and should not cost the
- * seat).
+ * released after this delay unless the page came back and called
+ * quickPlay.resumeSeat (a reload fires the same pagehide event as a close,
+ * and should not cost the seat).
  */
 export const CLOSE_LEAVE_DELAY_MS = 5_000;
 /**

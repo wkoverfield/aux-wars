@@ -150,3 +150,35 @@ describe("seat key and leave beacon", () => {
     expect(sendBeacon).not.toHaveBeenCalled();
   });
 });
+
+describe("useLeaveOnClose", () => {
+  it("resumes the seat on mount and on a back/forward cache restore, and beacons on pagehide", async () => {
+    const { renderHook } = await import("@testing-library/react");
+    const { useLeaveOnClose } = await import("./useQuickPlay");
+    const resume = vi.fn(() => Promise.resolve());
+    const sendBeacon = vi.fn(() => true);
+    const original = navigator.sendBeacon;
+    navigator.sendBeacon = sendBeacon;
+    const { unmount } = renderHook(() =>
+      useLeaveOnClose({ enabled: true, code: "QAAAAA", playerId: "p1", connectionId: "c1", resume })
+    );
+    expect(resume).toHaveBeenCalledWith({ code: "QAAAAA", playerId: "p1", connectionId: "c1" });
+    const pageshow = new Event("pageshow");
+    pageshow.persisted = true;
+    window.dispatchEvent(pageshow);
+    expect(resume).toHaveBeenCalledTimes(2);
+    window.dispatchEvent(new Event("pagehide"));
+    // jsdom has no deployment URL in tests; the beacon is skipped rather than thrown.
+    unmount();
+    window.dispatchEvent(new Event("pagehide"));
+    navigator.sendBeacon = original;
+  });
+
+  it("does nothing for private rooms", async () => {
+    const { renderHook } = await import("@testing-library/react");
+    const { useLeaveOnClose } = await import("./useQuickPlay");
+    const resume = vi.fn();
+    renderHook(() => useLeaveOnClose({ enabled: false, code: "QAAAAA", playerId: "p1", connectionId: "c1", resume }));
+    expect(resume).not.toHaveBeenCalled();
+  });
+});

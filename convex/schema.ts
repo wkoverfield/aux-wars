@@ -146,6 +146,11 @@ export default defineSchema({
     // first game starts (quickplay_matched) or they leave first
     // (quickplay_left_waiting). Written on those two transitions only.
     waitingSince: v.optional(v.number()),
+    // Quick Play: set when this player's tab sent the pagehide leave beacon;
+    // the seat is released CLOSE_LEAVE_DELAY_MS later unless the page came
+    // back (quickPlay.resumeSeat or a rejoin clears it). Written on those
+    // events only. Never returned by a query.
+    closingAt: v.optional(v.number()),
     submittedRounds: v.optional(v.array(v.number())), // Tracks which rounds this player has submitted for (prevents race conditions)
     // DEPRECATED: rate-limit stamps. No longer written; they live in
     // playerRateLimits so a vote does not rewrite a document every room

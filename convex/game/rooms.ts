@@ -235,8 +235,9 @@ export const leaveGame = mutation({
     playerId: v.string(),
     connectionId: v.string(),
     // Sent by the client's pagehide beacon. A public seat is then released
-    // after CLOSE_LEAVE_DELAY_MS unless the player is back online (a reload
-    // fires the same event as a close). Private rooms ignore it.
+    // after CLOSE_LEAVE_DELAY_MS unless the page comes back and calls
+    // quickPlay.resumeSeat (a reload fires the same event as a close).
+    // Private rooms ignore it.
     onClose: v.optional(v.boolean()),
   },
   handler: async (ctx, { code, playerId, connectionId, onClose }) => {
@@ -252,10 +253,12 @@ export const leaveGame = mutation({
     // running game moving, and delete the room once empty.
     if (room.isPublic) {
       if (onClose) {
+        const closingAt = now();
+        await ctx.db.patch(currentPlayer._id, { closingAt });
         await ctx.scheduler.runAfter(CLOSE_LEAVE_DELAY_MS, internal.quickPlay.leaveAfterClose, {
           code,
           playerId,
-          connectionId,
+          closingAt,
         });
         return { roomDeleted: false, deferred: true } as const;
       }
