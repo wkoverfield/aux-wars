@@ -12,74 +12,110 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 // Request queue to prevent duplicate simultaneous searches
 const pendingRequests = new Map();
 
-// Error tracking for exponential backoff
-const errorCounts = new Map();
+// Failure backoff: after MAX_RETRIES consecutive failures for a query, the
+// query is not re-fetched until FAILURE_BACKOFF_MS has passed.
+const errorCounts = new Map(); // cacheKey -> { count, reason, at }
 const MAX_RETRIES = 3;
+const FAILURE_BACKOFF_MS = 30 * 1000;
+
+export const SEARCH_TIMEOUT_MS = 8000;
 
 /**
- * Performs the actual music search with error handling
+ * A search that did not produce an answer (as opposed to an empty result).
+ * reason: "timeout" | "network" | "http_<status>" | "bad_payload".
+ * fromBackoff is true when no request was made because the same query failed
+ * repeatedly just before.
+ */
+export class SearchError extends Error {
+  constructor(reason, { fromBackoff = false } = {}) {
+    super(`Music search failed: ${reason}`);
+    this.name = "SearchError";
+    this.reason = reason;
+    this.fromBackoff = fromBackoff;
+  }
+}
+
+function failureReason(err) {
+  if (err instanceof SearchError) return err.reason;
+  if (err?.name === "AbortError" || err?.name === "TimeoutError") return "timeout";
+  // Anything else: fetch rejects with a TypeError when the request never got
+  // a response (offline, DNS, blocked host, CORS).
+  return "network";
+}
+
+/**
+ * Performs one request. Resolves with the tracks array (possibly empty) on a
+ * well-formed 200; rejects with a SearchError otherwise.
  * @param {string} query - Search query
- * @param {string} cacheKey - Cache key for storing results
  * @returns {Promise<Array>} Array of track objects
  */
-async function performSearch(query, cacheKey) {
-  try {
-    // Use Express endpoint via Vite proxy in dev, explicit URL in prod
-    const baseUrl = import.meta.env.VITE_SERVER_URL || '';
-    const endpoint = baseUrl ? `${baseUrl}/api/music/search` : '/api/music/search';
+async function fetchTracks(query) {
+  // Use Express endpoint via Vite proxy in dev, explicit URL in prod
+  const baseUrl = import.meta.env.VITE_SERVER_URL || '';
+  const endpoint = baseUrl ? `${baseUrl}/api/music/search` : '/api/music/search';
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-POSTHOG-DISTINCT-ID': getVisitorId(),
-      },
-      body: JSON.stringify({ query })
-    });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  try {
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-POSTHOG-DISTINCT-ID': getVisitorId(),
+        },
+        body: JSON.stringify({ query }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      throw new SearchError(failureReason(err));
+    }
 
     if (!response.ok) {
-      throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+      throw new SearchError(`http_${response.status}`);
     }
 
-    const data = await response.json();
-
-    if (data.error) {
-      throw new Error(data.error);
+    let data;
+    try {
+      data = await response.json();
+    } catch (err) {
+      // An abort while the body streams is still a timeout.
+      throw new SearchError(err?.name === "AbortError" ? "timeout" : "bad_payload");
     }
+    if (!data || typeof data !== "object" || data.error || !Array.isArray(data.tracks)) {
+      throw new SearchError("bad_payload");
+    }
+    return data.tracks;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-    const tracks = Array.isArray(data.tracks) ? data.tracks : [];
-
-
-    // Cache successful results
-    searchCache.set(cacheKey, {
-      results: tracks,
-      timestamp: Date.now()
-    });
-
-    // Reset error count on success
+async function performSearch(query, cacheKey) {
+  try {
+    const tracks = await fetchTracks(query);
+    searchCache.set(cacheKey, { results: tracks, timestamp: Date.now() });
     errorCounts.delete(cacheKey);
-
     return tracks;
+  } catch (err) {
+    const reason = failureReason(err);
+    const previous = errorCounts.get(cacheKey);
+    errorCounts.set(cacheKey, { count: (previous?.count ?? 0) + 1, reason, at: Date.now() });
 
-  } catch {
-
-    // Increment error count for this query
-    const currentErrors = errorCounts.get(cacheKey) || 0;
-    errorCounts.set(cacheKey, currentErrors + 1);
-
-    // Return cached stale data if available
+    // Stale results beat an error message.
     const stale = searchCache.get(cacheKey);
-    if (stale) {
-      return stale.results;
-    }
-
-    // If no cache available, return empty array rather than throwing
-    return [];
+    if (stale) return stale.results;
+    throw new SearchError(reason);
   }
 }
 
 /**
- * Searches for music tracks with caching and request deduplication
+ * Searches for music tracks with caching and request deduplication.
+ *
+ * Resolves with an array: the server's tracks (empty only when the search
+ * genuinely matched nothing), or stale cached tracks when a refresh failed.
+ * Rejects with a SearchError when the search failed and nothing is cached.
  * @param {string} query - Search query
  * @returns {Promise<Array>} Array of track objects
  */
@@ -91,17 +127,17 @@ export async function searchTracks(query) {
 
   const cacheKey = query.toLowerCase().trim();
 
-  // Check if we should skip due to too many recent errors
-  const errorCount = errorCounts.get(cacheKey) || 0;
-  if (errorCount >= MAX_RETRIES) {
-    const stale = searchCache.get(cacheKey);
-    return stale ? stale.results : [];
-  }
-
-  // Check cache first
+  // Fresh cache first
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.results;
+  }
+
+  // Back off a query that keeps failing
+  const errors = errorCounts.get(cacheKey);
+  if (errors && errors.count >= MAX_RETRIES && Date.now() - errors.at < FAILURE_BACKOFF_MS) {
+    if (cached) return cached.results;
+    throw new SearchError(errors.reason, { fromBackoff: true });
   }
 
   // Check if request is already pending (deduplication)
@@ -109,24 +145,10 @@ export async function searchTracks(query) {
     return pendingRequests.get(cacheKey);
   }
 
-  // Create new request with timeout
-  const requestPromise = Promise.race([
-    performSearch(query, cacheKey),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Search timeout')), 10000)
-    )
-  ]);
-
+  const requestPromise = performSearch(query, cacheKey);
   pendingRequests.set(cacheKey, requestPromise);
-
   try {
-    const results = await requestPromise;
-    return results;
-  } catch {
-
-    // Return cached data if available, even if stale
-    const stale = searchCache.get(cacheKey);
-    return stale ? stale.results : [];
+    return await requestPromise;
   } finally {
     pendingRequests.delete(cacheKey);
   }
@@ -177,6 +199,10 @@ export function cleanupCache() {
     searchCache.delete(key);
     errorCounts.delete(key);
   });
+
+  for (const [key, value] of errorCounts.entries()) {
+    if (now - value.at > CACHE_TTL * 2) errorCounts.delete(key);
+  }
 
 }
 

@@ -264,7 +264,6 @@ export default function GameWinner() {
   };
   const handleBackToLobby = async () => {
     if (!session?.playerId || !session?.connectionId) return;
-    captureGameEvent('return_to_lobby_clicked', gameProperties({ code: gameCode, players: playersQuery, session }));
     await returnToLobbyMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
     updateSession({ lastPhase: 'lobby' });
     navigate(`/lobby/${gameCode}`, { replace: true });

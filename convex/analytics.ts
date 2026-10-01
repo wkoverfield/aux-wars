@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query, type MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 /**
@@ -16,11 +16,26 @@ const eventMetadata = v.optional(v.object({
   value: v.optional(v.number()),
   label: v.optional(v.string()),
   phase: v.optional(v.string()),
+  visitorId: v.optional(v.string()), // opaque client visitor id (retention linkage)
+  reason: v.optional(v.string()), // search_failed: see searchFailReason
 }));
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const SEARCH_FAIL_REASON_RE = /^(timeout|network|bad_payload|http_\d{3})$/;
+
+/**
+ * Failure class of a client music search: "timeout", "network",
+ * "bad_payload" or "http_<status>". Anything else reads "unknown".
+ */
+export function searchFailReason(reason: unknown): string {
+  return typeof reason === "string" && SEARCH_FAIL_REASON_RE.test(reason) ? reason : "unknown";
+}
 
 const PUBLIC_EVENT_TYPES = new Set([
   "pro_cta_viewed",
   "pro_checkout_started",
+  "search_failed",
   "search_no_results",
   "session_start",
   "vote_listen",
@@ -32,33 +47,48 @@ export const trackEvent = internalMutation({
     metadata: eventMetadata,
   },
   handler: async (ctx, { eventType, metadata }) => {
-    // Insert the event
+    if (AGGREGATE_ONLY_EVENT_TYPES.has(eventType)) {
+      // High-volume, low-value-per-row events: counted, never stored raw.
+      await bumpAggregate(ctx, eventType, 1);
+      const ms = metadata?.value;
+      if (eventType === "vote_listen" && typeof ms === "number" && Number.isFinite(ms)) {
+        await bumpAggregate(ctx, LISTEN_MS_TOTAL, Math.round(Math.min(Math.max(ms, 0), MAX_LISTEN_MS)));
+        await bumpAggregate(ctx, LISTEN_MS_SAMPLES, 1);
+      }
+      return;
+    }
+
     await ctx.db.insert("analyticsEvents", {
       eventType,
       timestamp: Date.now(),
       metadata,
     });
-
-    // Increment aggregate count
-    const existing = await ctx.db
-      .query("analyticsAggregates")
-      .withIndex("by_type", (q) => q.eq("eventType", eventType))
-      .first();
-
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        count: existing.count + 1,
-        lastUpdated: Date.now(),
-      });
-    } else {
-      await ctx.db.insert("analyticsAggregates", {
-        eventType,
-        count: 1,
-        lastUpdated: Date.now(),
-      });
-    }
+    await bumpAggregate(ctx, eventType, 1);
   },
 });
+
+// Event types kept only as an all-time count in analyticsAggregates (plus the
+// daily metricSnapshots of that count), with no analyticsEvents row per event.
+// vote_listen fires once per rating and made up a third of the raw table.
+export const AGGREGATE_ONLY_EVENT_TYPES = new Set(["vote_listen"]);
+// Running sum of vote_listen metadata.value (ms) and how many values it holds,
+// so average listen time is LISTEN_MS_TOTAL / LISTEN_MS_SAMPLES. Each value is
+// clamped because the event comes from a public mutation.
+export const LISTEN_MS_TOTAL = "vote_listen:ms_total";
+export const LISTEN_MS_SAMPLES = "vote_listen:ms_samples";
+const MAX_LISTEN_MS = 10 * 60 * 1000;
+
+async function bumpAggregate(ctx: MutationCtx, eventType: string, by: number) {
+  const existing = await ctx.db
+    .query("analyticsAggregates")
+    .withIndex("by_type", (q) => q.eq("eventType", eventType))
+    .first();
+  if (existing) {
+    await ctx.db.patch(existing._id, { count: existing.count + by, lastUpdated: Date.now() });
+  } else {
+    await ctx.db.insert("analyticsAggregates", { eventType, count: by, lastUpdated: Date.now() });
+  }
+}
 
 /**
  * Public, fire-and-forget event logger for client-side analytics
@@ -73,6 +103,10 @@ export const logEvent = mutation({
   handler: async (ctx, { eventType, metadata }) => {
     if (!PUBLIC_EVENT_TYPES.has(eventType)) {
       return { success: false, message: "Unsupported event type" } as const;
+    }
+    if (eventType === "search_failed") {
+      // Only the failure class is kept: never query text or other fields.
+      metadata = { reason: searchFailReason(metadata?.reason) };
     }
     await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, { eventType, metadata });
     return { success: true } as const;
@@ -166,27 +200,68 @@ export const getCountByEventType = internalQuery({
   },
 });
 
+const CLEANUP_BATCH = 1000;
+const MAX_GUARD_DAYS = 400;
+
 /**
- * Internal mutation to clean up old analytics events (called by cron)
+ * Upper bound for deleting raw events: the start of the oldest UTC date that
+ * has no dailyMetrics row, capped at the retention cutoff. A day's raw events
+ * are the only source for its permanent rollup, so they are never deleted
+ * before that rollup exists. With no rollups at all nothing is deleted.
+ */
+async function rolledUpBefore(ctx: MutationCtx, cutoff: number): Promise<number> {
+  const oldest = await ctx.db.query("analyticsEvents").withIndex("by_timestamp").order("asc").first();
+  if (!oldest || oldest.timestamp >= cutoff) return cutoff;
+  let dayStart = Math.floor(oldest.timestamp / DAY_MS) * DAY_MS;
+  for (let i = 0; i < MAX_GUARD_DAYS && dayStart < cutoff; i++) {
+    const date = new Date(dayStart).toISOString().slice(0, 10);
+    const row = await ctx.db
+      .query("dailyMetrics")
+      .withIndex("by_date", (q) => q.eq("date", date))
+      .first();
+    if (!row) return dayStart;
+    dayStart += DAY_MS;
+  }
+  return Math.min(dayStart, cutoff);
+}
+
+/**
+ * Deletes raw analyticsEvents older than the retention window, in batches.
+ * Each run deletes up to batchSize rows and reschedules itself until nothing
+ * deletable is left, so a large backlog drains over many small transactions.
+ * Never deletes a day that has not been rolled up (see rolledUpBefore).
  */
 export const cleanupOldEvents = internalMutation({
-  args: { retentionDays: v.number() },
-  handler: async (ctx, { retentionDays }) => {
-    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
-    const oldEvents = await ctx.db
+  args: {
+    retentionDays: v.number(),
+    batchSize: v.optional(v.number()),
+    before: v.optional(v.number()), // bound fixed by the first batch of a drain
+  },
+  handler: async (ctx, { retentionDays, batchSize, before }) => {
+    const n = Math.min(Math.max(batchSize ?? CLEANUP_BATCH, 1), 4000);
+    const bound =
+      before ?? (await rolledUpBefore(ctx, Date.now() - retentionDays * DAY_MS));
+    const batch = await ctx.db
       .query("analyticsEvents")
-      .withIndex("by_timestamp", (q) => q.lt("timestamp", cutoff))
-      .collect();
-
-    let deleted = 0;
-    for (const event of oldEvents) {
+      .withIndex("by_timestamp", (q) => q.lt("timestamp", bound))
+      .take(n);
+    for (const event of batch) {
       await ctx.db.delete(event._id);
-      deleted++;
     }
-
-    if (deleted > 0) {
-      console.log(`[analytics] Cleaned up ${deleted} events older than ${retentionDays} days`);
+    const more = batch.length === n;
+    if (more) {
+      await ctx.scheduler.runAfter(0, internal.analytics.cleanupOldEvents, {
+        retentionDays,
+        batchSize: n,
+        before: bound,
+      });
     }
+    if (batch.length > 0) {
+      console.log(
+        `[analytics] Deleted ${batch.length} events before ${new Date(bound).toISOString()}${more ? " (continuing)" : ""}`
+      );
+    }
+    return { deleted: batch.length, before: bound, more };
   },
 });
 
@@ -265,7 +340,9 @@ export const getLiveStats = query({
 const STATS_SAMPLE_CAP = 10000;
 
 /**
- * Median/avg time (seconds) players listen before voting — answers "how long do
+ * Median/avg time (seconds) players listen before voting. Percentiles come
+ * from legacy raw vote_listen rows while any remain; the all-time average
+ * comes from the running aggregates. — answers "how long do
  * people actually listen?" and sets the right rating clip length.
  */
 export const getListenTimeStats = internalQuery({
@@ -283,7 +360,17 @@ export const getListenTimeStats = internalQuery({
       .map((e) => e.metadata?.value)
       .filter((v): v is number => typeof v === "number")
       .sort((a, b) => a - b);
-    if (values.length === 0) return { count: 0, sampledLastNDays: days };
+    // Running average from the aggregates (new events are not stored raw).
+    const agg = async (t: string) =>
+      (await ctx.db.query("analyticsAggregates").withIndex("by_type", (q) => q.eq("eventType", t)).first())
+        ?.count ?? 0;
+    const msTotal = await agg(LISTEN_MS_TOTAL);
+    const msSamples = await agg(LISTEN_MS_SAMPLES);
+    const allTime = {
+      allTimeSamples: msSamples,
+      allTimeAvgSec: msSamples > 0 ? Math.round(msTotal / msSamples / 100) / 10 : null,
+    };
+    if (values.length === 0) return { count: 0, sampledLastNDays: days, ...allTime };
     const sum = values.reduce((a, b) => a + b, 0);
     const pct = (p: number) => values[Math.min(values.length - 1, Math.floor(p * values.length))];
     const toSec = (ms: number) => Math.round(ms / 100) / 10; // ms -> seconds, 1 decimal
@@ -295,6 +382,7 @@ export const getListenTimeStats = internalQuery({
       p75Sec: toSec(pct(0.75)),
       maxSec: toSec(values[values.length - 1]),
       sampledLastNDays: days,
+      ...allTime,
     };
   },
 });

@@ -102,13 +102,6 @@ export default function RoundWinner() {
     if (isTransitioning || !session?.playerId || !session?.connectionId) return;
     setIsTransitioning(true);
     setGameTransition(true);
-    captureGameEvent("next_round_clicked", gameProperties({
-      code: gameCode,
-      room,
-      players: playersQuery,
-      session,
-      extra: { final_round: isFinalRound },
-    }));
     await nextRoundMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
   };
 

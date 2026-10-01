@@ -1,6 +1,58 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+// Fields of one dailyMetrics row (everything except retention, which later
+// rollups patch in). Exported so the rollup writer validates the same shape.
+export const dailyMetricsFields = {
+  date: v.string(), // UTC "YYYY-MM-DD"
+  computedAt: v.number(),
+  gamesCreated: v.number(),
+  gamesStarted: v.number(),
+  gamesCompleted: v.number(),
+  gamesAbandoned: v.number(),
+  abandonedByPhase: v.record(v.string(), v.number()),
+  completionRate: v.union(v.number(), v.null()), // completed / started, 0-1
+  playerJoins: v.number(),
+  uniquePlayers: v.number(), // distinct visitorId (playerId for legacy joins)
+  joinsWithVisitorId: v.number(),
+  playersInStartedGames: v.number(), // distinct players who joined a room that started
+  playersInCompletedGames: v.number(), // distinct players who joined a room that completed
+  playerSeatsCompleted: v.number(), // sum of playerCount over completed games
+  avgPlayersPerGame: v.union(v.number(), v.null()), // over started games
+  p90PlayersPerGame: v.union(v.number(), v.null()),
+  maxPlayersPerGame: v.union(v.number(), v.null()),
+  songsSubmitted: v.number(),
+  ratingsSubmitted: v.number(),
+  pageviews: v.number(), // site-wide, from pageviewCounters
+  uniqueVisitors: v.number(), // site-wide, from pageviewCounters
+  newVisitors: v.union(v.number(), v.null()),
+  returningVisitors: v.union(v.number(), v.null()),
+  newVisitorsPlayed: v.union(v.number(), v.null()), // new visitors who played the same day
+  newPlayers: v.union(v.number(), v.null()),
+  peakPlayersOnline: v.union(v.number(), v.null()),
+  peakPlayersInGame: v.union(v.number(), v.null()),
+  peakHourUTC: v.union(v.number(), v.null()),
+  proPurchases: v.number(),
+  searchNoResults: v.number(),
+  topNoResultSearches: v.array(v.object({ query: v.string(), count: v.number() })),
+  // Client searches that failed (timeout, network, HTTP error, bad payload),
+  // distinct from searchNoResults. Optional: rows rolled up before
+  // search_failed existed do not have them.
+  searchFailed: v.optional(v.number()),
+  searchFailedByReason: v.optional(v.record(v.string(), v.number())),
+  // That day's per-UTC-hour concurrency maxes (hours with no players omitted).
+  hourlyPeaks: v.array(
+    v.object({ hourUTC: v.number(), playersOnline: v.number(), playersInGame: v.number() })
+  ),
+};
+
+const retentionPoint = v.object({ cohort: v.number(), returned: v.number() });
+export const dailyRetentionValidator = v.object({
+  d1: v.optional(retentionPoint),
+  d7: v.optional(retentionPoint),
+  d30: v.optional(retentionPoint),
+});
+
 export default defineSchema({
   rooms: defineTable({
     code: v.string(),
@@ -33,7 +85,9 @@ export default defineSchema({
     rematchStartingAt: v.optional(v.number()), // Timestamp the "Play Again" countdown fires (gameOver → fresh game)
     createdAt: v.number(),
     lastActivityAt: v.number(),
-  }).index("by_code", ["code"]),
+  })
+    .index("by_code", ["code"])
+    .index("by_lastActivityAt", ["lastActivityAt"]),
 
   players: defineTable({
     roomCode: v.string(),
@@ -204,10 +258,18 @@ export default defineSchema({
 
   // --- Site stats (pageview analytics) ---
   // Cumulative counters keyed by "total" | "path:<p>" | "day:<YYYY-MM-DD>" | "uvday:<YYYY-MM-DD>".
+  // Sharded: a key's value is the SUM of its rows. Each write lands on one of
+  // PAGEVIEW_SHARDS rows chosen at random, so concurrent pageviews do not all
+  // conflict on one document. Rows without `shard` predate sharding and count
+  // as shard 0 (folded by siteStats:migratePageviewShards). Read through
+  // readCounter / readAllCounters in siteStats.ts, never with .first().
   pageviewCounters: defineTable({
     key: v.string(),
     count: v.number(),
-  }).index("by_key", ["key"]),
+    shard: v.optional(v.number()),
+  })
+    .index("by_key", ["key"])
+    .index("by_key_and_shard", ["key", "shard"]),
 
   // Per-day unique-visitor dedup rows (pruned > 120 days by cron).
   pageviewVisits: defineTable({
@@ -226,5 +288,54 @@ export default defineSchema({
     capturedAt: v.number(),
     metrics: v.record(v.string(), v.number()),
   }).index("by_date", ["date"]),
+
+  // --- Concurrency (see convex/concurrency.ts) ---
+  // Written by a 60s internal cron. Never read by homepage or gameplay queries.
+  // kind "latest": a single row (hourStart 0) with the most recent sample,
+  // rewritten every run; updatedAt is when it was taken.
+  // kind "hour": one row per UTC hour holding that hour's max of each value,
+  // written only when a sample beats it.
+  // kind "allTime": a single row (hourStart 0) holding the all-time record and
+  // when each value was set, written only when a sample beats it.
+  concurrencyStats: defineTable({
+    kind: v.union(v.literal("hour"), v.literal("allTime"), v.literal("latest")),
+    hourStart: v.number(), // UTC ms at the start of the hour; 0 for allTime and latest
+    date: v.optional(v.string()), // hour rows: UTC "YYYY-MM-DD"
+    hourUTC: v.optional(v.number()), // hour rows: 0-23
+    playersOnline: v.number(),
+    playersInGame: v.number(),
+    activeRooms: v.number(),
+    activeGames: v.number(),
+    playersOnlineAt: v.optional(v.number()), // allTime row: when the online record was set
+    playersInGameAt: v.optional(v.number()), // allTime row: when the in-game record was set
+    updatedAt: v.number(),
+  })
+    .index("by_kind_and_hourStart", ["kind", "hourStart"])
+    .index("by_kind_and_date", ["kind", "date"]),
+
+  // --- Permanent daily rollups (see convex/dailyMetrics.ts) ---
+  // One row per UTC date, never pruned. Rebuilt idempotently from raw
+  // analyticsEvents (90-day window), pageview counters, visitorFirstSeen and
+  // concurrencyStats. Nullable fields are null when the source data did not
+  // exist for that date (never zero-filled).
+  dailyMetrics: defineTable({
+    ...dailyMetricsFields,
+    // Retention of this date's new-visitor cohort, filled in by the rollups of
+    // date+1, date+7 and date+30: visitors seen again on exactly that day.
+    retention: v.optional(dailyRetentionValidator),
+  }).index("by_date", ["date"]),
+
+  // --- Retention identity ---
+  // One row per opaque client visitor id, never pruned. firstSeenDate comes
+  // from the first pageview (or the first join when no pageview landed);
+  // firstPlayedDate from the first join that carried the visitor id.
+  visitorFirstSeen: defineTable({
+    visitorId: v.string(),
+    firstSeenDate: v.string(), // UTC "YYYY-MM-DD"
+    firstPlayedDate: v.optional(v.string()), // UTC "YYYY-MM-DD"
+  })
+    .index("by_visitor", ["visitorId"])
+    .index("by_firstSeenDate", ["firstSeenDate"])
+    .index("by_firstPlayedDate", ["firstPlayedDate"]),
 });
 

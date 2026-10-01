@@ -1,8 +1,120 @@
-import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
+import { mutation, query, internalQuery, internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const dstr = (ms: number) => new Date(ms).toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+
+/**
+ * Normalizes a client-supplied visitor id. Returns null for missing ids and
+ * for the shared "anon" fallback, which would merge unrelated visitors.
+ */
+export function cleanVisitorId(raw: string | undefined | null): string | null {
+  // Same truncation as the pageviewVisits key, so retention lookups match.
+  const id = (raw ?? "").slice(0, 64);
+  if (!id.trim() || id === "anon") return null;
+  return id;
+}
+
+/**
+ * Records the first day a visitor was seen. Inserts only when the visitor has
+ * no row yet; an existing row is never rewritten here.
+ */
+export async function recordVisitorSeen(ctx: MutationCtx, visitorId: string, date: string) {
+  const existing = await ctx.db
+    .query("visitorFirstSeen")
+    .withIndex("by_visitor", (q) => q.eq("visitorId", visitorId))
+    .unique();
+  if (existing) return;
+  await ctx.db.insert("visitorFirstSeen", { visitorId, firstSeenDate: date });
+}
+
+/**
+ * Records the first day a visitor played (joined a room). Writes only when
+ * firstPlayedDate is unset, so repeat joins cost one indexed read.
+ */
+export async function recordVisitorPlayed(ctx: MutationCtx, visitorId: string, date: string) {
+  const existing = await ctx.db
+    .query("visitorFirstSeen")
+    .withIndex("by_visitor", (q) => q.eq("visitorId", visitorId))
+    .unique();
+  if (!existing) {
+    await ctx.db.insert("visitorFirstSeen", {
+      visitorId,
+      firstSeenDate: date,
+      firstPlayedDate: date,
+    });
+    return;
+  }
+  if (existing.firstPlayedDate) return;
+  await ctx.db.patch(existing._id, { firstPlayedDate: date });
+}
+
+// --- Sharded pageview counters ---
+// A counter key's value is the sum of its rows. Writes pick one of
+// PAGEVIEW_SHARDS rows at random so concurrent pageviews rarely touch the same
+// document (one hot row per key produced constant write conflicts and some
+// permanently failed pageviews). Legacy rows without `shard` count as shard 0.
+export const PAGEVIEW_SHARDS = 8;
+
+/** Sum of every shard row for one key (at most PAGEVIEW_SHARDS + 1 rows). */
+export async function readCounter(ctx: QueryCtx, key: string): Promise<number> {
+  const rows = await ctx.db
+    .query("pageviewCounters")
+    .withIndex("by_key", (q) => q.eq("key", key))
+    .take(PAGEVIEW_SHARDS * 2);
+  return rows.reduce((s, r) => s + r.count, 0);
+}
+
+/** Every counter key summed across its shards. */
+export async function readAllCounters(ctx: QueryCtx): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  for await (const row of ctx.db.query("pageviewCounters")) {
+    map.set(row.key, (map.get(row.key) ?? 0) + row.count);
+  }
+  return map;
+}
+
+/** Adds `by` to one randomly chosen shard of `key`. */
+export async function bumpCounter(ctx: MutationCtx, key: string, by = 1, shard?: number) {
+  const s = shard ?? Math.floor(Math.random() * PAGEVIEW_SHARDS);
+  const existing = await ctx.db
+    .query("pageviewCounters")
+    .withIndex("by_key_and_shard", (q) => q.eq("key", key).eq("shard", s))
+    .first();
+  if (existing) await ctx.db.patch(existing._id, { count: existing.count + by });
+  else await ctx.db.insert("pageviewCounters", { key, count: by, shard: s });
+}
+
+/**
+ * Internal, one-off after deploying sharded counters: folds each legacy row
+ * (no `shard` field) into that key's shard 0 row. Totals are unchanged: the
+ * legacy count is added to shard 0 and the legacy row deleted in the same
+ * transaction. Reschedules itself until no legacy row is left.
+ */
+export const migratePageviewShards = internalMutation({
+  args: { batchSize: v.optional(v.number()) },
+  handler: async (ctx, { batchSize }) => {
+    const n = Math.min(Math.max(batchSize ?? 500, 1), 2000);
+    // The table is small (a few rows per day and path), so a filtered scan
+    // taking n legacy rows stays well inside read limits.
+    const legacy = await ctx.db
+      .query("pageviewCounters")
+      .filter((q) => q.eq(q.field("shard"), undefined))
+      .take(n);
+    for (const row of legacy) {
+      await ctx.db.delete(row._id);
+      await bumpCounter(ctx, row.key, row.count, 0);
+    }
+    const folded = legacy.length;
+    const scanned = folded;
+    const more = folded === n;
+    if (more) {
+      await ctx.scheduler.runAfter(0, internal.siteStats.migratePageviewShards, { batchSize: n });
+    }
+    return { folded, scanned, more };
+  },
+});
 
 function sanitizePath(raw: string): string | null {
   let p = (raw || "").split("?")[0].split("#")[0].trim();
@@ -29,14 +141,7 @@ export const recordPageview = mutation({
     const vId = (visitorId || "anon").slice(0, 64);
     const date = dstr(Date.now());
 
-    const bump = async (key: string) => {
-      const existing = await ctx.db
-        .query("pageviewCounters")
-        .withIndex("by_key", (q) => q.eq("key", key))
-        .first();
-      if (existing) await ctx.db.patch(existing._id, { count: existing.count + 1 });
-      else await ctx.db.insert("pageviewCounters", { key, count: 1 });
-    };
+    const bump = (key: string) => bumpCounter(ctx, key);
 
     await bump("total");
     await bump(`path:${p}`);
@@ -49,7 +154,53 @@ export const recordPageview = mutation({
     if (!seen) {
       await ctx.db.insert("pageviewVisits", { date, visitorId: vId });
       await bump(`uvday:${date}`);
+      // First visit of the day: the only time the visitor can be new.
+      const firstSeenId = cleanVisitorId(visitorId);
+      if (firstSeenId) await recordVisitorSeen(ctx, firstSeenId, date);
     }
+  },
+});
+
+/**
+ * Internal, one-off: seeds visitorFirstSeen from the per-day pageviewVisits
+ * rows still on hand (about 120 days). Walks pageviewVisits in date order, so
+ * the first row met for a visitor is its earliest; a row that already exists
+ * is moved earlier only. Reschedules itself page by page until done.
+ * Run before dailyMetrics:backfillDailyMetrics so new/returning and retention
+ * have history to work with.
+ */
+export const backfillVisitorFirstSeen = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())), pageSize: v.optional(v.number()) },
+  handler: async (ctx, { cursor, pageSize }) => {
+    const numItems = Math.min(Math.max(pageSize ?? 1000, 1), 2000);
+    const page = await ctx.db
+      .query("pageviewVisits")
+      .withIndex("by_date_and_visitor")
+      .paginate({ cursor: cursor ?? null, numItems });
+    let inserted = 0;
+    let movedEarlier = 0;
+    for (const visit of page.page) {
+      const visitorId = cleanVisitorId(visit.visitorId);
+      if (!visitorId) continue;
+      const existing = await ctx.db
+        .query("visitorFirstSeen")
+        .withIndex("by_visitor", (q) => q.eq("visitorId", visitorId))
+        .unique();
+      if (!existing) {
+        await ctx.db.insert("visitorFirstSeen", { visitorId, firstSeenDate: visit.date });
+        inserted++;
+      } else if (visit.date < existing.firstSeenDate) {
+        await ctx.db.patch(existing._id, { firstSeenDate: visit.date });
+        movedEarlier++;
+      }
+    }
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.siteStats.backfillVisitorFirstSeen, {
+        cursor: page.continueCursor,
+        pageSize: numItems,
+      });
+    }
+    return { scanned: page.page.length, inserted, movedEarlier, done: page.isDone };
   },
 });
 
@@ -60,7 +211,7 @@ export const recordPageview = mutation({
 export const getDashboard = internalQuery({
   args: {},
   handler: async (ctx) => {
-    const counters = await ctx.db.query("pageviewCounters").collect();
+    const counters = [...(await readAllCounters(ctx)).entries()].map(([key, count]) => ({ key, count }));
     const map: Record<string, number> = {};
     for (const c of counters) map[c.key] = c.count;
 

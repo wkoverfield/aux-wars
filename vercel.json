@@ -3,6 +3,14 @@
   "outputDirectory": "client/dist",
   "installCommand": "npm install",
   "framework": null,
+  "headers": [
+    {
+      "source": "/stats",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",
