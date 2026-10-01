@@ -1,6 +1,8 @@
 import { internalMutation } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { presence } from "../presence";
+import { removePublicPlayer, settlePublicRoom } from "./publicRooms";
+import { PUBLIC_WAITING_TIMEOUT_MS } from "./quickPlayRules";
 
 function now() { return Date.now(); }
 
@@ -79,6 +81,14 @@ export const cleanupInactivePlayers = internalMutation({
       const entries = await presence.listRoom(ctx, roomCode, false);
       const presenceByUser = new Map(entries.map((e) => [e.userId, e]));
 
+      // Quick Play rooms that are waiting (lobby, or game over before the
+      // auto-rematch) drop offline players much sooner: strangers rarely come
+      // back, and a ghost would hold a seat and count toward the countdown.
+      const roomCutoff =
+        room.isPublic && (room.phase === "lobby" || room.phase === "gameOver")
+          ? now() - PUBLIC_WAITING_TIMEOUT_MS
+          : cutoff;
+
       const stalePlayers = roomPlayers.filter((player) => {
         const entry = presenceByUser.get(player.playerId);
         if (entry?.online) return false; // connected — never stale
@@ -87,10 +97,21 @@ export const cleanupInactivePlayers = internalMutation({
         const lastSeen = entry
           ? entry.lastDisconnected
           : (player.connectedAt ?? player._creationTime);
-        return lastSeen < cutoff;
+        return lastSeen < roomCutoff;
       });
 
       if (stalePlayers.length === 0) continue;
+
+      // Quick Play rooms have no host: remove the players, then let the room
+      // re-settle (countdown, running game, or deletion when empty).
+      if (room.isPublic) {
+        for (const player of stalePlayers) {
+          console.log(`[cleanupInactivePlayers] Removing disconnected player ${player.playerId} from public room ${roomCode}`);
+          await removePublicPlayer(ctx, room, player);
+        }
+        await settlePublicRoom(ctx, roomCode, "leave");
+        continue;
+      }
 
       // Remove the stale players (and their presence rows)
       for (const player of stalePlayers) {

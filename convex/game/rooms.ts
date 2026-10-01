@@ -4,6 +4,8 @@ import { internal } from "../_generated/api";
 import { containsHateSpeech } from "./contentFilter";
 import { presence } from "../presence";
 import { cleanVisitorId, recordVisitorPlayed } from "../siteStats";
+import { leavePublicRoom } from "./publicRooms";
+import { QUICK_PLAY_CAP } from "./quickPlayRules";
 
 function now() {
   return Date.now();
@@ -98,6 +100,12 @@ export const joinGame = mutation({
       .withIndex("by_player", (q) => q.eq("playerId", playerId).eq("roomCode", code))
       .unique();
 
+    // Quick Play rooms seat new players only through the matchmaker (cap,
+    // countdown and never-mid-game rules); reconnects take the path below.
+    if (!existing && room.isPublic) {
+      return { success: false, message: "Quick Play rooms can only be joined through Quick Play" };
+    }
+
     const playerCap = room.settings?.hostPro ? PRO_PLAYER_CAP : FREE_PLAYER_CAP;
     if (!existing && players.length >= playerCap) {
       return { success: false, message: `Room is full (max ${playerCap} players)` };
@@ -177,6 +185,7 @@ export const setRoomLock = mutation({
   handler: async (ctx, { code, playerId, connectionId, locked }) => {
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return { success: false, message: "Game code not found" };
+    if (room.isPublic) return { success: false, message: "Quick Play rooms cannot be locked" };
     const host = await validateConnection(ctx, code, playerId, connectionId);
     if (!host || !host.isHost) return { success: false, message: "Only the host can lock the room" };
     await ctx.db.patch(room._id, { locked });
@@ -214,6 +223,13 @@ export const leaveGame = mutation({
     const currentPlayer = await validateConnection(ctx, code, playerId, connectionId);
     if (!currentPlayer) {
       return { roomDeleted: false, message: "Connection issue. Please refresh the page." } as const;
+    }
+
+    // Quick Play: no host to reassign; recompute the countdown or keep the
+    // running game moving, and delete the room once empty.
+    if (room.isPublic) {
+      const { roomDeleted } = await leavePublicRoom(ctx, room, currentPlayer);
+      return { roomDeleted } as const;
     }
 
     const players = await ctx.db
@@ -272,6 +288,9 @@ export const kickPlayer = mutation({
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) {
       return { success: false, message: "Room not found" };
+    }
+    if (room.isPublic) {
+      return { success: false, message: "Quick Play rooms remove players by vote" };
     }
 
     // Verify caller is the host
@@ -402,6 +421,9 @@ export const updateSettings = mutation({
     if (!room) {
       return { success: false, message: "Room not found" } as const;
     }
+    if (room.isPublic) {
+      return { success: false, message: "Quick Play rooms use fixed settings" } as const;
+    }
 
     // Only host can change settings
     const player = await validateConnection(ctx, code, playerId, connectionId);
@@ -471,6 +493,9 @@ export const addCustomPrompt = mutation({
     if (!room) {
       return { success: false, message: "Room not found" } as const;
     }
+    if (room.isPublic) {
+      return { success: false, message: "Quick Play rooms use curated prompts only" } as const;
+    }
 
     // Validate custom prompt length
     const trimmedText = text.trim();
@@ -525,6 +550,9 @@ export const addCustomPrompts = mutation({
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) {
       return { success: false, message: "Room not found", added: 0, skipped: prompts.length, maxedOut: false, selected: 0 } as const;
+    }
+    if (room.isPublic) {
+      return { success: false, message: "Quick Play rooms use curated prompts only", added: 0, skipped: prompts.length, maxedOut: false, selected: 0 } as const;
     }
 
     const allPrompts = await ctx.db
@@ -647,6 +675,8 @@ function publicRoom(room: any) {
   return {
     ...room,
     hostPlayerId: room.hostPlayerId,
+    // Quick Play rooms: the fixed seat count, for "Waiting for players (2/6)".
+    ...(room.isPublic ? { playerCap: QUICK_PLAY_CAP } : {}),
   };
 }
 

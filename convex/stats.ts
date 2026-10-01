@@ -95,6 +95,78 @@ export const getLive = query({
 // Caps for today's in-query raw reads. These event types are a handful per
 // game; the caps only matter on an extreme day, and `truncated` says so.
 const TODAY_EVENT_CAP = 2000;
+const LIVE_COUNT_TYPES = [
+  "game_created",
+  "pro_purchased",
+  "quickplay_clicked",
+  "quickplay_1v1_offered",
+  "quickplay_1v1_accepted",
+] as const;
+
+type QuickPlayDay = {
+  quickPlayClicks?: number;
+  quickPlayMatched?: number;
+  quickPlayMedianWaitMs?: number | null;
+  quickPlayLeftWaiting?: number;
+  quickPlayGamesStarted?: number;
+  quickPlayAvgPlayersAtStart?: number | null;
+  quickPlay1v1Offered?: number;
+  quickPlay1v1Accepted?: number;
+};
+
+/**
+ * Quick Play card totals over a set of day rows. Median wait across days is
+ * the match-weighted median of the daily medians (rows keep no raw waits).
+ */
+export function summarizeQuickPlay(days: QuickPlayDay[]) {
+  let clicks = 0;
+  let matched = 0;
+  let leftWaiting = 0;
+  let gamesStarted = 0;
+  let playersAtStart = 0;
+  let oneVOneOffered = 0;
+  let oneVOneAccepted = 0;
+  const medians: Array<{ ms: number; weight: number }> = [];
+  for (const d of days) {
+    clicks += d.quickPlayClicks ?? 0;
+    matched += d.quickPlayMatched ?? 0;
+    leftWaiting += d.quickPlayLeftWaiting ?? 0;
+    const games = d.quickPlayGamesStarted ?? 0;
+    gamesStarted += games;
+    if (games > 0 && typeof d.quickPlayAvgPlayersAtStart === "number") {
+      playersAtStart += d.quickPlayAvgPlayersAtStart * games;
+    }
+    oneVOneOffered += d.quickPlay1v1Offered ?? 0;
+    oneVOneAccepted += d.quickPlay1v1Accepted ?? 0;
+    if (typeof d.quickPlayMedianWaitMs === "number" && (d.quickPlayMatched ?? 0) > 0) {
+      medians.push({ ms: d.quickPlayMedianWaitMs, weight: d.quickPlayMatched ?? 0 });
+    }
+  }
+  medians.sort((a, b) => a.ms - b.ms);
+  const totalWeight = medians.reduce((s, m) => s + m.weight, 0);
+  let medianWaitMs: number | null = null;
+  let acc = 0;
+  for (const m of medians) {
+    acc += m.weight;
+    if (acc * 2 >= totalWeight) {
+      medianWaitMs = m.ms;
+      break;
+    }
+  }
+  const rate = (n: number, d: number) => (d > 0 ? Math.round(Math.min(1, n / d) * 10000) / 10000 : null);
+  return {
+    clicks,
+    matched,
+    matchRate: rate(matched, clicks),
+    medianWaitMs,
+    leftWaiting,
+    abandonRate: rate(leftWaiting, clicks),
+    gamesStarted,
+    avgPlayersAtStart: gamesStarted > 0 ? Math.round((playersAtStart / gamesStarted) * 100) / 100 : null,
+    oneVOneOffered,
+    oneVOneAccepted,
+  };
+}
 
 async function readToday(ctx: QueryCtx, now: number) {
   const date = dstr(now);
@@ -106,12 +178,13 @@ async function readToday(ctx: QueryCtx, now: number) {
     detail[t] = r.events;
     truncated ||= r.truncated;
   }
-  const created = await readEventsCapped(ctx, "game_created", start, TODAY_EVENT_CAP);
-  const pro = await readEventsCapped(ctx, "pro_purchased", start, TODAY_EVENT_CAP);
-  truncated ||= created.truncated || pro.truncated;
+  // Low-volume count types are read live; songs and ratings are not (below).
   const counts = Object.fromEntries(COUNT_EVENT_TYPES.map((t) => [t, 0])) as DayEvents["counts"];
-  counts.game_created = created.events.length;
-  counts.pro_purchased = pro.events.length;
+  for (const t of LIVE_COUNT_TYPES) {
+    const r = await readEventsCapped(ctx, t, start, TODAY_EVENT_CAP);
+    counts[t] = r.events.length;
+    truncated ||= r.truncated;
+  }
 
   const { pageviews, uniqueVisitors } = await readPageviewDay(ctx, date);
   const hours = await readHourPeaks(ctx, date);
@@ -227,6 +300,8 @@ export const getDashboard = query({
 
     return {
       today: todayRow,
+      // Window days plus today so far (Quick Play is new; today matters).
+      quickPlay: summarizeQuickPlay([...rows, todayRow]),
       days: daysOut,
       hourlyPeaks: byHour,
       retention: {

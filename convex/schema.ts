@@ -44,6 +44,17 @@ export const dailyMetricsFields = {
   hourlyPeaks: v.array(
     v.object({ hourUTC: v.number(), playersOnline: v.number(), playersInGame: v.number() })
   ),
+  // Quick Play funnel. Optional: rows rolled up before Quick Play existed do
+  // not have them.
+  quickPlayClicks: v.optional(v.number()), // seats handed out by quickPlay.join
+  quickPlayMatched: v.optional(v.number()), // waiting players whose game started
+  quickPlayMatchRate: v.optional(v.union(v.number(), v.null())), // matched / clicks, 0-1
+  quickPlayMedianWaitMs: v.optional(v.union(v.number(), v.null())),
+  quickPlayLeftWaiting: v.optional(v.number()), // left before their game started
+  quickPlayGamesStarted: v.optional(v.number()), // includes auto-rematches
+  quickPlayAvgPlayersAtStart: v.optional(v.union(v.number(), v.null())),
+  quickPlay1v1Offered: v.optional(v.number()),
+  quickPlay1v1Accepted: v.optional(v.number()),
 };
 
 const retentionPoint = v.object({ cohort: v.number(), returned: v.number() });
@@ -83,11 +94,28 @@ export default defineSchema({
     promptVotingStartedAt: v.optional(v.number()), // Timestamp when prompt voting started
     skipVotes: v.optional(v.array(v.string())), // Player IDs who voted to skip current prompt
     rematchStartingAt: v.optional(v.number()), // Timestamp the "Play Again" countdown fires (gameOver → fresh game)
+    // --- Quick Play (public, hostless rooms; see convex/quickPlay.ts) ---
+    // Absent on private rooms. Every timestamp below is a scheduled fire time,
+    // written once per state transition (never on a timer); the scheduled
+    // internal mutation no-ops unless the stored value still matches.
+    isPublic: v.optional(v.boolean()),
+    startsAt: v.optional(v.number()), // lobby start countdown fire time (armed at 3+ players)
+    countdownArmedAt: v.optional(v.number()), // when the countdown armed; extensions are capped from here
+    startVotes: v.optional(v.array(v.string())), // playerIds voting "Start now" (unanimous starts)
+    oneVOneOfferAt: v.optional(v.number()), // pending 1v1 offer fire time (exactly 2 players)
+    oneVOneOffered: v.optional(v.boolean()), // the 1v1 offer is showing
+    oneVOneAccepts: v.optional(v.array(v.string())), // playerIds who accepted the 1v1
+    autoAdvanceAt: v.optional(v.number()), // results → next round (or game over) fire time
+    kickVotes: v.optional(
+      v.array(v.object({ targetPlayerId: v.string(), voterIds: v.array(v.string()) }))
+    ),
+    kickedPlayerIds: v.optional(v.array(v.string())), // never matched back into this room
     createdAt: v.number(),
     lastActivityAt: v.number(),
   })
     .index("by_code", ["code"])
-    .index("by_lastActivityAt", ["lastActivityAt"]),
+    .index("by_lastActivityAt", ["lastActivityAt"])
+    .index("by_public_phase", ["isPublic", "phase"]),
 
   players: defineTable({
     roomCode: v.string(),
@@ -102,6 +130,10 @@ export default defineSchema({
     // Optional so existing rows stay valid; safe to drop once old rows age out.
     lastSeenAt: v.optional(v.number()),
     isActive: v.optional(v.boolean()), // Is this the currently active connection for this playerId?
+    // Quick Play: when the matchmaker seated this player. Cleared when their
+    // first game starts (quickplay_matched) or they leave first
+    // (quickplay_left_waiting). Written on those two transitions only.
+    waitingSince: v.optional(v.number()),
     submittedRounds: v.optional(v.array(v.number())), // Tracks which rounds this player has submitted for (prevents race conditions)
     // DEPRECATED: rate-limit stamps. No longer written; they live in
     // playerRateLimits so a vote does not rewrite a document every room
