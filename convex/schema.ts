@@ -135,6 +135,11 @@ export default defineSchema({
     // Optional so existing rows stay valid; safe to drop once old rows age out.
     lastSeenAt: v.optional(v.number()),
     isActive: v.optional(v.boolean()), // Is this the currently active connection for this playerId?
+    // SHA-256 of the seat key that seated this player (see game/roomOps.ts).
+    // Required to take over the seat from a new connection. Always set on
+    // Quick Play seats; set on private-room seats when the client sends one.
+    // Never returned by a query.
+    seatKeyHash: v.optional(v.string()),
     // Quick Play: when the matchmaker seated this player. Cleared when their
     // first game starts (quickplay_matched) or they leave first
     // (quickplay_left_waiting). Written on those two transitions only.

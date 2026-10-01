@@ -7,6 +7,9 @@ import {
   generateRoomCode,
   getRoom,
   getRoomPlayers,
+  hashSeatKey,
+  isValidSeatKey,
+  mayTakeOverSeat,
   type Player,
   type Room,
 } from "./game/roomOps";
@@ -91,11 +94,17 @@ export const join = mutation({
   args: {
     playerId: v.string(),
     connectionId: v.string(),
+    // Secret the client keeps next to playerId; proves ownership of the seat
+    // on rejoin (see seat keys in game/roomOps.ts).
+    seatKey: v.string(),
     name: v.optional(v.string()), // omitted: the server assigns a fun name
     visitorId: v.optional(v.string()),
   },
-  handler: async (ctx, { playerId, connectionId, name, visitorId }) => {
+  handler: async (ctx, { playerId, connectionId, seatKey, name, visitorId }) => {
     if (!playerId.trim() || playerId.length > 100 || !connectionId || connectionId.length > 200) {
+      return { success: false, message: "Invalid player" } as const;
+    }
+    if (!isValidSeatKey(seatKey)) {
       return { success: false, message: "Invalid player" } as const;
     }
 
@@ -112,7 +121,8 @@ export const join = mutation({
 
     // Already seated in a public room (double click, second tab, came back
     // from the homepage): take over the connection there instead of seating
-    // the same player twice.
+    // the same player twice. Only with that seat's key: playerIds are visible
+    // to everyone in the room, so a playerId alone proves nothing.
     const memberships = await ctx.db
       .query("players")
       .withIndex("by_player", (q) => q.eq("playerId", playerId))
@@ -120,6 +130,9 @@ export const join = mutation({
     for (const m of memberships) {
       const room = await getRoom(ctx, m.roomCode);
       if (!room?.isPublic) continue;
+      if (!(await mayTakeOverSeat(room, m, seatKey))) {
+        return { success: false, message: "This player is already in a Quick Play game" } as const;
+      }
       await ctx.db.patch(m._id, { connectionId, connectedAt: now(), isActive: true });
       await ctx.db.patch(room._id, { lastActivityAt: now() });
       return { success: true, code: room.code, name: m.name, playerId, rejoined: true } as const;
@@ -142,6 +155,9 @@ export const join = mutation({
       if (!acceptsNewPlayers(room, playerId, t)) continue;
       const players = await getRoomPlayers(ctx, room.code);
       if (players.length >= QUICK_PLAY_CAP) continue;
+      // The membership scan above is bounded, so a playerId seated in many
+      // rooms can slip past it. Never seat a playerId twice in one room.
+      if (players.some((p) => p.playerId === playerId)) continue;
       if (
         !best ||
         players.length > best.players.length ||
@@ -182,6 +198,7 @@ export const join = mutation({
       roomCode: room.code,
       playerId,
       connectionId,
+      seatKeyHash: await hashSeatKey(seatKey),
       name: playerName,
       isHost: false,
       isReady: false,

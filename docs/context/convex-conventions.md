@@ -87,6 +87,23 @@ Anything that writes fixture data, resets state, or exists only for testing must
 be declared with `internalMutation` / `internalAction`. A public mutation is
 callable by anyone who can reach the deployment.
 
+## playerId is public; seats are guarded by connectionId and seat key
+
+Every client in a room reads the other players' `playerId`s (player lists,
+start, 1v1 and kick vote arrays), so a `playerId` is never a credential on its
+own.
+
+- Acting as a player requires the seat's current `connectionId`
+  (`validateConnection`). No query returns `connectionId`.
+- Pointing a seat at a new connection (`quickPlay.join` rejoin,
+  `game/rooms.joinGame` takeover) requires the seat key that seated it
+  (`mayTakeOverSeat` in `convex/game/roomOps.ts`). Only its SHA-256 hash is
+  stored, on `players.seatKeyHash`. Every Quick Play seat has one; private-room
+  seats have one when the client sent it.
+- Any new path that writes `players.connectionId` goes through
+  `mayTakeOverSeat`, and `publicPlayer` (or any other query shape) never
+  includes `connectionId` or `seatKeyHash`.
+
 ## Typechecking
 
 `convex/` has its own `convex/tsconfig.json` and is checked by `npm run

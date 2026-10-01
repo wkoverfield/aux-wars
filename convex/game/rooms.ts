@@ -5,6 +5,7 @@ import { containsHateSpeech } from "./contentFilter";
 import { presence } from "../presence";
 import { cleanVisitorId, recordVisitorPlayed } from "../siteStats";
 import { leavePublicRoom } from "./publicRooms";
+import { hashSeatKey, isValidSeatKey, mayTakeOverSeat } from "./roomOps";
 import { QUICK_PLAY_CAP } from "./quickPlayRules";
 
 function now() {
@@ -73,8 +74,12 @@ export const joinGame = mutation({
     connectionId: v.string(),
     name: v.string(),
     visitorId: v.optional(v.string()),
+    // Seat key (see game/roomOps.ts). Required to reconnect to a Quick Play
+    // seat; optional in private rooms, where it is stored when sent so that
+    // seat can then only be taken over with it.
+    seatKey: v.optional(v.string()),
   },
-  handler: async (ctx, { code, playerId, connectionId, name, visitorId }) => {
+  handler: async (ctx, { code, playerId, connectionId, name, visitorId, seatKey }) => {
     // Validate player name
     const trimmedName = name.trim();
     if (!trimmedName || trimmedName.length < 1 || trimmedName.length > 50) {
@@ -82,6 +87,9 @@ export const joinGame = mutation({
     }
     if (containsHateSpeech(trimmedName)) {
       return { success: false, message: "Please choose a different name" };
+    }
+    if (seatKey !== undefined && !isValidSeatKey(seatKey)) {
+      return { success: false, message: "Invalid player" };
     }
 
     const room = await getRoomByCodeInternal(ctx, code);
@@ -119,7 +127,12 @@ export const joinGame = mutation({
 
     if (existing) {
       // CONNECTION TAKEOVER: This player is rejoining from another tab/device
-      // Deactivate the old connection and activate this new one
+      // Deactivate the old connection and activate this new one. playerIds
+      // are visible to everyone in the room, so a keyed seat also needs its
+      // seat key.
+      if (!(await mayTakeOverSeat(room, existing, seatKey))) {
+        return { success: false, message: "Could not rejoin this game. Please refresh the page." };
+      }
       const oldConnectionId = existing.connectionId;
 
       await ctx.db.patch(existing._id, {
@@ -143,6 +156,7 @@ export const joinGame = mutation({
         roomCode: code,
         playerId,
         connectionId,
+        ...(seatKey !== undefined ? { seatKeyHash: await hashSeatKey(seatKey) } : {}),
         name: trimmedName,
         isHost: isFirst,
         isReady: false,

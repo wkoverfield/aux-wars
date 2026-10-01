@@ -33,6 +33,40 @@ export async function getRoomPlayers(ctx: MutationCtx, code: string): Promise<Pl
     .collect();
 }
 
+/**
+ * Seat keys. playerId is a public identifier: every client in a room reads
+ * the other players' ids (player lists, start/1v1/kick vote arrays). It cannot
+ * also be the credential for taking over a seat, or anyone in a room could
+ * take over anyone else's seat and act (and vote) as them.
+ *
+ * The client keeps a random seat key next to its playerId and presents it
+ * when it is seated and on every rejoin. Only its SHA-256 hash is stored
+ * (players.seatKeyHash), and no query returns it.
+ */
+export const SEAT_KEY_MIN_LENGTH = 16;
+export const SEAT_KEY_MAX_LENGTH = 200;
+
+export function isValidSeatKey(seatKey: string): boolean {
+  return seatKey.length >= SEAT_KEY_MIN_LENGTH && seatKey.length <= SEAT_KEY_MAX_LENGTH;
+}
+
+export async function hashSeatKey(seatKey: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seatKey));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * True when a caller presenting `seatKey` may take over `player`'s seat (point
+ * it at a new connection). A seat that has a key needs that key. A seat
+ * without one is a private-room seat from before seat keys, which keeps the
+ * old playerId-only takeover; a keyless public seat is never taken over.
+ */
+export async function mayTakeOverSeat(room: Room, player: Player, seatKey: string | undefined): Promise<boolean> {
+  if (!player.seatKeyHash) return !room.isPublic;
+  if (seatKey === undefined || !isValidSeatKey(seatKey)) return false;
+  return (await hashSeatKey(seatKey)) === player.seatKeyHash;
+}
+
 /** The room's current game epoch (see rooms.gameEpoch in the schema). */
 export function gameEpochOf(room: Room): number {
   return room.gameEpoch ?? 0;

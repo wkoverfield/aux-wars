@@ -46,11 +46,13 @@ async function advance(t: T, ms: number) {
 }
 
 const conn = (id: string) => `conn-${id}`;
+const seatKey = (id: string) => `seat-key-${id}-0123456789abcdef`;
 
 async function join(t: T, playerId: string, extra: { name?: string; connectionId?: string } = {}) {
   const res = await t.mutation(api.quickPlay.join, {
     playerId,
     connectionId: extra.connectionId ?? conn(playerId),
+    seatKey: seatKey(playerId),
     ...(extra.name !== undefined ? { name: extra.name } : {}),
   });
   if (!res.success) throw new Error(`join failed: ${res.message}`);
@@ -221,9 +223,19 @@ describe("placement", () => {
   test("a requested name is used when valid and rejected when not", async () => {
     const t = setup();
     expect((await join(t, "p1", { name: "  QA-Bob  " })).name).toBe("QA-Bob");
-    const slur = await t.mutation(api.quickPlay.join, { playerId: "p2", connectionId: "c2", name: "faggot" });
+    const slur = await t.mutation(api.quickPlay.join, {
+      playerId: "p2",
+      connectionId: "c2",
+      seatKey: seatKey("p2"),
+      name: "faggot",
+    });
     expect(slur.success).toBe(false);
-    const long = await t.mutation(api.quickPlay.join, { playerId: "p3", connectionId: "c3", name: "x".repeat(51) });
+    const long = await t.mutation(api.quickPlay.join, {
+      playerId: "p3",
+      connectionId: "c3",
+      seatKey: seatKey("p3"),
+      name: "x".repeat(51),
+    });
     expect(long.success).toBe(false);
   });
 });
@@ -591,7 +603,13 @@ describe("host-only actions on public rooms", () => {
 
     // Reconnect by code still works for a seated player.
     expect(
-      await t.mutation(api.game.rooms.joinGame, { code, playerId: "p2", connectionId: "conn-p2-b", name: "QA-p2" })
+      await t.mutation(api.game.rooms.joinGame, {
+        code,
+        playerId: "p2",
+        connectionId: "conn-p2-b",
+        name: "QA-p2",
+        seatKey: seatKey("p2"),
+      })
     ).toMatchObject({ success: true, tookOver: true });
   });
 
@@ -761,6 +779,153 @@ describe("majority kick", () => {
     await t.mutation(api.quickPlay.voteKick, { code, playerId: "p2", connectionId: conn("p2"), targetPlayerId: "p4" });
     await leave(t, code, "p1");
     expect((await room(t, code))!.kickVotes).toEqual([{ targetPlayerId: "p4", voterIds: ["p2"] }]);
+  });
+});
+
+describe("seat ownership", () => {
+  // Every client in a room reads the other players' playerIds, so a playerId
+  // alone must not let a stranger take over a seat.
+  test("a stranger presenting another player's playerId cannot rejoin or vote as them", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    for (const id of ["p2", "p3", "p4"]) await join(t, id);
+    const strangerConn = "conn-stranger";
+    const strangerKey = "stranger-key-0123456789abcdef";
+
+    // Through Quick Play, with a wrong key or with no valid key.
+    expect(
+      await t.mutation(api.quickPlay.join, { playerId: "p2", connectionId: strangerConn, seatKey: strangerKey })
+    ).toMatchObject({ success: false });
+    expect(
+      await t.mutation(api.quickPlay.join, { playerId: "p2", connectionId: strangerConn, seatKey: "short" })
+    ).toMatchObject({ success: false });
+
+    // Through a code reconnect, with a wrong key or none.
+    expect(
+      await t.mutation(api.game.rooms.joinGame, {
+        code,
+        playerId: "p2",
+        connectionId: strangerConn,
+        name: "QA-stranger",
+        seatKey: strangerKey,
+      })
+    ).toMatchObject({ success: false });
+    expect(
+      await t.mutation(api.game.rooms.joinGame, { code, playerId: "p2", connectionId: strangerConn, name: "QA-stranger" })
+    ).toMatchObject({ success: false });
+
+    const p2 = (await players(t, code)).find((p) => p.playerId === "p2")!;
+    expect(p2.connectionId).toBe(conn("p2"));
+    expect(p2.name).not.toBe("QA-stranger");
+
+    // The stranger's connection cannot vote as p2 or p3.
+    for (const voter of ["p2", "p3"]) {
+      expect(
+        await t.mutation(api.quickPlay.voteKick, {
+          code,
+          playerId: voter,
+          connectionId: strangerConn,
+          targetPlayerId: "p4",
+        })
+      ).toMatchObject({ success: false });
+    }
+    expect(
+      await t.mutation(api.quickPlay.voteStart, { code, playerId: "p2", connectionId: strangerConn })
+    ).toMatchObject({ success: false });
+    const r = (await room(t, code))!;
+    expect(r.kickVotes ?? []).toEqual([]);
+    expect(r.startVotes ?? []).toEqual([]);
+    expect((await players(t, code)).map((p) => p.playerId)).toContain("p4");
+  });
+
+  test("the seat key is stored hashed and never returned by room queries", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    const [p1] = await players(t, code);
+    expect(p1.seatKeyHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(p1.seatKeyHash).not.toContain(seatKey("p1"));
+    const view = await t.query(api.game.rooms.getRoomByCode, { code });
+    const list = await t.query(api.game.rooms.getPlayers, { code });
+    expect(JSON.stringify(view)).not.toContain(p1.seatKeyHash!);
+    expect(JSON.stringify(list)).not.toContain(p1.seatKeyHash!);
+  });
+
+  test("a public seat without a stored key cannot be taken over", async () => {
+    const t = setup();
+    await insertRoom(t, "QAKEYS", { playerIds: ["o1", "o2"] });
+    expect(
+      await t.mutation(api.game.rooms.joinGame, {
+        code: "QAKEYS",
+        playerId: "o1",
+        connectionId: "conn-other",
+        name: "QA-other",
+        seatKey: seatKey("o1"),
+      })
+    ).toMatchObject({ success: false });
+  });
+
+  test("placement never seats a playerId twice in one room", async () => {
+    const t = setup();
+    // o1 is seated in the only open room, but its membership is not found by
+    // the bounded scan (simulated with a seat in more private rooms than it reads).
+    await insertRoom(t, "QAFULL", { playerIds: ["o1", "o2"] });
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 25; i++) {
+        const code = `AAA${String(i).padStart(3, "0")}`;
+        await ctx.db.insert("rooms", {
+          code,
+          phase: "lobby",
+          currentRound: 1,
+          settings: quickPlaySettings(),
+          createdAt: Date.now(),
+          lastActivityAt: Date.now(),
+        });
+        await ctx.db.insert("players", {
+          roomCode: code,
+          playerId: "o1",
+          connectionId: "conn-x",
+          name: "QA-o1",
+          isHost: true,
+          isReady: false,
+        });
+      }
+    });
+    const res = await t.mutation(api.quickPlay.join, {
+      playerId: "o1",
+      connectionId: "conn-stranger",
+      seatKey: "stranger-key-0123456789abcdef",
+    });
+    if (res.success) expect(res.code).not.toBe("QAFULL");
+    expect((await players(t, "QAFULL")).filter((p) => p.playerId === "o1")).toHaveLength(1);
+  });
+
+  test("private rooms keep keyless reconnects and honor a key once one is stored", async () => {
+    const t = setup();
+    const { code } = await t.mutation(api.game.rooms.hostGame, {});
+    await t.mutation(api.game.rooms.joinGame, { code, playerId: "h", connectionId: "c-h", name: "QA-h" });
+    await t.mutation(api.game.rooms.joinGame, {
+      code,
+      playerId: "k",
+      connectionId: "c-k",
+      name: "QA-k",
+      seatKey: seatKey("k"),
+    });
+
+    expect(
+      await t.mutation(api.game.rooms.joinGame, { code, playerId: "h", connectionId: "c-h2", name: "QA-h" })
+    ).toMatchObject({ success: true, tookOver: true });
+    expect(
+      await t.mutation(api.game.rooms.joinGame, { code, playerId: "k", connectionId: "c-k2", name: "QA-k" })
+    ).toMatchObject({ success: false });
+    expect(
+      await t.mutation(api.game.rooms.joinGame, {
+        code,
+        playerId: "k",
+        connectionId: "c-k2",
+        name: "QA-k",
+        seatKey: seatKey("k"),
+      })
+    ).toMatchObject({ success: true, tookOver: true });
   });
 });
 
