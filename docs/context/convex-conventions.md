@@ -90,8 +90,8 @@ callable by anyone who can reach the deployment.
 ## playerId is public; seats are guarded by connectionId and seat key
 
 Every client in a room reads the other players' `playerId`s (player lists,
-start, 1v1 and kick vote arrays), so a `playerId` is never a credential on its
-own.
+round results, prompt skip votes), so a `playerId` is never a credential on
+its own.
 
 - Acting as a player requires the seat's current `connectionId`
   (`validateConnection`). No query returns `connectionId`.
@@ -111,3 +111,12 @@ typecheck:convex`. Run it before committing changes under `convex/`. It exists
 because untypechecked code shipped an always-true comparison between a branded
 `Id` and a plain field, which made the cleanup cron silently double-assign
 hosts.
+
+## Quick Play votes are keyed by player doc _id; kick votes stay server side
+
+`rooms.startVotes`, `rooms.oneVOneAccepts` and `rooms.kickVotes` hold `players`
+document ids, not `playerId`s. `getRoomByCode` never returns `kickVotes` or
+`kickedPlayerIds`: kick votes leave the server only as anonymous per-target
+tallies (`room.kickTallies`: `{ targetPlayerDocId, votes, needed }`), so no
+client can tell who voted to kick whom. Any new query that returns room state
+must strip them the same way (`publicRoom` in `convex/game/rooms.ts`).

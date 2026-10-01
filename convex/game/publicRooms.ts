@@ -1,4 +1,5 @@
 import type { MutationCtx } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
 import type { EventMetadata } from "../analytics";
 import { internal } from "../_generated/api";
 import { presence } from "../presence";
@@ -62,19 +63,37 @@ async function track(ctx: MutationCtx, eventType: string, metadata: EventMetadat
 const sameList = (a: string[] | undefined, b: string[] | undefined) =>
   JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
 
-type KickVote = { targetPlayerId: string; voterIds: string[] };
+type PlayerDocId = Id<"players">;
+type KickVote = { targetId: PlayerDocId; voterIds: PlayerDocId[] };
 
 /** Kick votes with departed targets and voters dropped. */
-export function liveKickVotes(votes: KickVote[] | undefined, playerIds: Set<string>): KickVote[] {
+export function liveKickVotes(votes: KickVote[] | undefined, seated: Set<string>): KickVote[] {
   return (votes ?? [])
-    .filter((kv) => playerIds.has(kv.targetPlayerId))
-    .map((kv) => ({ ...kv, voterIds: kv.voterIds.filter((id) => playerIds.has(id)) }))
+    .filter((kv) => seated.has(kv.targetId))
+    .map((kv) => ({ ...kv, voterIds: kv.voterIds.filter((id) => seated.has(id)) }))
     .filter((kv) => kv.voterIds.length > 0);
 }
 
 /** Votes needed to kick someone: a majority of the other players. */
 export function kickVotesNeeded(playerCount: number): number {
   return Math.floor((playerCount - 1) / 2) + 1;
+}
+
+/**
+ * The kick votes clients may see: one anonymous tally per targeted player.
+ * Voter ids never leave the server, so nobody can tell who voted against whom.
+ */
+export function kickTallies(
+  votes: KickVote[] | undefined,
+  players: Array<{ _id: PlayerDocId }>
+): Array<{ targetPlayerDocId: PlayerDocId; votes: number; needed: number }> {
+  const seated = new Set<string>(players.map((p) => p._id));
+  const needed = kickVotesNeeded(players.length);
+  return liveKickVotes(votes, seated).map((kv) => ({
+    targetPlayerDocId: kv.targetId,
+    votes: kv.voterIds.length,
+    needed,
+  }));
 }
 
 /**
@@ -212,20 +231,20 @@ export async function reconcileLobby(ctx: MutationCtx, room: Room, players: Play
     await deleteRoomCascade(ctx, room);
     return;
   }
-  const ids = new Set(players.map((p) => p.playerId));
+  const ids = new Set<string>(players.map((p) => p._id));
   const t = now();
 
   if (n >= QUICK_PLAY_CAP) return await launchLobby(ctx, room, players, "full");
 
   const startVotes = (room.startVotes ?? []).filter((id) => ids.has(id));
-  if (n >= 2 && players.every((p) => startVotes.includes(p.playerId))) {
+  if (n >= 2 && players.every((p) => startVotes.includes(p._id))) {
     return await launchLobby(ctx, room, players, "vote");
   }
 
   let oneVOneAccepts = (room.oneVOneAccepts ?? []).filter((id) => ids.has(id));
   let oneVOneOffered = room.oneVOneOffered === true;
   let oneVOneOfferAt = room.oneVOneOfferAt;
-  if (n === 2 && oneVOneOffered && players.every((p) => oneVOneAccepts.includes(p.playerId))) {
+  if (n === 2 && oneVOneOffered && players.every((p) => oneVOneAccepts.includes(p._id))) {
     return await launchLobby(ctx, room, players, "1v1");
   }
 
@@ -324,7 +343,7 @@ export async function settlePublicRoom(
     return { roomDeleted: false };
   }
 
-  const ids = new Set(players.map((p) => p.playerId));
+  const ids = new Set<string>(players.map((p) => p._id));
   const kickVotes = liveKickVotes(room.kickVotes, ids);
   if (JSON.stringify(kickVotes) !== JSON.stringify(room.kickVotes ?? [])) {
     await ctx.db.patch(room._id, { kickVotes });

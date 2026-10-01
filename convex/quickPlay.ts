@@ -1,8 +1,10 @@
 import { v } from "convex/values";
-import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { containsHateSpeech } from "./game/contentFilter";
 import { cleanVisitorId, recordVisitorPlayed } from "./siteStats";
+import { presence } from "./presence";
 import {
   generateRoomCode,
   getRoom,
@@ -16,6 +18,7 @@ import {
 import {
   dropKnownOffline,
   kickVotesNeeded,
+  leavePublicRoom,
   liveKickVotes,
   reconcileLobby,
   removePublicPlayer,
@@ -27,6 +30,7 @@ import {
   JOIN_REMATCH_MARGIN_MS,
   JOIN_START_MARGIN_MS,
   ONE_V_ONE_OFFER_MS,
+  PLACEMENT_RECENT_MS,
   QUICK_PLAY_CAP,
   generateFunName,
   quickPlaySettings,
@@ -90,6 +94,28 @@ function acceptsNewPlayers(room: Room, playerId: string, t: number): boolean {
   return false; // never seat anyone in a started game
 }
 
+type PresenceEntry = { userId: string; online: boolean; lastDisconnected: number };
+
+async function presenceByUser(ctx: QueryCtx | MutationCtx, code: string) {
+  const entries: PresenceEntry[] = await presence.listRoom(ctx, code, false);
+  return new Map(entries.map((e) => [e.userId, e]));
+}
+
+/**
+ * Players placement treats as really there: online, or offline (or joined
+ * with no heartbeat yet) less than PLACEMENT_RECENT_MS ago.
+ */
+function livePlayerCount(players: Player[], byUser: Map<string, PresenceEntry>, t: number): number {
+  const cutoff = t - PLACEMENT_RECENT_MS;
+  let live = 0;
+  for (const p of players) {
+    const entry = byUser.get(p.playerId);
+    if (entry?.online) live++;
+    else if ((entry ? entry.lastDisconnected : (p.connectedAt ?? p._creationTime)) >= cutoff) live++;
+  }
+  return live;
+}
+
 export const join = mutation({
   args: {
     playerId: v.string(),
@@ -138,7 +164,10 @@ export const join = mutation({
       return { success: true, code: room.code, name: m.name, playerId, rejoined: true } as const;
     }
 
-    // Placement: the open room with the most players (oldest on a tie).
+    // Placement: the open room with the most live players (then most seated,
+    // then oldest). A room whose players have all gone quiet (closed tabs the
+    // cleanup cron has not swept yet) is skipped: a newcomer would only wait
+    // with ghosts.
     const t = now();
     const open = [
       ...(await ctx.db
@@ -150,7 +179,7 @@ export const join = mutation({
         .withIndex("by_public_phase", (q) => q.eq("isPublic", true).eq("phase", "gameOver"))
         .take(MAX_OPEN_ROOMS_SCANNED)),
     ];
-    let best: { room: Room; players: Player[] } | null = null;
+    let best: { room: Room; players: Player[]; live: number } | null = null;
     for (const room of open) {
       if (!acceptsNewPlayers(room, playerId, t)) continue;
       const players = await getRoomPlayers(ctx, room.code);
@@ -158,12 +187,17 @@ export const join = mutation({
       // The membership scan above is bounded, so a playerId seated in many
       // rooms can slip past it. Never seat a playerId twice in one room.
       if (players.some((p) => p.playerId === playerId)) continue;
+      const live = livePlayerCount(players, await presenceByUser(ctx, room.code), t);
+      if (live === 0) continue;
       if (
         !best ||
-        players.length > best.players.length ||
-        (players.length === best.players.length && room._creationTime < best.room._creationTime)
+        live > best.live ||
+        (live === best.live && players.length > best.players.length) ||
+        (live === best.live &&
+          players.length === best.players.length &&
+          room._creationTime < best.room._creationTime)
       ) {
-        best = { room, players };
+        best = { room, players, live };
       }
     }
 
@@ -226,10 +260,20 @@ export const join = mutation({
 });
 
 /**
- * Players waiting in public lobbies, for the homepage line. Reads only the
- * public-lobby index range and those rooms' players (no clock reads, no
- * per-user args), so one cached execution serves every homepage and it
- * re-runs only when a public lobby changes.
+ * Players waiting in public lobbies, for the homepage line.
+ *
+ * Counts a seated player only while presence reports them online, or before
+ * their first heartbeat lands (no presence entry yet), so closed or abandoned
+ * tabs do not inflate the number. It deliberately reads no clock: a
+ * Date.now() read would make every execution unique and defeat the query
+ * cache. The cost is that a player who switched tabs while waiting drops out
+ * of the count until they come back (placement still treats them as live for
+ * PLACEMENT_RECENT_MS).
+ *
+ * No per-user args, so one cached execution serves every homepage. It re-runs
+ * when a public lobby or its players change, or when presence records an
+ * online/offline transition in one of those rooms (steady-state heartbeats
+ * write nothing).
  */
 export const waitingCount = query({
   args: {},
@@ -244,7 +288,12 @@ export const waitingCount = query({
         .query("players")
         .withIndex("by_room", (q) => q.eq("roomCode", room.code))
         .take(QUICK_PLAY_CAP);
-      waiting += players.length;
+      if (players.length === 0) continue;
+      const byUser = await presenceByUser(ctx, room.code);
+      for (const p of players) {
+        const entry = byUser.get(p.playerId);
+        if (!entry || entry.online) waiting++;
+      }
     }
     return { waiting };
   },
@@ -256,14 +305,14 @@ export const voteStart = mutation({
   handler: async (ctx, { code, playerId, connectionId, vote }) => {
     const found = await publicRoomAndPlayer(ctx, code, playerId, connectionId);
     if ("error" in found) return { success: false, message: found.error } as const;
-    const { room } = found;
+    const { room, player } = found;
     if (room.phase !== "lobby") return { success: false, message: "The game already started" } as const;
 
     const want = vote ?? true;
     const current = room.startVotes ?? [];
-    const has = current.includes(playerId);
+    const has = current.includes(player._id);
     if (want !== has) {
-      const startVotes = want ? [...current, playerId] : current.filter((id) => id !== playerId);
+      const startVotes = want ? [...current, player._id] : current.filter((id) => id !== player._id);
       await ctx.db.patch(room._id, { startVotes, lastActivityAt: now() });
       const fresh = (await ctx.db.get(room._id))!;
       await reconcileLobby(ctx, fresh, await getRoomPlayers(ctx, code), "refresh");
@@ -278,7 +327,7 @@ export const respondOneVOne = mutation({
   handler: async (ctx, { code, playerId, connectionId, accept }) => {
     const found = await publicRoomAndPlayer(ctx, code, playerId, connectionId);
     if ("error" in found) return { success: false, message: found.error } as const;
-    const { room } = found;
+    const { room, player } = found;
     if (room.phase !== "lobby" || room.oneVOneOffered !== true) {
       return { success: false, message: "No 1v1 offer is open" } as const;
     }
@@ -297,8 +346,8 @@ export const respondOneVOne = mutation({
     }
 
     const accepts = room.oneVOneAccepts ?? [];
-    if (!accepts.includes(playerId)) {
-      await ctx.db.patch(room._id, { oneVOneAccepts: [...accepts, playerId], lastActivityAt: now() });
+    if (!accepts.includes(player._id)) {
+      await ctx.db.patch(room._id, { oneVOneAccepts: [...accepts, player._id], lastActivityAt: now() });
       const fresh = (await ctx.db.get(room._id))!;
       await reconcileLobby(ctx, fresh, await getRoomPlayers(ctx, code), "refresh");
     }
@@ -310,42 +359,50 @@ export const respondOneVOne = mutation({
  * Vote to remove a player from a public room (any phase). A majority of the
  * other players removes them, and they are never matched back into the room.
  * Needs 3+ players: with 2, leaving is the remedy.
+ *
+ * Votes are anonymous: the result and getRoomByCode carry only the target's
+ * tally ({ votes, needed }), never who voted.
  */
 export const voteKick = mutation({
-  args: { code: v.string(), playerId: v.string(), connectionId: v.string(), targetPlayerId: v.string() },
-  handler: async (ctx, { code, playerId, connectionId, targetPlayerId }) => {
+  args: {
+    code: v.string(),
+    playerId: v.string(),
+    connectionId: v.string(),
+    targetPlayerDocId: v.id("players"),
+  },
+  handler: async (ctx, { code, playerId, connectionId, targetPlayerDocId }) => {
     const found = await publicRoomAndPlayer(ctx, code, playerId, connectionId);
     if ("error" in found) return { success: false, message: found.error } as const;
-    const { room } = found;
-    if (playerId === targetPlayerId) return { success: false, message: "You cannot kick yourself" } as const;
+    const { room, player } = found;
+    if (player._id === targetPlayerDocId) return { success: false, message: "You cannot kick yourself" } as const;
 
     const players = await getRoomPlayers(ctx, code);
-    const target = players.find((p) => p.playerId === targetPlayerId);
+    const target = players.find((p) => p._id === targetPlayerDocId);
     if (!target) return { success: false, message: "Player not found" } as const;
     if (players.length < 3) return { success: false, message: "Kick votes need at least 3 players" } as const;
 
-    const ids = new Set(players.map((p) => p.playerId));
-    const votes = liveKickVotes(room.kickVotes, ids);
-    const entry = votes.find((kv) => kv.targetPlayerId === targetPlayerId);
-    const voterIds = entry ? entry.voterIds : [];
-    if (voterIds.includes(playerId)) {
-      return { success: true, kicked: false, votes: voterIds.length, needed: kickVotesNeeded(players.length) } as const;
-    }
-    const nextVoters = [...voterIds, playerId];
+    const seated = new Set<string>(players.map((p) => p._id));
+    const votes = liveKickVotes(room.kickVotes, seated);
+    const entry = votes.find((kv) => kv.targetId === targetPlayerDocId);
+    const voterIds: Id<"players">[] = entry ? entry.voterIds : [];
     const needed = kickVotesNeeded(players.length);
+    if (voterIds.includes(player._id)) {
+      return { success: true, kicked: false, votes: voterIds.length, needed } as const;
+    }
+    const nextVoters = [...voterIds, player._id];
 
     if (nextVoters.length < needed) {
       const kickVotes = entry
-        ? votes.map((kv) => (kv.targetPlayerId === targetPlayerId ? { ...kv, voterIds: nextVoters } : kv))
-        : [...votes, { targetPlayerId, voterIds: nextVoters }];
+        ? votes.map((kv) => (kv.targetId === targetPlayerDocId ? { ...kv, voterIds: nextVoters } : kv))
+        : [...votes, { targetId: targetPlayerDocId, voterIds: nextVoters }];
       await ctx.db.patch(room._id, { kickVotes, lastActivityAt: now() });
       return { success: true, kicked: false, votes: nextVoters.length, needed } as const;
     }
 
     await removePublicPlayer(ctx, room, target);
     await ctx.db.patch(room._id, {
-      kickedPlayerIds: [...(room.kickedPlayerIds ?? []), targetPlayerId],
-      kickVotes: votes.filter((kv) => kv.targetPlayerId !== targetPlayerId),
+      kickedPlayerIds: [...(room.kickedPlayerIds ?? []), target.playerId],
+      kickVotes: votes.filter((kv) => kv.targetId !== targetPlayerDocId),
       lastActivityAt: now(),
     });
     await settlePublicRoom(ctx, code, "leave");
@@ -381,5 +438,26 @@ export const fireOneVOneOffer = internalMutation({
       eventType: "quickplay_1v1_offered",
       metadata: { roomCode: code },
     });
+  },
+});
+
+/**
+ * A public-room tab closed (leaveGame with onClose) a few seconds ago. Release
+ * the seat unless the player came back: presence online again (the "close"
+ * was a reload) or the seat moved to another connection.
+ */
+export const leaveAfterClose = internalMutation({
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
+    const room = await getRoom(ctx, code);
+    if (!room || !room.isPublic) return;
+    const player = await ctx.db
+      .query("players")
+      .withIndex("by_player", (q) => q.eq("playerId", playerId).eq("roomCode", code))
+      .unique();
+    if (!player || player.connectionId !== connectionId) return;
+    const entry = (await presenceByUser(ctx, code)).get(playerId);
+    if (entry?.online) return;
+    await leavePublicRoom(ctx, room, player);
   },
 });

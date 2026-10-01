@@ -14,6 +14,8 @@ import {
   PUBLIC_IN_GAME_GRACE_MS,
   PUBLIC_IN_GAME_OFFLINE_MS,
   PUBLIC_WAITING_TIMEOUT_MS,
+  CLOSE_LEAVE_DELAY_MS,
+  PLACEMENT_RECENT_MS,
   generateFunName,
   quickPlaySettings,
 } from "./game/quickPlayRules";
@@ -115,6 +117,13 @@ async function insertRoom(
       });
     }
   });
+}
+
+/** A seated player's players doc _id (votes are keyed by it). */
+async function docId(t: T, code: string, playerId: string) {
+  const p = (await players(t, code)).find((x) => x.playerId === playerId);
+  if (!p) throw new Error(`${playerId} is not seated in ${code}`);
+  return p._id;
 }
 
 const leave = (t: T, code: string, playerId: string) =>
@@ -361,7 +370,7 @@ describe("start rule", () => {
     await vote("p1");
     await vote("p2");
     await vote("p2", false);
-    expect((await room(t, code))!.startVotes).toEqual(["p1"]);
+    expect((await room(t, code))!.startVotes).toEqual([await docId(t, code, "p1")]);
     await vote("p2");
     expect((await room(t, code))!.phase).toBe("lobby");
     await leave(t, code, "p3");
@@ -406,6 +415,9 @@ describe("1v1 offer", () => {
     let r = (await room(t, code))!;
     expect(r.oneVOneOffered).toBe(false);
     expect(r.oneVOneOfferAt).toBe(Date.now() + ONE_V_ONE_OFFER_MS);
+    for (const id of ["p1", "p2"]) {
+      await t.mutation(api.presence.heartbeat, { roomId: code, userId: id, sessionId: `s-${id}`, interval: 30_000 });
+    }
     await join(t, "p3");
     r = (await room(t, code))!;
     expect(r.oneVOneOfferAt).toBeUndefined();
@@ -735,8 +747,9 @@ describe("majority kick", () => {
     const t = setup();
     const { code } = await join(t, "p1");
     for (const id of ["p2", "p3", "p4"]) await join(t, id);
+    const target = await docId(t, code, "p4");
     const kick = (voter: string) =>
-      t.mutation(api.quickPlay.voteKick, { code, playerId: voter, connectionId: conn(voter), targetPlayerId: "p4" });
+      t.mutation(api.quickPlay.voteKick, { code, playerId: voter, connectionId: conn(voter), targetPlayerDocId: target });
 
     expect(await kick("p1")).toMatchObject({ success: true, kicked: false, votes: 1, needed: 2 });
     expect(await kick("p1")).toMatchObject({ kicked: false, votes: 1 }); // double vote ignored
@@ -758,14 +771,14 @@ describe("majority kick", () => {
       code,
       playerId: "p1",
       connectionId: conn("p1"),
-      targetPlayerId: "p2",
+      targetPlayerDocId: await docId(t, code, "p2"),
     });
     expect(res.success).toBe(false);
     const self = await t.mutation(api.quickPlay.voteKick, {
       code,
       playerId: "p1",
       connectionId: conn("p1"),
-      targetPlayerId: "p1",
+      targetPlayerDocId: await docId(t, code, "p1"),
     });
     expect(self.success).toBe(false);
     expect(await players(t, code)).toHaveLength(2);
@@ -775,10 +788,37 @@ describe("majority kick", () => {
     const t = setup();
     const { code } = await join(t, "p1");
     for (const id of ["p2", "p3", "p4", "p5"]) await join(t, id);
-    await t.mutation(api.quickPlay.voteKick, { code, playerId: "p1", connectionId: conn("p1"), targetPlayerId: "p5" });
-    await t.mutation(api.quickPlay.voteKick, { code, playerId: "p2", connectionId: conn("p2"), targetPlayerId: "p4" });
+    const p4 = await docId(t, code, "p4");
+    const p2 = await docId(t, code, "p2");
+    await t.mutation(api.quickPlay.voteKick, {
+      code,
+      playerId: "p1",
+      connectionId: conn("p1"),
+      targetPlayerDocId: await docId(t, code, "p5"),
+    });
+    await t.mutation(api.quickPlay.voteKick, { code, playerId: "p2", connectionId: conn("p2"), targetPlayerDocId: p4 });
     await leave(t, code, "p1");
-    expect((await room(t, code))!.kickVotes).toEqual([{ targetPlayerId: "p4", voterIds: ["p2"] }]);
+    expect((await room(t, code))!.kickVotes).toEqual([{ targetId: p4, voterIds: [p2] }]);
+  });
+
+  test("clients see an anonymous tally per target, never who voted", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    for (const id of ["p2", "p3", "p4", "p5"]) await join(t, id);
+    const p5 = await docId(t, code, "p5");
+    const voter = await docId(t, code, "p1");
+    await t.mutation(api.quickPlay.voteKick, { code, playerId: "p1", connectionId: conn("p1"), targetPlayerDocId: p5 });
+
+    const view = (await t.query(api.game.rooms.getRoomByCode, { code }))!;
+    expect(view.room).toMatchObject({ kickTallies: [{ targetPlayerDocId: p5, votes: 1, needed: 3 }] });
+    expect(view.room).not.toHaveProperty("kickVotes");
+    expect(view.room).not.toHaveProperty("kickedPlayerIds");
+    const json = JSON.stringify(view.room);
+    expect(json).not.toContain("voterIds");
+    // The voter's doc id appears nowhere in the room payload (only in the
+    // players list, which it always does).
+    expect(json).not.toContain(voter);
+    expect(JSON.stringify(await t.query(api.game.rooms.getPlayers, { code }))).not.toContain("voterIds");
   });
 });
 
@@ -825,7 +865,7 @@ describe("seat ownership", () => {
           code,
           playerId: voter,
           connectionId: strangerConn,
-          targetPlayerId: "p4",
+          targetPlayerDocId: await docId(t, code, "p4"),
         })
       ).toMatchObject({ success: false });
     }
@@ -960,17 +1000,16 @@ describe("disconnected players", () => {
 
   test("a launch drops players presence has reported gone for minutes", async () => {
     const t = setup();
-    const { code } = await join(t, "p3");
-    const tokens = await t.mutation(api.presence.heartbeat, {
-      roomId: code,
-      userId: "p3",
-      sessionId: "s3",
-      interval: 30_000,
-    });
+    const { code } = await join(t, "p1");
+    await join(t, "p3");
+    const online = (id: string) =>
+      t.mutation(api.presence.heartbeat, { roomId: code, userId: id, sessionId: `s-${id}`, interval: 30_000 });
+    await online("p1");
+    const tokens = await online("p3");
     await t.mutation(api.presence.disconnect, { sessionToken: tokens.sessionToken });
     await advance(t, PUBLIC_WAITING_TIMEOUT_MS);
-    await join(t, "p1");
-    await join(t, "p2");
+    await online("p1"); // p1 stayed; p3 has been gone for minutes
+    expect((await join(t, "p2")).code).toBe(code);
     expect((await room(t, code))!.startsAt).toBeDefined();
     await advance(t, COUNTDOWN_MS);
     const r = (await room(t, code))!;
@@ -1179,5 +1218,113 @@ describe("dropouts in a running public game", () => {
     expect((await room(t, "QAGONE"))!.phase).toBe("rating");
     // Private rooms keep their long grace window.
     expect(await players(t, "QAPRVG")).toHaveLength(2);
+  });
+});
+
+describe("ghosts (closed or abandoned tabs)", () => {
+  const heartbeat = (t: T, code: string, id: string) =>
+    t.mutation(api.presence.heartbeat, { roomId: code, userId: id, sessionId: `s-${id}`, interval: 30_000 });
+  async function goOffline(t: T, code: string, id: string) {
+    const tokens = await heartbeat(t, code, id);
+    await t.mutation(api.presence.disconnect, { sessionToken: tokens.sessionToken });
+  }
+
+  test("the in-game grace is 45s and the waiting window 3 minutes", () => {
+    expect(PUBLIC_IN_GAME_GRACE_MS).toBe(45_000);
+    expect(PUBLIC_WAITING_TIMEOUT_MS).toBe(3 * 60 * 1000);
+  });
+
+  test("placement skips a lobby whose players all went quiet and prefers live players", async () => {
+    const t = setup();
+    await insertRoom(t, "QAGHST", { playerIds: ["g1", "g2"] });
+    await goOffline(t, "QAGHST", "g1");
+    await goOffline(t, "QAGHST", "g2");
+    await insertRoom(t, "QALIVE", { playerIds: ["l1"] });
+    await advance(t, PLACEMENT_RECENT_MS + 1000);
+    await heartbeat(t, "QALIVE", "l1");
+    // QAGHST has more seats taken, but nobody in it is there.
+    expect((await join(t, "p1")).code).toBe("QALIVE");
+
+    await insertRoom(t, "QAONLY", { playerIds: ["o1", "o2"] });
+    await goOffline(t, "QAONLY", "o1");
+    await goOffline(t, "QAONLY", "o2");
+    await advance(t, PLACEMENT_RECENT_MS + 1000);
+    await heartbeat(t, "QALIVE", "l1");
+    await heartbeat(t, "QALIVE", "p1");
+    const res = await join(t, "p2");
+    expect(res.code).toBe("QALIVE");
+    // With only ghost rooms open, a newcomer gets a fresh room.
+    for (const id of ["l1", "p1", "p2"]) await leave(t, "QALIVE", id);
+    const solo = await join(t, "p9");
+    expect(["QAGHST", "QAONLY"]).not.toContain(solo.code);
+  });
+
+  test("a recently disconnected player still counts as live for placement", async () => {
+    const t = setup();
+    await insertRoom(t, "QARCNT", { playerIds: ["r1"] });
+    await goOffline(t, "QARCNT", "r1"); // e.g. switched tabs a moment ago
+    await advance(t, PLACEMENT_RECENT_MS - 5000);
+    expect((await join(t, "p1")).code).toBe("QARCNT");
+  });
+
+  test("waitingCount counts online players and players not yet heartbeating, not offline ones", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    await join(t, "p2");
+    await join(t, "p3");
+    await heartbeat(t, code, "p1");
+    await goOffline(t, code, "p2");
+    // p1 online, p2 offline, p3 has no presence entry yet.
+    expect(await t.query(api.quickPlay.waitingCount, {})).toEqual({ waiting: 2 });
+  });
+
+  test("leaveGame from a closing tab releases a public seat after a short delay", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    await join(t, "p2");
+    await heartbeat(t, code, "p1");
+    await goOffline(t, code, "p2"); // presence disconnect beacon from the closing tab
+    const res = await t.mutation(api.game.rooms.leaveGame, {
+      code,
+      playerId: "p2",
+      connectionId: conn("p2"),
+      onClose: true,
+    });
+    expect(res).toMatchObject({ deferred: true });
+    expect(await players(t, code)).toHaveLength(2);
+    await advance(t, CLOSE_LEAVE_DELAY_MS);
+    expect((await players(t, code)).map((p) => p.playerId)).toEqual(["p1"]);
+    await advance(t, 0);
+    expect(await events(t, "quickplay_left_waiting")).toHaveLength(1);
+  });
+
+  test("a reload keeps the seat: presence came back before the delay ran out", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    await join(t, "p2");
+    await goOffline(t, code, "p2");
+    await t.mutation(api.game.rooms.leaveGame, { code, playerId: "p2", connectionId: conn("p2"), onClose: true });
+    await heartbeat(t, code, "p2"); // the reloaded page heartbeats
+    await advance(t, CLOSE_LEAVE_DELAY_MS);
+    expect(await players(t, code)).toHaveLength(2);
+  });
+
+  test("a stale close does nothing once the seat moved to another tab", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    await join(t, "p2");
+    await t.mutation(api.game.rooms.leaveGame, { code, playerId: "p2", connectionId: conn("p2"), onClose: true });
+    await join(t, "p2", { connectionId: "conn-p2-new-tab" });
+    await advance(t, CLOSE_LEAVE_DELAY_MS);
+    expect(await players(t, code)).toHaveLength(2);
+  });
+
+  test("private rooms ignore onClose and leave at once, as before", async () => {
+    const t = setup();
+    const { code } = await t.mutation(api.game.rooms.hostGame, {});
+    await t.mutation(api.game.rooms.joinGame, { code, playerId: "h", connectionId: "c-h", name: "QA-h" });
+    await t.mutation(api.game.rooms.joinGame, { code, playerId: "g", connectionId: "c-g", name: "QA-g" });
+    await t.mutation(api.game.rooms.leaveGame, { code, playerId: "g", connectionId: "c-g", onClose: true });
+    expect((await players(t, code)).map((p) => p.playerId)).toEqual(["h"]);
   });
 });

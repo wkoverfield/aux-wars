@@ -106,15 +106,17 @@ export default defineSchema({
     isPublic: v.optional(v.boolean()),
     startsAt: v.optional(v.number()), // lobby start countdown fire time (armed at 3+ players)
     countdownArmedAt: v.optional(v.number()), // when the countdown armed; extensions are capped from here
-    startVotes: v.optional(v.array(v.string())), // playerIds voting "Start now" (unanimous starts)
+    // Votes are keyed by players doc _id. Kick votes never leave the server
+    // (getRoomByCode returns per-target tallies only).
+    startVotes: v.optional(v.array(v.id("players"))), // players voting "Start now" (unanimous starts)
     oneVOneOfferAt: v.optional(v.number()), // pending 1v1 offer fire time (exactly 2 players)
     oneVOneOffered: v.optional(v.boolean()), // the 1v1 offer is showing
-    oneVOneAccepts: v.optional(v.array(v.string())), // playerIds who accepted the 1v1
+    oneVOneAccepts: v.optional(v.array(v.id("players"))), // players who accepted the 1v1
     autoAdvanceAt: v.optional(v.number()), // results → next round (or game over) fire time
     kickVotes: v.optional(
-      v.array(v.object({ targetPlayerId: v.string(), voterIds: v.array(v.string()) }))
+      v.array(v.object({ targetId: v.id("players"), voterIds: v.array(v.id("players")) }))
     ),
-    kickedPlayerIds: v.optional(v.array(v.string())), // never matched back into this room
+    kickedPlayerIds: v.optional(v.array(v.string())), // playerIds never matched back into this room
     createdAt: v.number(),
     lastActivityAt: v.number(),
   })

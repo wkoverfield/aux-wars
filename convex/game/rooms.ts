@@ -1,12 +1,13 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { internal } from "../_generated/api";
+import type { Doc } from "../_generated/dataModel";
 import { containsHateSpeech } from "./contentFilter";
 import { presence } from "../presence";
 import { cleanVisitorId, recordVisitorPlayed } from "../siteStats";
-import { leavePublicRoom } from "./publicRooms";
+import { kickTallies, leavePublicRoom } from "./publicRooms";
 import { hashSeatKey, isValidSeatKey, mayTakeOverSeat } from "./roomOps";
-import { QUICK_PLAY_CAP } from "./quickPlayRules";
+import { CLOSE_LEAVE_DELAY_MS, QUICK_PLAY_CAP } from "./quickPlayRules";
 
 function now() {
   return Date.now();
@@ -229,8 +230,16 @@ export const rejoinGame = mutation({
 });
 
 export const leaveGame = mutation({
-  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
-  handler: async (ctx, { code, playerId, connectionId }) => {
+  args: {
+    code: v.string(),
+    playerId: v.string(),
+    connectionId: v.string(),
+    // Sent by the client's pagehide beacon. A public seat is then released
+    // after CLOSE_LEAVE_DELAY_MS unless the player is back online (a reload
+    // fires the same event as a close). Private rooms ignore it.
+    onClose: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { code, playerId, connectionId, onClose }) => {
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return;
 
@@ -242,6 +251,14 @@ export const leaveGame = mutation({
     // Quick Play: no host to reassign; recompute the countdown or keep the
     // running game moving, and delete the room once empty.
     if (room.isPublic) {
+      if (onClose) {
+        await ctx.scheduler.runAfter(CLOSE_LEAVE_DELAY_MS, internal.quickPlay.leaveAfterClose, {
+          code,
+          playerId,
+          connectionId,
+        });
+        return { roomDeleted: false, deferred: true } as const;
+      }
       const { roomDeleted } = await leavePublicRoom(ctx, room, currentPlayer);
       return { roomDeleted } as const;
     }
@@ -473,7 +490,7 @@ export const getRoomByCode = query({
       .query("players")
       .withIndex("by_room", (q) => q.eq("roomCode", code))
       .collect();
-    return { room: publicRoom(room), players: players.map(publicPlayer) };
+    return { room: publicRoom(room, players), players: players.map(publicPlayer) };
   },
 });
 
@@ -682,15 +699,23 @@ function publicPlayer(player: any) {
     connectedAt: player.connectedAt,
     isActive: player.isActive,
     submittedRounds: player.submittedRounds,
+    // Quick Play: seated but still waiting for their first game (e.g. joined
+    // during the auto-rematch countdown, so the finished game is not theirs).
+    ...(player.waitingSince !== undefined ? { isWaiting: true } : {}),
   };
 }
 
-function publicRoom(room: any) {
+/**
+ * Room as clients see it. Kick votes are reduced to anonymous per-target
+ * tallies and the kicked list (raw playerIds) is withheld.
+ */
+function publicRoom(room: Doc<"rooms">, players: Doc<"players">[]) {
+  const { kickVotes, kickedPlayerIds, ...rest } = room;
+  void kickedPlayerIds;
   return {
-    ...room,
-    hostPlayerId: room.hostPlayerId,
+    ...rest,
     // Quick Play rooms: the fixed seat count, for "Waiting for players (2/6)".
-    ...(room.isPublic ? { playerCap: QUICK_PLAY_CAP } : {}),
+    ...(room.isPublic ? { playerCap: QUICK_PLAY_CAP, kickTallies: kickTallies(kickVotes, players) } : {}),
   };
 }
 

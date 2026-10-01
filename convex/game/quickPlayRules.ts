@@ -41,7 +41,21 @@ export const PUBLIC_WAITING_TIMEOUT_MS = 3 * 60 * 1000;
  * of running out each timer. Long enough to cover a page refresh or a quick
  * tab switch (presence flips a hidden or closed tab offline at once).
  */
-export const PUBLIC_IN_GAME_GRACE_MS = 20_000;
+export const PUBLIC_IN_GAME_GRACE_MS = 45_000;
+/**
+ * Placement treats a waiting player as live when presence reports them online,
+ * or reported them offline (or saw them join) less than this long ago. A room
+ * with no live player is not offered to newcomers, so a lobby of closed tabs
+ * the cleanup cron has not swept yet never strands someone.
+ */
+export const PLACEMENT_RECENT_MS = 60_000;
+/**
+ * A tab that closes calls leaveGame with onClose. A public seat is then
+ * released after this delay unless the player's presence came back online
+ * (a reload fires the same pagehide event as a close, and should not cost the
+ * seat).
+ */
+export const CLOSE_LEAVE_DELAY_MS = 5_000;
 /**
  * A player in a running Quick Play game the presence component has reported
  * offline for longer than this is removed by the cleanup cron (instead of the
