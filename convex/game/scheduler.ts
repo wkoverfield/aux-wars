@@ -2,6 +2,7 @@ import { internalMutation } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { presence } from "../presence";
 import { removePublicPlayer, settlePublicRoom } from "./publicRooms";
+import { gameEpochOf } from "./roomOps";
 import { PUBLIC_WAITING_TIMEOUT_MS } from "./quickPlayRules";
 
 function now() { return Date.now(); }
@@ -167,6 +168,7 @@ export const cleanupInactivePlayers = internalMutation({
           await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, {
             code: roomCode,
             round: room.currentRound,
+            epoch: gameEpochOf(room),
           });
         }
       }

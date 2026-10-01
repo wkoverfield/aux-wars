@@ -5,6 +5,7 @@ import { api, internal } from "./_generated/api";
 import presenceComponent from "@convex-dev/presence/test";
 import type { Doc } from "./_generated/dataModel";
 import { CURATED_PROMPTS } from "./game/promptPacks";
+import { PROMPT_VOTING_MS } from "./game/roomOps";
 import {
   AUTO_ADVANCE_MS,
   AUTO_REMATCH_MS,
@@ -428,6 +429,117 @@ describe("leaving", () => {
     expect(r.phase).toBe("lobby");
     expect(r.currentRound).toBe(1);
     expect(await events(t, "quickplay_left_waiting")).toHaveLength(0);
+  });
+});
+
+describe("timers from an abandoned game", () => {
+  const SELECTION_MS = quickPlaySettings().roundLength * 1000;
+
+  test("a game that restarts after falling under 2 players keeps its full selection window", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    await join(t, "p2");
+    await join(t, "p3");
+    await advance(t, COUNTDOWN_MS);
+    expect((await room(t, code))!.gameEpoch).toBe(1);
+    await advance(t, PROMPT_VOTING_MS);
+    expect((await room(t, code))!.phase).toBe("songSelection"); // old selection timer armed for ~60s from here
+
+    await advance(t, 5000);
+    await leave(t, code, "p2");
+    await leave(t, code, "p3");
+    expect((await room(t, code))!.phase).toBe("lobby");
+
+    await join(t, "p4");
+    for (const id of ["p1", "p4"]) {
+      await t.mutation(api.quickPlay.voteStart, { code, playerId: id, connectionId: conn(id) });
+    }
+    let r = (await room(t, code))!;
+    expect(r.phase).toBe("promptVoting");
+    expect(r.gameEpoch).toBe(2);
+    await advance(t, PROMPT_VOTING_MS);
+    r = (await room(t, code))!;
+    expect(r.phase).toBe("songSelection");
+    const newSelectionStart = r.selectionStartedAt!;
+
+    // The abandoned game's endSelectionPhase({ round: 1 }) comes due here.
+    await advance(t, SELECTION_MS - 20_000);
+    r = (await room(t, code))!;
+    expect(r.phase).toBe("songSelection");
+    expect(r.selectionStartedAt).toBe(newSelectionStart);
+    expect(await t.run(async (ctx) => ctx.db.query("roundResults").collect())).toHaveLength(0);
+
+    // The new game's own timer still ends the round on schedule.
+    await advance(t, 20_000);
+    expect((await room(t, code))!.phase).toBe("results");
+  });
+
+  test("a stale rating step from an earlier game does nothing", async () => {
+    const t = setup();
+    await insertRoom(t, "QAEPOC", {
+      phase: "rating",
+      currentRound: 1,
+      currentRatingIndex: 0,
+      gameEpoch: 2,
+      playerIds: ["e1", "e2"],
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("submissions", {
+        roomCode: "QAEPOC",
+        round: 1,
+        playerId: "e1",
+        trackId: "qa-track",
+        trackDetails: { name: "QA Song", artist: "QA Artist", albumCover: "", previewUrl: "https://example.test/a.mp3" },
+        submittedAt: Date.now(),
+      });
+    });
+    for (const [round, epoch] of [
+      [1, 1],
+      [1, undefined],
+    ] as const) {
+      await t.mutation(internal.game.flow.advanceRating, {
+        code: "QAEPOC",
+        round,
+        ratingIndex: 0,
+        timedOut: true,
+        ...(epoch !== undefined ? { epoch } : {}),
+      });
+    }
+    await t.mutation(internal.game.flow.calculateResultsInternal, { code: "QAEPOC", round: 1, epoch: 1 });
+    const r = (await room(t, "QAEPOC"))!;
+    expect(r.phase).toBe("rating");
+    expect(r.currentRatingIndex).toBe(0);
+
+    await t.mutation(internal.game.flow.advanceRating, {
+      code: "QAEPOC",
+      round: 1,
+      ratingIndex: 0,
+      timedOut: true,
+      epoch: 2,
+    });
+    expect((await room(t, "QAEPOC"))!.currentRatingIndex).toBe(1);
+  });
+
+  test("skipping the prompt restarts the voting window; the first timer is ignored", async () => {
+    const t = setup();
+    const { code } = await join(t, "p1");
+    await join(t, "p2");
+    for (const id of ["p1", "p2"]) {
+      await t.mutation(api.quickPlay.voteStart, { code, playerId: id, connectionId: conn(id) });
+    }
+    expect((await room(t, code))!.phase).toBe("promptVoting");
+    await advance(t, 10_000);
+    for (const id of ["p1", "p2"]) {
+      await t.mutation(api.game.flow.voteSkipPrompt, { code, playerId: id, connectionId: conn(id) });
+    }
+    const skippedAt = (await room(t, code))!.promptVotingStartedAt!;
+    await advance(t, PROMPT_VOTING_MS - 10_000); // the pre-skip timer comes due
+    let r = (await room(t, code))!;
+    expect(r.phase).toBe("promptVoting");
+    expect(r.promptVotingStartedAt).toBe(skippedAt);
+    await advance(t, 10_000);
+    r = (await room(t, code))!;
+    expect(r.phase).toBe("songSelection");
   });
 });
 

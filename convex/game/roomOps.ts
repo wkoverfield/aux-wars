@@ -13,7 +13,7 @@ export type Room = Doc<"rooms">;
 export type Player = Doc<"players">;
 export type RoomPatch = Partial<Omit<Room, "_id" | "_creationTime">>;
 
-const PROMPT_VOTING_MS = 15_000;
+export const PROMPT_VOTING_MS = 15_000;
 
 function now() {
   return Date.now();
@@ -31,6 +31,21 @@ export async function getRoomPlayers(ctx: MutationCtx, code: string): Promise<Pl
     .query("players")
     .withIndex("by_room", (q) => q.eq("roomCode", code))
     .collect();
+}
+
+/** The room's current game epoch (see rooms.gameEpoch in the schema). */
+export function gameEpochOf(room: Room): number {
+  return room.gameEpoch ?? 0;
+}
+
+/**
+ * True when a scheduled in-game timer armed in `epoch` still belongs to the
+ * room's current game. A timer from an abandoned game (room sent back to the
+ * lobby and relaunched) carries an older epoch and must no-op, because the new
+ * game reuses round 1 and would otherwise pass a (phase, round) check.
+ */
+export function isCurrentGame(room: Room, epoch: number | undefined): boolean {
+  return gameEpochOf(room) === (epoch ?? 0);
 }
 
 export function pickPrompt(prompts: string[], usedPrompts: string[] = []): string {
@@ -53,33 +68,43 @@ export async function launchFirstRound(
   const code = room.code;
   const chosenPrompt = pickPrompt(room.settings.selectedPrompts, []);
   const enablePromptVoting = room.settings.enablePromptVoting !== false; // default true
+  const epoch = gameEpochOf(room) + 1;
+  const t = now();
 
   if (enablePromptVoting) {
     await ctx.db.patch(room._id, {
       ...extraPatch,
       phase: "promptVoting",
       currentRound: 1,
+      gameEpoch: epoch,
       currentPrompt: chosenPrompt,
       usedPrompts: [chosenPrompt],
-      promptVotingStartedAt: now(),
+      promptVotingStartedAt: t,
       skipVotes: [],
-      lastActivityAt: now(),
+      lastActivityAt: t,
     });
-    await ctx.scheduler.runAfter(PROMPT_VOTING_MS, internal.game.flow.endPromptVoting, { code, round: 1 });
+    await ctx.scheduler.runAfter(PROMPT_VOTING_MS, internal.game.flow.endPromptVoting, {
+      code,
+      round: 1,
+      epoch,
+      startedAt: t,
+    });
   } else {
     await ctx.db.patch(room._id, {
       ...extraPatch,
       phase: "songSelection",
       currentRound: 1,
+      gameEpoch: epoch,
       currentPrompt: chosenPrompt,
       usedPrompts: [chosenPrompt],
-      selectionStartedAt: now(),
-      lastActivityAt: now(),
+      selectionStartedAt: t,
+      lastActivityAt: t,
     });
     if (room.settings.roundLength > 0) {
       await ctx.scheduler.runAfter(room.settings.roundLength * 1000, internal.game.flow.endSelectionPhase, {
         code,
         round: 1,
+        epoch,
       });
     }
   }
@@ -115,30 +140,38 @@ export async function advanceToNextRound(ctx: MutationCtx, room: Room): Promise<
   const players = await getRoomPlayers(ctx, code);
   await Promise.all(players.map((p) => ctx.db.patch(p._id, { submittedRounds: [] })));
 
+  const epoch = gameEpochOf(room);
+  const t = now();
   if (enablePromptVoting) {
     await ctx.db.patch(room._id, {
       currentRound: newRound,
       currentPrompt: chosenPrompt,
       usedPrompts: [...(room.usedPrompts || []), chosenPrompt],
       phase: "promptVoting",
-      promptVotingStartedAt: now(),
+      promptVotingStartedAt: t,
       skipVotes: [],
-      lastActivityAt: now(),
+      lastActivityAt: t,
     });
-    await ctx.scheduler.runAfter(PROMPT_VOTING_MS, internal.game.flow.endPromptVoting, { code, round: newRound });
+    await ctx.scheduler.runAfter(PROMPT_VOTING_MS, internal.game.flow.endPromptVoting, {
+      code,
+      round: newRound,
+      epoch,
+      startedAt: t,
+    });
   } else {
     await ctx.db.patch(room._id, {
       currentRound: newRound,
       currentPrompt: chosenPrompt,
       usedPrompts: [...(room.usedPrompts || []), chosenPrompt],
       phase: "songSelection",
-      selectionStartedAt: now(),
-      lastActivityAt: now(),
+      selectionStartedAt: t,
+      lastActivityAt: t,
     });
     if (room.settings.roundLength > 0) {
       await ctx.scheduler.runAfter(room.settings.roundLength * 1000, internal.game.flow.endSelectionPhase, {
         code,
         round: newRound,
+        epoch,
       });
     }
   }

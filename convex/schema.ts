@@ -76,6 +76,11 @@ export default defineSchema({
       v.literal("gameOver")
     ),
     currentRound: v.number(),
+    // Bumped each time a game launches (start, rematch, Quick Play restart).
+    // In-game scheduled timers carry the epoch they were armed in and no-op on
+    // a mismatch, so a timer from an abandoned game can't fire into the next
+    // one (which reuses round 1). Absent = 0 (rooms that never launched since).
+    gameEpoch: v.optional(v.number()),
     currentPrompt: v.optional(v.string()),
     currentRatingIndex: v.optional(v.number()),
     hostPlayerId: v.optional(v.id("players")),

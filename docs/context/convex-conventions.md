@@ -64,6 +64,23 @@ If a client needs a user-specific slice of room state, prefer deriving it on the
 client from the shared room-keyed query, or isolate it in a separate small query
 that reads as few documents as possible.
 
+## Scheduled timers must prove they are still current
+
+A scheduled function cannot be cancelled by changing state, so every timer has
+to check on arrival that the state it was armed for still holds. `(phase,
+round)` alone is not enough: a game can be abandoned and relaunched, and the new
+game reuses round 1.
+
+- In-game timers (`endPromptVoting`, `endSelectionPhase`,
+  `startRatingPhaseInternal`, `advanceRating`, `calculateResultsInternal`)
+  carry the room's `gameEpoch`, which `launchFirstRound` bumps on every launch,
+  and no-op on a mismatch (`isCurrentGame` in `convex/game/roomOps.ts`).
+  Anything that schedules one of them passes `epoch: gameEpochOf(room)`.
+- A timer that can be re-armed within one phase also carries the fire or start
+  time it was armed with and no-ops unless the room still holds that value
+  (`promptVotingStartedAt` for a prompt skip; `startsAt`, `oneVOneOfferAt`,
+  `autoAdvanceAt` and `rematchStartingAt` for Quick Play and rematch timers).
+
 ## Seed and QA functions are internal, never public
 
 Anything that writes fixture data, resets state, or exists only for testing must

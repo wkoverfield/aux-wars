@@ -4,6 +4,7 @@ import { internal } from "../_generated/api";
 import { presence } from "../presence";
 import {
   deleteRoomCascade,
+  gameEpochOf,
   getRoom,
   getRoomPlayers,
   launchFirstRound,
@@ -299,6 +300,7 @@ export async function settlePublicRoom(
       await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, {
         code,
         round: room.currentRound,
+        epoch: gameEpochOf(room),
       });
     }
   } else if (room.phase === "rating") {
