@@ -12,6 +12,50 @@ import AdSlot from '../../components/AdSlot';
 import recordLogo from '../../components/record-logo.svg';
 import { captureGameEvent, gameProperties } from '../../services/analytics';
 import { computeAwards } from './computeAwards';
+import { useNow } from '../quickplay/useQuickPlay';
+import { secondsUntil } from '../quickplay/quickPlayModel';
+
+/**
+ * Quick Play top bar: anyone can leave; the next game starts on its own.
+ */
+function PublicGameOverBar({ seconds, onLeave, leaving }) {
+  return (
+    <div className="absolute top-0 inset-x-0 z-30 pointer-events-none">
+      <div className="w-full max-w-2xl mx-auto flex justify-between items-center px-3 pt-3 md:pt-6">
+        <button
+          type="button"
+          onClick={onLeave}
+          disabled={leaving}
+          className="pointer-events-auto green-btn rounded-full py-2 px-4 font-semibold text-xs md:text-sm"
+        >
+          Leave
+        </button>
+        {seconds !== null && (
+          <div
+            role="timer"
+            className="flex items-center gap-1 py-1 px-3 md:py-2 md:px-4 rounded-md text-white font-semibold bg-[#242424] text-sm md:text-base tabular-nums"
+          >
+            Next game in <span className="text-[#68d570]">{seconds}s</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Quick Play: seated during the rematch countdown, so this game was not theirs. */
+function NextGameWait({ seconds }) {
+  return (
+    <div className="h-full w-full flex flex-col items-center justify-center px-6 text-center text-white">
+      <AnimatedLogo />
+      <p className="text-2xl md:text-3xl font-bold mt-2">You&rsquo;re in</p>
+      <p className="text-gray-400 text-sm md:text-base mt-2 max-w-sm">
+        This room is finishing a game. You&rsquo;ll play the next one
+        {seconds !== null ? <>, starting in <span className="text-[#68d570] font-semibold tabular-nums">{seconds}s</span>.</> : '.'}
+      </p>
+    </div>
+  );
+}
 
 function buildPlayerStatsFromRounds(results) {
   const stats = {};
@@ -169,6 +213,24 @@ export default function GameWinner() {
   const room = roomQuery?.room || roomQuery;
   const rematchAt = room?.rematchStartingAt || null;
 
+  // Quick Play rooms rematch on their own; no host buttons, no cancel.
+  const isPublic = Boolean(room?.isPublic);
+  const leaveGameMutation = useMutation(api.game.rooms.leaveGame);
+  const [leaving, setLeaving] = useState(false);
+  const now = useNow(isPublic && Boolean(rematchAt));
+  const nextGameSeconds = isPublic ? secondsUntil(rematchAt, now) : null;
+  const me = playersQuery?.find((p) => p.playerId === session?.playerId);
+  const handleLeavePublic = async () => {
+    if (leaving || !session?.playerId || !session?.connectionId) return;
+    setLeaving(true);
+    try {
+      await leaveGameMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
+    } finally {
+      clearSession();
+      navigate('/', { replace: true });
+    }
+  };
+
   const sortedPlayers = useMemo(
     () => (allRoundResultsQuery
       ? buildPlayerStatsFromRounds(allRoundResultsQuery).sort((a, b) => b.wins - a.wins || b.totalRecords - a.totalRecords)
@@ -242,6 +304,15 @@ export default function GameWinner() {
     }));
   }, [sortedPlayers, playersQuery, gameCode, session, allRoundResultsQuery]);
 
+  if (isPublic && me?.isWaiting) {
+    return (
+      <div className="relative h-full w-full overflow-hidden bg-transparent">
+        <PublicGameOverBar seconds={nextGameSeconds} onLeave={handleLeavePublic} leaving={leaving} />
+        <NextGameWait seconds={nextGameSeconds} />
+      </div>
+    );
+  }
+
   if (!allRoundResultsQuery || !playersQuery) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -275,6 +346,8 @@ export default function GameWinner() {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-transparent">
+      {isPublic && <PublicGameOverBar seconds={nextGameSeconds} onLeave={handleLeavePublic} leaving={leaving} />}
+
       {/* ---------- REVEAL (suspense → winner → superlatives) ---------- */}
       {!isFinal && (
         <div
@@ -338,7 +411,7 @@ export default function GameWinner() {
           className="h-full w-full"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}
         >
-          <ScrollFade className="h-full w-full" contentClassName="min-h-full flex flex-col items-center w-full max-w-2xl mx-auto px-2 py-4">
+          <ScrollFade className="h-full w-full" contentClassName={`min-h-full flex flex-col items-center w-full max-w-2xl mx-auto px-2 ${isPublic ? 'pt-16 md:pt-20 pb-4' : 'py-4'}`}>
             <AnimatedLogo />
 
             {winner && (
@@ -378,6 +451,7 @@ export default function GameWinner() {
             <AdSlot slot="gameover" className="max-w-2xl mx-auto mt-4" />
 
             {/* Buttons — pushed to the bottom when there's room, in-flow so they're always reachable */}
+            {!isPublic && (
             <div className="w-full max-w-md flex gap-3 mt-auto pt-6">
               <button
                 onClick={handleBackToLobby}
@@ -392,6 +466,7 @@ export default function GameWinner() {
                 🔄 Play Again
               </button>
             </div>
+            )}
           </ScrollFade>
         </motion.div>
       )}
@@ -401,7 +476,7 @@ export default function GameWinner() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {rematchAt && <RematchCountdown rematchAt={rematchAt} onCancel={handleCancelRematch} />}
+        {rematchAt && !isPublic && <RematchCountdown rematchAt={rematchAt} onCancel={handleCancelRematch} />}
       </AnimatePresence>
     </div>
   );

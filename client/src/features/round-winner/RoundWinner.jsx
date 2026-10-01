@@ -14,6 +14,8 @@ import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { captureGameEvent, gameProperties } from "../../services/analytics";
 import ScrollFade from "../../components/ScrollFade";
+import { useNow } from "../quickplay/useQuickPlay";
+import { autoAdvanceLabel, secondsUntil } from "../quickplay/quickPlayModel";
 
 /**
  * RoundWinner component displays the results of a completed round.
@@ -95,6 +97,13 @@ export default function RoundWinner() {
   const currentPlayer = playersQuery?.find(p => p.playerId === session?.playerId);
   const isHost = currentPlayer?.isHost ?? false;
 
+  // Quick Play rooms have no host: the server advances on its own and the
+  // Next Round button becomes a timer.
+  const isPublic = Boolean(room?.isPublic);
+  const autoAdvanceAt = isPublic ? room?.autoAdvanceAt : undefined;
+  const now = useNow(typeof autoAdvanceAt === "number");
+  const autoAdvanceText = autoAdvanceLabel({ seconds: secondsUntil(autoAdvanceAt, now), isFinalRound });
+
   /**
    * Handles the transition to the next round or final results
    */
@@ -151,8 +160,21 @@ export default function RoundWinner() {
 
   return (
     <div className="relative flex flex-col h-screen w-full max-w-7xl mx-auto pt-2 pb-6 px-2 md:p-6 bg-transparent items-center overflow-hidden">
+      {/* Quick Play: auto-advance timer in the host button's spot */}
+      {isPublic && autoAdvanceText && (
+        <div className="w-full flex flex-row justify-end mb-1 mt-2 md:mb-2 md:mt-4">
+          <div
+            className="flex items-center gap-2 py-1 px-3 md:py-2 md:px-4 rounded-md text-gray-300 font-semibold bg-[#242424] text-sm md:text-base tabular-nums"
+            role="timer"
+            aria-live="off"
+          >
+            {autoAdvanceText}
+          </div>
+        </div>
+      )}
+
       {/* Navigation button - only show for host */}
-      {isHost && (
+      {isHost && !isPublic && (
         <div className="w-full flex flex-row justify-end mb-1 mt-2 md:mb-2 md:mt-4">
           <button
             disabled={isTransitioning}

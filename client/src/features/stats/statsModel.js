@@ -317,6 +317,34 @@ export function normalizeCounts(raw, labelKeys) {
     .sort((a, b) => b.count - a.count);
 }
 
+/** Quick Play window totals (stats.getDashboard `quickPlay`). */
+export function normalizeQuickPlay(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  return {
+    clicks: num(src.clicks),
+    matched: num(src.matched),
+    matchRate: ratio(src.matchRate),
+    medianWaitMs: num(src.medianWaitMs),
+    leftWaiting: num(src.leftWaiting),
+    abandonRate: ratio(src.abandonRate),
+    gamesStarted: num(src.gamesStarted),
+    avgPlayersAtStart: num(src.avgPlayersAtStart),
+    oneVOneOffered: num(src.oneVOneOffered),
+    oneVOneAccepted: num(src.oneVOneAccepted),
+  };
+}
+
+/** A wait in seconds or minutes ("42s", "1m 5s"). */
+export function fmtWait(ms) {
+  const n = num(ms);
+  if (n === null) return EMPTY;
+  const total = Math.round(n / 1000);
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  return sec ? `${m}m ${sec}s` : `${m}m`;
+}
+
 export function normalizeDashboard(raw, windowDays, nowMs = Date.now()) {
   const src = raw && typeof raw === "object" ? raw : {};
   const dailyRows = src.days ?? src.daily ?? src.dailyMetrics ?? [];
@@ -335,6 +363,7 @@ export function normalizeDashboard(raw, windowDays, nowMs = Date.now()) {
     ),
     searches: normalizeSearches(src.searches),
     abandonment: normalizeCounts(src.abandonmentByPhase ?? src.abandonment, ["phase", "label"]),
+    quickPlay: normalizeQuickPlay(src.quickPlay),
   };
 }
 
