@@ -255,7 +255,7 @@ export default function PublicLobby() {
           <div className="w-full max-w-5xl mx-auto px-5 py-4 grid gap-10 md:grid-cols-2 md:gap-10 lg:gap-16 md:h-full">
             {/* Controls */}
             <section className="lobby-info flex flex-col gap-5 min-w-0" aria-label="Your seat">
-              <label className="text-xl" htmlFor="qp-name">Nickname:</label>
+              <label className="text-xl" htmlFor="qp-name">Your name</label>
               <div className="flex flex-col gap-1">
                 <input
                   id="qp-name"
@@ -289,8 +289,8 @@ export default function PublicLobby() {
                     aria-pressed={iVotedStart}
                     className={
                       iVotedStart
-                        ? "green-btn rounded-full py-2 px-8 w-full font-semibold"
-                        : "bg-white rounded-full py-2 px-8 text-black w-full font-semibold"
+                        ? "rounded-full py-2 px-8 w-full font-semibold border border-[#68d570] text-[#68d570] bg-[#68d570]/10"
+                        : "rounded-full py-2 px-8 w-full font-semibold border border-white/30 text-white bg-transparent hover:bg-white/10"
                     }
                   >
                     <span className="text-sm md:text-base">
@@ -327,7 +327,6 @@ export default function PublicLobby() {
           </div>
         </div>
 
-        <p className="text-[11px] text-gray-500 text-center py-4">Room {code}</p>
       </div>
       <SessionTakenOverModal show={showTakenOver} gameCode={code} />
     </>
