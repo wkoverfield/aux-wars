@@ -105,6 +105,7 @@ describe("StatsPage key gate", () => {
     await screen.findByText("No peak recorded yet. The first sample lands within a minute of someone playing.");
     expect(await screen.findByText("Nothing recorded today yet.")).toBeTruthy();
     expect(await screen.findByText("No hourly samples yet.")).toBeTruthy();
+    expect(await screen.findByText("No Quick Play clicks in this window yet.")).toBeTruthy();
     expect(document.body.textContent).not.toContain("—");
   });
 

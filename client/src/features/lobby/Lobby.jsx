@@ -17,14 +17,26 @@ import { getPackIdsForPrompts } from "../../data/promptCategories";
 import { captureGameEvent, gameProperties } from "../../services/analytics";
 import logo from "../../assets/aux-wars-logo.svg";
 import ScrollFade from "../../components/ScrollFade";
+import { useRoom } from "../../services/RoomProvider";
+import PublicLobby from "../quickplay/PublicLobby";
 
 /**
- * Lobby component manages the game lobby where players can join, set their names,
- * and prepare for the game. Handles game settings, player management, and game start.
- * 
- * @returns {JSX.Element} Rendered component
+ * Lobby route: Quick Play rooms get the hostless waiting screen, private rooms
+ * the hosted lobby.
  */
 export default function Lobby() {
+  const { room, loading } = useRoom();
+  if (loading) return null;
+  return room?.isPublic ? <PublicLobby /> : <PrivateLobby />;
+}
+
+/**
+ * Private (hosted) lobby: players join with the code, set their names and
+ * ready up; the host manages settings, kicks and starts the game.
+ *
+ * @returns {JSX.Element} Rendered component
+ */
+function PrivateLobby() {
   // const socket = useSocket();
   const navigate = useNavigate();
   const { gameCode: routeGameCode } = useParams();

@@ -32,8 +32,18 @@ function emptyEvents(): DayEvents {
       player_joined: [],
       search_no_results: [],
       search_failed: [],
+      quickplay_matched: [],
+      quickplay_left_waiting: [],
     },
-    counts: { game_created: 0, song_submitted: 0, rating_submitted: 0, pro_purchased: 0 },
+    counts: {
+      game_created: 0,
+      song_submitted: 0,
+      rating_submitted: 0,
+      pro_purchased: 0,
+      quickplay_clicked: 0,
+      quickplay_1v1_offered: 0,
+      quickplay_1v1_accepted: 0,
+    },
   };
 }
 
@@ -61,6 +71,51 @@ describe("percentile", () => {
   });
 });
 
+describe("computeDayMetrics: Quick Play", () => {
+  test("empty day has zero counts and null rates", () => {
+    expect(computeDayMetrics(inputs())).toMatchObject({
+      quickPlayClicks: 0,
+      quickPlayMatched: 0,
+      quickPlayMatchRate: null,
+      quickPlayMedianWaitMs: null,
+      quickPlayLeftWaiting: 0,
+      quickPlayGamesStarted: 0,
+      quickPlayAvgPlayersAtStart: null,
+      quickPlay1v1Offered: 0,
+      quickPlay1v1Accepted: 0,
+    });
+  });
+
+  test("clicks, match rate, median wait, abandons and players at start", () => {
+    const ev = emptyEvents();
+    ev.counts = { ...ev.counts, quickplay_clicked: 5, quickplay_1v1_offered: 2, quickplay_1v1_accepted: 1 };
+    ev.detail.quickplay_matched = [
+      { waitedMs: 30_000, playersAtStart: 3 },
+      { waitedMs: 10_000, playersAtStart: 3 },
+      { waitedMs: 70_000, playersAtStart: 2 },
+      { playersAtStart: 2 }, // no wait recorded: excluded from the median only
+    ];
+    ev.detail.quickplay_left_waiting = [{ waitedMs: 5000 }];
+    ev.detail.game_started = [
+      { roomCode: "QA0001", playerCount: 3, label: "quickplay" },
+      { roomCode: "QA0002", playerCount: 2, label: "quickplay" },
+      { roomCode: "QA0003", playerCount: 6 },
+    ];
+    expect(computeDayMetrics(inputs({ events: ev }))).toMatchObject({
+      quickPlayClicks: 5,
+      quickPlayMatched: 4,
+      quickPlayMatchRate: 0.8,
+      quickPlayMedianWaitMs: 30_000,
+      quickPlayLeftWaiting: 1,
+      quickPlayGamesStarted: 2,
+      quickPlayAvgPlayersAtStart: 2.5,
+      quickPlay1v1Offered: 2,
+      quickPlay1v1Accepted: 1,
+      gamesStarted: 3,
+    });
+  });
+});
+
 describe("computeDayMetrics", () => {
   test("empty day is zeros and nulls, never fabricated", () => {
     const row = computeDayMetrics(inputs());
@@ -81,7 +136,7 @@ describe("computeDayMetrics", () => {
 
   test("games, players, funnel and abandonment", () => {
     const ev = emptyEvents();
-    ev.counts = { game_created: 4, song_submitted: 30, rating_submitted: 90, pro_purchased: 1 };
+    ev.counts = { ...ev.counts, game_created: 4, song_submitted: 30, rating_submitted: 90, pro_purchased: 1 };
     ev.detail.game_started = [
       { roomCode: "AAAA", playerCount: 3 },
       { roomCode: "BBBB", playerCount: 5 },

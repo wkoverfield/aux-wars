@@ -11,6 +11,7 @@ import {
   fmtInt,
   fmtPct,
   fmtShortDate,
+  fmtWait,
   normalizeDashboard,
   normalizeLive,
 } from "./statsModel";
@@ -275,6 +276,41 @@ function Abandonment({ rows }) {
   );
 }
 
+function QuickPlay({ qp, windowDays }) {
+  const oneVOne =
+    qp.oneVOneOffered > 0 ? `1v1: ${fmtInt(qp.oneVOneAccepted)} of ${fmtInt(qp.oneVOneOffered)} offers accepted` : null;
+  return (
+    <Card title="Quick Play" aside={`last ${windowDays} days`}>
+      {qp.clicks ? (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
+            <Stat label="Clicks" value={fmtInt(qp.clicks)} accent />
+            <Stat
+              label="Match rate"
+              value={fmtPct(qp.matchRate)}
+              detail={qp.matched !== null ? `${fmtInt(qp.matched)} got a game` : null}
+            />
+            <Stat label="Median wait" value={fmtWait(qp.medianWaitMs)} detail="Click to game start" />
+            <Stat
+              label="Left while waiting"
+              value={fmtInt(qp.leftWaiting)}
+              detail={qp.abandonRate !== null ? `${fmtPct(qp.abandonRate)} of clicks` : null}
+            />
+            <Stat
+              label="Avg players at start"
+              value={fmtDecimal(qp.avgPlayersAtStart)}
+              detail={qp.gamesStarted ? `${fmtInt(qp.gamesStarted)} games, incl. rematches` : null}
+            />
+          </div>
+          {oneVOne && <p className="text-xs text-gray-500 mt-4">{oneVOne}</p>}
+        </>
+      ) : (
+        <EmptyNote>No Quick Play clicks in this window yet.</EmptyNote>
+      )}
+    </Card>
+  );
+}
+
 /**
  * The stats dashboard. Rendered only after `checkKey` accepted the key: both
  * queries throw on a bad key, and StatsPage wraps this in an error boundary
@@ -335,6 +371,7 @@ export default function Dashboard({ adminKey }) {
         <>
           <Trends dashboard={dashboard} windowDays={windowDays} />
           <HourlyCurve hourly={hourly} />
+          <QuickPlay qp={dashboard.quickPlay} windowDays={windowDays} />
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <Funnel funnel={dashboard.funnel} windowDays={windowDays} />
             <Retention retention={dashboard.retention} />

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import schema from "./schema";
 import { api } from "./_generated/api";
 import presenceComponent from "@convex-dev/presence/test";
-import { constantTimeEqual, isValidAdminKey } from "./stats";
+import { constantTimeEqual, isValidAdminKey, summarizeQuickPlay } from "./stats";
 import { addDays, dstr } from "./dailyMetrics";
 
 const modules = import.meta.glob(["./**/*.ts", "./**/*.js", "!./**/*.test.ts", "!./**/*.d.ts"]);
@@ -212,5 +212,61 @@ describe("stats queries", () => {
       { phase: "lobby", count: 1 },
     ]);
     expect(d.today).toMatchObject({ date: today, partial: true, songsSubmitted: null, gamesStarted: 0 });
+    // Rows rolled up before Quick Play existed read as zeros, never fabricated.
+    expect(d.quickPlay).toEqual({
+      clicks: 0,
+      matched: 0,
+      matchRate: null,
+      medianWaitMs: null,
+      leftWaiting: 0,
+      abandonRate: null,
+      gamesStarted: 0,
+      avgPlayersAtStart: null,
+      oneVOneOffered: 0,
+      oneVOneAccepted: 0,
+    });
+  });
+
+  test("getDashboard's Quick Play card counts today's live events", async () => {
+    const t = setup();
+    vi.stubEnv("STATS_ADMIN_KEY", KEY);
+    await t.run(async (ctx) => {
+      const ts = Date.now();
+      const ev = (eventType: string, metadata: Record<string, unknown> = {}) =>
+        ctx.db.insert("analyticsEvents", { eventType, timestamp: ts, metadata });
+      for (let i = 0; i < 4; i++) await ev("quickplay_clicked");
+      await ev("quickplay_matched", { waitedMs: 20_000, playersAtStart: 3 });
+      await ev("quickplay_matched", { waitedMs: 40_000, playersAtStart: 3 });
+      await ev("quickplay_matched", { waitedMs: 50_000, playersAtStart: 3 });
+      await ev("quickplay_left_waiting", { waitedMs: 9000 });
+      await ev("game_started", { roomCode: "QAQP01", playerCount: 3, label: "quickplay" });
+      await ev("game_started", { roomCode: "QAPRIV", playerCount: 5 });
+      await ev("quickplay_1v1_offered");
+    });
+    const d = await t.query(api.stats.getDashboard, { adminKey: KEY, days: 7 });
+    expect(d.quickPlay).toEqual({
+      clicks: 4,
+      matched: 3,
+      matchRate: 0.75,
+      medianWaitMs: 40_000,
+      leftWaiting: 1,
+      abandonRate: 0.25,
+      gamesStarted: 1,
+      avgPlayersAtStart: 3,
+      oneVOneOffered: 1,
+      oneVOneAccepted: 0,
+    });
+    expect(d.today).toMatchObject({ quickPlayClicks: 4, quickPlayMedianWaitMs: 40_000 });
+  });
+});
+
+describe("summarizeQuickPlay", () => {
+  test("weights daily medians by matches and averages players per game", () => {
+    const s = summarizeQuickPlay([
+      { quickPlayClicks: 10, quickPlayMatched: 8, quickPlayMedianWaitMs: 30_000, quickPlayGamesStarted: 2, quickPlayAvgPlayersAtStart: 4 },
+      { quickPlayClicks: 2, quickPlayMatched: 1, quickPlayMedianWaitMs: 90_000, quickPlayGamesStarted: 1, quickPlayAvgPlayersAtStart: 1 },
+      {},
+    ]);
+    expect(s).toMatchObject({ clicks: 12, matched: 9, matchRate: 0.75, medianWaitMs: 30_000, gamesStarted: 3, avgPlayersAtStart: 3 });
   });
 });
