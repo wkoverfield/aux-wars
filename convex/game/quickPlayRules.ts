@@ -50,6 +50,18 @@ export const PUBLIC_IN_GAME_GRACE_MS = 45_000;
  */
 export const PLACEMENT_RECENT_MS = 60_000;
 /**
+ * A seated player with no presence entry (never heartbeated) stops counting
+ * after this long: placement skips them and a launch drops them. A real
+ * client's first heartbeat lands within a second or two of joining, so this
+ * only catches seats that were joined by something that is not a page
+ * (e.g. a script calling quickPlay.join in a loop).
+ */
+export const NO_HEARTBEAT_GRACE_MS = 20_000;
+/** At most this many Quick Play joins per player id, and per visitor id... */
+export const JOIN_RATE_LIMIT = 6;
+/** ...within this window. Rejoining an existing seat is not counted. */
+export const JOIN_RATE_WINDOW_MS = 60_000;
+/**
  * A tab that closes calls leaveGame with onClose. A public seat is then
  * released after this delay unless the page came back and called
  * quickPlay.resumeSeat (a reload fires the same pagehide event as a close,

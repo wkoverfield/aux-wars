@@ -30,6 +30,9 @@ import {
   JOIN_REMATCH_MARGIN_MS,
   JOIN_START_MARGIN_MS,
   ONE_V_ONE_OFFER_MS,
+  JOIN_RATE_LIMIT,
+  JOIN_RATE_WINDOW_MS,
+  NO_HEARTBEAT_GRACE_MS,
   PLACEMENT_RECENT_MS,
   QUICK_PLAY_CAP,
   generateFunName,
@@ -102,18 +105,46 @@ async function presenceByUser(ctx: QueryCtx | MutationCtx, code: string) {
 }
 
 /**
- * Players placement treats as really there: online, or offline (or joined
- * with no heartbeat yet) less than PLACEMENT_RECENT_MS ago.
+ * Players placement treats as really there: online, offline less than
+ * PLACEMENT_RECENT_MS ago, or joined less than NO_HEARTBEAT_GRACE_MS ago with
+ * no heartbeat yet.
  */
 function livePlayerCount(players: Player[], byUser: Map<string, PresenceEntry>, t: number): number {
-  const cutoff = t - PLACEMENT_RECENT_MS;
   let live = 0;
   for (const p of players) {
     const entry = byUser.get(p.playerId);
     if (entry?.online) live++;
-    else if ((entry ? entry.lastDisconnected : (p.connectedAt ?? p._creationTime)) >= cutoff) live++;
+    else if (entry) {
+      if (entry.lastDisconnected >= t - PLACEMENT_RECENT_MS) live++;
+    } else if ((p.connectedAt ?? p._creationTime) >= t - NO_HEARTBEAT_GRACE_MS) live++;
   }
   return live;
+}
+
+/**
+ * Counts a Quick Play join against each key (player id, visitor id) and says
+ * whether any key is over JOIN_RATE_LIMIT within JOIN_RATE_WINDOW_MS. One row
+ * per key, so concurrent joins from different people never touch the same
+ * document.
+ */
+async function overJoinRateLimit(ctx: MutationCtx, keys: string[], t: number): Promise<boolean> {
+  let over = false;
+  for (const key of keys) {
+    const row = await ctx.db
+      .query("quickPlayJoinLimits")
+      .withIndex("by_key", (q) => q.eq("key", key))
+      .unique();
+    if (!row) {
+      await ctx.db.insert("quickPlayJoinLimits", { key, windowStart: t, count: 1 });
+    } else if (t - row.windowStart >= JOIN_RATE_WINDOW_MS) {
+      await ctx.db.patch(row._id, { windowStart: t, count: 1 });
+    } else if (row.count >= JOIN_RATE_LIMIT) {
+      over = true;
+    } else {
+      await ctx.db.patch(row._id, { count: row.count + 1 });
+    }
+  }
+  return over;
 }
 
 export const join = mutation({
@@ -164,11 +195,17 @@ export const join = mutation({
       return { success: true, code: room.code, name: m.name, playerId, rejoined: true } as const;
     }
 
+    const t = now();
+    const cleanVisitor = cleanVisitorId(visitorId);
+    const limitKeys = [`pid:${playerId}`, ...(cleanVisitor ? [`vid:${cleanVisitor}`] : [])];
+    if (await overJoinRateLimit(ctx, limitKeys, t)) {
+      return { success: false, message: "Too many Quick Play joins. Try again in a minute." } as const;
+    }
+
     // Placement: the open room with the most live players (then most seated,
     // then oldest). A room whose players have all gone quiet (closed tabs the
     // cleanup cron has not swept yet) is skipped: a newcomer would only wait
     // with ghosts.
-    const t = now();
     const open = [
       ...(await ctx.db
         .query("rooms")
@@ -201,7 +238,6 @@ export const join = mutation({
       }
     }
 
-    const cleanVisitor = cleanVisitorId(visitorId);
     const visitorMeta = cleanVisitor ? { visitorId: cleanVisitor } : {};
     let room: Room;
     let seated: Player[];
@@ -262,9 +298,9 @@ export const join = mutation({
 /**
  * Players waiting in public lobbies, for the homepage line.
  *
- * Counts a seated player only while presence reports them online, or before
- * their first heartbeat lands (no presence entry yet), so closed or abandoned
- * tabs do not inflate the number. It deliberately reads no clock: a
+ * Counts a seated player only while presence reports them online, so closed
+ * or abandoned tabs, and seats that never heartbeated, do not inflate the
+ * number. A real player shows up within a second or two of joining. It deliberately reads no clock: a
  * Date.now() read would make every execution unique and defeat the query
  * cache. The cost is that a player who switched tabs while waiting drops out
  * of the count until they come back (placement still treats them as live for
@@ -292,7 +328,7 @@ export const waitingCount = query({
       const byUser = await presenceByUser(ctx, room.code);
       for (const p of players) {
         const entry = byUser.get(p.playerId);
-        if (!entry || entry.online) waiting++;
+        if (entry?.online) waiting++;
       }
     }
     return { waiting };
@@ -474,5 +510,25 @@ export const resumeSeat = mutation({
       await ctx.db.patch(found.player._id, { closingAt: undefined });
     }
     return { success: true } as const;
+  },
+});
+
+/**
+ * Deletes join-throttle rows whose window ended more than an hour ago, in
+ * batches, rescheduling itself until none are left.
+ */
+export const pruneJoinLimits = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = now() - 60 * 60 * 1000;
+    const stale = await ctx.db
+      .query("quickPlayJoinLimits")
+      .withIndex("by_windowStart", (q) => q.lt("windowStart", cutoff))
+      .take(500);
+    for (const row of stale) await ctx.db.delete(row._id);
+    if (stale.length === 500) {
+      await ctx.scheduler.runAfter(0, internal.quickPlay.pruneJoinLimits, {});
+    }
+    return { deleted: stale.length };
   },
 });

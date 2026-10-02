@@ -16,6 +16,9 @@ import {
   PUBLIC_WAITING_TIMEOUT_MS,
   CLOSE_LEAVE_DELAY_MS,
   PLACEMENT_RECENT_MS,
+  NO_HEARTBEAT_GRACE_MS,
+  JOIN_RATE_LIMIT,
+  JOIN_RATE_WINDOW_MS,
   generateFunName,
   quickPlaySettings,
 } from "./game/quickPlayRules";
@@ -50,7 +53,11 @@ async function advance(t: T, ms: number) {
 const conn = (id: string) => `conn-${id}`;
 const seatKey = (id: string) => `seat-key-${id}-0123456789abcdef`;
 
-async function join(t: T, playerId: string, extra: { name?: string; connectionId?: string } = {}) {
+async function join(
+  t: T,
+  playerId: string,
+  extra: { name?: string; connectionId?: string; heartbeat?: boolean } = {}
+) {
   const res = await t.mutation(api.quickPlay.join, {
     playerId,
     connectionId: extra.connectionId ?? conn(playerId),
@@ -58,6 +65,15 @@ async function join(t: T, playerId: string, extra: { name?: string; connectionId
     ...(extra.name !== undefined ? { name: extra.name } : {}),
   });
   if (!res.success) throw new Error(`join failed: ${res.message}`);
+  // A real client starts heartbeating as soon as the waiting screen mounts;
+  // seats that never heartbeat stop counting after NO_HEARTBEAT_GRACE_MS.
+  if (extra.heartbeat === false) return res;
+  await t.mutation(api.presence.heartbeat, {
+    roomId: res.code,
+    userId: playerId,
+    sessionId: `s-${playerId}`,
+    interval: 30_000,
+  });
   return res;
 }
 
@@ -707,6 +723,9 @@ describe("hostless game flow", () => {
 
     const late = await join(t, "p4");
     expect(late.code).toBe("QAPUB3");
+    for (const id of ["p1", "p2", "p3"]) {
+      await t.mutation(api.presence.heartbeat, { roomId: "QAPUB3", userId: id, sessionId: `s-${id}`, interval: 30_000 });
+    }
     await advance(t, AUTO_REMATCH_MS);
     r = (await room(t, "QAPUB3"))!;
     expect(r.phase).toBe("promptVoting");
@@ -985,7 +1004,7 @@ describe("disconnected players", () => {
   test("the cron drops an offline waiting player after the public grace and records it", async () => {
     const t = setup();
     const { code } = await join(t, "p1");
-    await join(t, "p2"); // never heartbeats
+    await join(t, "p2", { heartbeat: false }); // never heartbeats
     await insertRoom(t, "QAPRIV", { isPublic: undefined, playerIds: ["v1"] });
     await advance(t, PUBLIC_WAITING_TIMEOUT_MS + 60_000);
     await t.mutation(api.presence.heartbeat, { roomId: code, userId: "p1", sessionId: "s1", interval: 30_000 });
@@ -1267,15 +1286,53 @@ describe("ghosts (closed or abandoned tabs)", () => {
     expect((await join(t, "p1")).code).toBe("QARCNT");
   });
 
-  test("waitingCount counts online players and players not yet heartbeating, not offline ones", async () => {
+  test("waitingCount counts only online players, not offline or never-heartbeated seats", async () => {
     const t = setup();
     const { code } = await join(t, "p1");
     await join(t, "p2");
-    await join(t, "p3");
+    await join(t, "p3", { heartbeat: false });
     await heartbeat(t, code, "p1");
     await goOffline(t, code, "p2");
-    // p1 online, p2 offline, p3 has no presence entry yet.
-    expect(await t.query(api.quickPlay.waitingCount, {})).toEqual({ waiting: 2 });
+    // p1 online, p2 offline, p3 never heartbeated.
+    expect(await t.query(api.quickPlay.waitingCount, {})).toEqual({ waiting: 1 });
+  });
+
+  test("scripted seats that never heartbeat stop counting and are dropped at launch", async () => {
+    const t = setup();
+    // A script seats five players that never open a page.
+    const { code } = await join(t, "g1", { heartbeat: false });
+    for (const id of ["g2", "g3", "g4"]) await join(t, id, { heartbeat: false });
+    expect(await t.query(api.quickPlay.waitingCount, {})).toEqual({ waiting: 0 });
+    await advance(t, NO_HEARTBEAT_GRACE_MS + 1000);
+    // A real player is not placed with them: every seat there has gone quiet.
+    const real = await join(t, "p1");
+    expect(real.code).not.toBe(code);
+    // The scripted room's countdown fires and drops the never-heartbeated seats
+    // instead of starting a game with them.
+    await advance(t, COUNTDOWN_MS + 30_000);
+    expect(await room(t, code)).toBeNull();
+  });
+
+  test("Quick Play joins are rate limited per player and per visitor", async () => {
+    const t = setup();
+    const raw = (playerId: string, visitorId?: string) =>
+      t.mutation(api.quickPlay.join, {
+        playerId,
+        connectionId: conn(playerId),
+        seatKey: seatKey(playerId),
+        ...(visitorId ? { visitorId } : {}),
+      });
+    // Same visitor, fresh player ids each time (a reloading script).
+    for (let i = 0; i < JOIN_RATE_LIMIT; i++) {
+      const res = await raw(`v${i}`, "visitor-abc12345");
+      expect(res.success).toBe(true);
+      await t.mutation(api.game.rooms.leaveGame, { code: res.success ? res.code : "", playerId: `v${i}`, connectionId: conn(`v${i}`) });
+    }
+    expect((await raw("v-over", "visitor-abc12345")).success).toBe(false);
+    // A different visitor is unaffected, and the limit resets after the window.
+    expect((await raw("w1", "visitor-xyz98765")).success).toBe(true);
+    await advance(t, JOIN_RATE_WINDOW_MS);
+    expect((await raw("v-later", "visitor-abc12345")).success).toBe(true);
   });
 
   test("leaveGame from a closing tab releases a public seat after a short delay", async () => {

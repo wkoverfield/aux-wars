@@ -19,6 +19,7 @@ import {
   COUNTDOWN_MAX_MS,
   COUNTDOWN_MIN_PLAYERS,
   COUNTDOWN_MS,
+  NO_HEARTBEAT_GRACE_MS,
   ONE_V_ONE_OFFER_MS,
   PUBLIC_IN_GAME_GRACE_MS,
   PUBLIC_WAITING_TIMEOUT_MS,
@@ -114,17 +115,21 @@ export async function removePublicPlayer(ctx: MutationCtx, room: Room, player: P
 
 /**
  * Removes players the presence component has reported offline for longer than
- * PUBLIC_WAITING_TIMEOUT_MS. Players with no presence entry yet are kept (the
- * first heartbeat can trail the join). Returns who is left.
+ * PUBLIC_WAITING_TIMEOUT_MS, and players who never heartbeated within
+ * NO_HEARTBEAT_GRACE_MS of joining (the first heartbeat can trail the join by
+ * a moment, so newer seats are kept). Returns who is left.
  */
 export async function dropKnownOffline(ctx: MutationCtx, room: Room, players: Player[]): Promise<Player[]> {
   const entries = await presence.listRoom(ctx, room.code, false);
   const byUser = new Map(entries.map((e) => [e.userId, e]));
-  const cutoff = now() - PUBLIC_WAITING_TIMEOUT_MS;
+  const t = now();
+  const cutoff = t - PUBLIC_WAITING_TIMEOUT_MS;
+  const noHeartbeatCutoff = t - NO_HEARTBEAT_GRACE_MS;
   const kept: Player[] = [];
   for (const p of players) {
     const entry = byUser.get(p.playerId);
-    if (entry && !entry.online && entry.lastDisconnected < cutoff) {
+    const neverHeartbeated = !entry && (p.connectedAt ?? p._creationTime) < noHeartbeatCutoff;
+    if (neverHeartbeated || (entry && !entry.online && entry.lastDisconnected < cutoff)) {
       await removePublicPlayer(ctx, room, p);
     } else {
       kept.push(p);

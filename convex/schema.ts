@@ -176,6 +176,17 @@ export default defineSchema({
     .index("by_player", ["playerId", "roomCode"])
     .index("by_room", ["roomCode"]),
 
+  // Quick Play join throttle: one row per key ("pid:<playerId>" or
+  // "vid:<visitorId>") holding a fixed-window count. Rows idle past the window
+  // are pruned daily (quickPlay.pruneJoinLimits).
+  quickPlayJoinLimits: defineTable({
+    key: v.string(),
+    windowStart: v.number(),
+    count: v.number(),
+  })
+    .index("by_key", ["key"])
+    .index("by_windowStart", ["windowStart"]),
+
   submissions: defineTable({
     roomCode: v.string(),
     round: v.number(),
