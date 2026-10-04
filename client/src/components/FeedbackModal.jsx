@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
+import { groupFeedback } from './feedbackGroups';
 
 // Get or create a persistent visitor ID for upvoting
 function getVisitorId() {
@@ -19,6 +20,32 @@ const FEEDBACK_TYPES = [
   { value: 'improvement', label: 'Improvement', color: 'bg-yellow-500' },
   { value: 'other', label: 'Other', color: 'bg-gray-500' },
 ];
+
+function FoldedSection({ label, items, renderItem }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="pt-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-2 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors"
+      >
+        <svg
+          className={`w-4 h-4 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+        {label} ({items.length})
+      </button>
+      {expanded && <div className="space-y-4 pt-1">{items.map(renderItem)}</div>}
+    </div>
+  );
+}
 
 export default function FeedbackModal({ showModal, onClose }) {
   const [showForm, setShowForm] = useState(false);
@@ -83,6 +110,99 @@ export default function FeedbackModal({ showModal, onClose }) {
   const getTypeConfig = (type) => {
     return FEEDBACK_TYPES.find((t) => t.value === type) || FEEDBACK_TYPES[3];
   };
+
+  const renderItem = (item) => {
+    const typeConfig = getTypeConfig(item.type);
+    const hasVoted = Boolean(item.hasUpvoted);
+    const mergedRequests = item.mergedRequests || [];
+
+    return (
+      <div
+        key={item._id}
+        className="bg-[#242424] rounded-lg p-4 border border-gray-700"
+      >
+        <div className="flex gap-4">
+          {/* Upvote button */}
+          <button
+            onClick={() => handleUpvote(item._id, hasVoted)}
+            className={`flex flex-col items-center gap-1 px-2 py-1 rounded transition-colors ${
+              hasVoted
+                ? 'text-[#68d570]'
+                : 'text-gray-400 hover:text-[#68d570]'
+            }`}
+          >
+            <svg
+              className="w-5 h-5"
+              fill={hasVoted ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5 15l7-7 7 7"
+              />
+            </svg>
+            <span className="text-sm font-medium">{item.upvotes}</span>
+          </button>
+
+          {/* Content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span
+                className={`px-2 py-0.5 text-xs font-medium rounded-full ${typeConfig.color} text-white`}
+              >
+                {typeConfig.label}
+              </span>
+              {item.status !== 'pending' && (
+                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                  item.status === 'completed'
+                    ? 'bg-green-600 text-white'
+                    : item.status === 'planned'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-600 text-gray-300'
+                }`}>
+                  {item.status === 'completed' ? '✓ shipped' : item.status}
+                </span>
+              )}
+            </div>
+            <h3 className="text-white font-medium mb-1">{item.title}</h3>
+            <p className="text-gray-400 text-sm">{item.description}</p>
+            {mergedRequests.length > 0 && (
+              <div className="mt-3 rounded-md border border-gray-700 bg-[#1f1f1f] p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                  Also requested as
+                </div>
+                <div className="space-y-2">
+                  {mergedRequests.map((request) => (
+                    <div
+                      key={request._id}
+                      className="border-l-2 border-[#68d570]/60 pl-3"
+                    >
+                      <div className="text-sm text-gray-200">
+                        {request.title}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {request.authorName || 'Anonymous'} •{' '}
+                        {new Date(request.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="mt-2 text-xs text-gray-500">
+              {item.authorName || 'Anonymous'} •{' '}
+              {new Date(item.createdAt).toLocaleDateString()}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const { open, shipped, declined } = groupFeedback(feedback);
 
   return (
     <AnimatePresence>
@@ -218,7 +338,7 @@ export default function FeedbackModal({ showModal, onClose }) {
                     Add a Suggestion
                   </button>
 
-                  {/* Feedback items */}
+                  {/* Feedback items: open requests first, shipped and declined folded away */}
                   {feedback === undefined ? (
                     <div className="text-center py-8 text-gray-500">Loading...</div>
                   ) : feedback.length === 0 ? (
@@ -226,96 +346,21 @@ export default function FeedbackModal({ showModal, onClose }) {
                       No suggestions yet. Be the first!
                     </div>
                   ) : (
-                    feedback.map((item) => {
-                      const typeConfig = getTypeConfig(item.type);
-                      const hasVoted = Boolean(item.hasUpvoted);
-                      const mergedRequests = item.mergedRequests || [];
-
-                      return (
-                        <div
-                          key={item._id}
-                          className="bg-[#242424] rounded-lg p-4 border border-gray-700"
-                        >
-                          <div className="flex gap-4">
-                            {/* Upvote button */}
-                            <button
-                              onClick={() => handleUpvote(item._id, hasVoted)}
-                              className={`flex flex-col items-center gap-1 px-2 py-1 rounded transition-colors ${
-                                hasVoted
-                                  ? 'text-[#68d570]'
-                                  : 'text-gray-400 hover:text-[#68d570]'
-                              }`}
-                            >
-                              <svg
-                                className="w-5 h-5"
-                                fill={hasVoted ? 'currentColor' : 'none'}
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M5 15l7-7 7 7"
-                                />
-                              </svg>
-                              <span className="text-sm font-medium">{item.upvotes}</span>
-                            </button>
-
-                            {/* Content */}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span
-                                  className={`px-2 py-0.5 text-xs font-medium rounded-full ${typeConfig.color} text-white`}
-                                >
-                                  {typeConfig.label}
-                                </span>
-                                {item.status !== 'pending' && (
-                                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                                    item.status === 'completed'
-                                      ? 'bg-green-600 text-white'
-                                      : item.status === 'planned'
-                                      ? 'bg-purple-600 text-white'
-                                      : 'bg-gray-600 text-gray-300'
-                                  }`}>
-                                    {item.status === 'completed' ? '✓ shipped' : item.status}
-                                  </span>
-                                )}
-                              </div>
-                              <h3 className="text-white font-medium mb-1">{item.title}</h3>
-                              <p className="text-gray-400 text-sm">{item.description}</p>
-                              {mergedRequests.length > 0 && (
-                                <div className="mt-3 rounded-md border border-gray-700 bg-[#1f1f1f] p-3">
-                                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
-                                    Also requested as
-                                  </div>
-                                  <div className="space-y-2">
-                                    {mergedRequests.map((request) => (
-                                      <div
-                                        key={request._id}
-                                        className="border-l-2 border-[#68d570]/60 pl-3"
-                                      >
-                                        <div className="text-sm text-gray-200">
-                                          {request.title}
-                                        </div>
-                                        <div className="text-xs text-gray-500">
-                                          {request.authorName || 'Anonymous'} •{' '}
-                                          {new Date(request.createdAt).toLocaleDateString()}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              <div className="mt-2 text-xs text-gray-500">
-                                {item.authorName || 'Anonymous'} •{' '}
-                                {new Date(item.createdAt).toLocaleDateString()}
-                              </div>
-                            </div>
-                          </div>
+                    <>
+                      {open.length > 0 ? (
+                        open.map(renderItem)
+                      ) : (
+                        <div className="text-center py-6 text-gray-500 text-sm">
+                          No open requests right now. Add a suggestion above.
                         </div>
-                      );
-                    })
+                      )}
+                      {shipped.length > 0 && (
+                        <FoldedSection label="Shipped" items={shipped} renderItem={renderItem} />
+                      )}
+                      {declined.length > 0 && (
+                        <FoldedSection label="Not planned" items={declined} renderItem={renderItem} />
+                      )}
+                    </>
                   )}
                 </div>
               )}
