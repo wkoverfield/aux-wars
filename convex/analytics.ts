@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 
@@ -18,7 +18,10 @@ const eventMetadata = v.optional(v.object({
   phase: v.optional(v.string()),
   visitorId: v.optional(v.string()), // opaque client visitor id (retention linkage)
   reason: v.optional(v.string()), // search_failed: see searchFailReason
+  waitedMs: v.optional(v.number()), // quickplay_matched / quickplay_left_waiting
+  playersAtStart: v.optional(v.number()), // quickplay_matched
 }));
+export type EventMetadata = NonNullable<Infer<typeof eventMetadata>>;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

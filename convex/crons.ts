@@ -28,6 +28,12 @@ crons.daily(
 );
 
 crons.daily(
+  "prune-quickplay-join-limits",
+  { hourUTC: 4, minuteUTC: 45 },
+  internal.quickPlay.pruneJoinLimits
+);
+
+crons.daily(
   "cleanup-old-analytics",
   { hourUTC: 4, minuteUTC: 0 },  // Run daily at 4am UTC
   internal.analytics.cleanupOldEvents,

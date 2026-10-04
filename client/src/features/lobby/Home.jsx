@@ -16,6 +16,7 @@ import { adsConfigured } from "../../services/ads";
 import { capture } from "../../services/posthog";
 import { captureGameEvent, hashRoomCode } from "../../services/analytics";
 import { getVisitorId } from "../../utils/visitorId";
+import QuickPlayLine from "../quickplay/QuickPlayLine";
 
 // Opaque visitor id sent on host/join so retention can link a visit to a play.
 // getVisitorId() falls back to a shared "anon" when storage is unavailable;
@@ -180,6 +181,9 @@ export default function Home() {
             disabled={isHosting}
           />
         </div>
+
+        {/* Quick Play: a text line, not a third button */}
+        <QuickPlayLine visitorId={joinVisitorId()} />
 
         {/* Pro CTA — only once ads are live (otherwise "ad-free" is meaningless) */}
         {adsConfigured() && (isPro ? (

@@ -50,12 +50,17 @@ export const DETAIL_EVENT_TYPES = [
   "player_joined",
   "search_no_results",
   "search_failed",
+  "quickplay_matched",
+  "quickplay_left_waiting",
 ] as const;
 export const COUNT_EVENT_TYPES = [
   "game_created",
   "song_submitted",
   "rating_submitted",
   "pro_purchased",
+  "quickplay_clicked",
+  "quickplay_1v1_offered",
+  "quickplay_1v1_accepted",
 ] as const;
 type DetailType = (typeof DETAIL_EVENT_TYPES)[number];
 type CountType = (typeof COUNT_EVENT_TYPES)[number];
@@ -69,6 +74,8 @@ export type SlimEvent = {
   phase?: string;
   label?: string;
   reason?: string;
+  waitedMs?: number;
+  playersAtStart?: number;
 };
 
 export function slimEvent(metadata: unknown): SlimEvent {
@@ -81,6 +88,8 @@ export function slimEvent(metadata: unknown): SlimEvent {
   if (typeof m.phase === "string") out.phase = m.phase;
   if (typeof m.label === "string") out.label = m.label;
   if (typeof m.reason === "string") out.reason = m.reason;
+  if (typeof m.waitedMs === "number") out.waitedMs = m.waitedMs;
+  if (typeof m.playersAtStart === "number") out.playersAtStart = m.playersAtStart;
   return out;
 }
 
@@ -217,6 +226,19 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
     }
   }
 
+  // Quick Play funnel. Matched and clicks are per player; games started and
+  // players at start come from game_started events labelled "quickplay".
+  const qpClicks = counts.quickplay_clicked ?? 0;
+  const qpMatched = detail.quickplay_matched ?? [];
+  const qpWaits = qpMatched
+    .map((e) => e.waitedMs)
+    .filter((n): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0)
+    .sort((a, b) => a - b);
+  const qpStartSizes = started
+    .filter((e) => e.label === "quickplay")
+    .map((e) => e.playerCount)
+    .filter((n): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0);
+
   const newVisitors = input.newVisitors;
   const returningVisitors =
     newVisitors === null ? null : Math.max(0, input.uniqueVisitors - newVisitors);
@@ -256,6 +278,18 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
     searchFailed: detail.search_failed.length,
     searchFailedByReason,
     hourlyPeaks,
+    quickPlayClicks: qpClicks,
+    quickPlayMatched: qpMatched.length,
+    quickPlayMatchRate: qpClicks > 0 ? round(Math.min(1, qpMatched.length / qpClicks), 4) : null,
+    quickPlayMedianWaitMs: percentile(qpWaits, 0.5),
+    quickPlayLeftWaiting: (detail.quickplay_left_waiting ?? []).length,
+    quickPlayGamesStarted: qpStartSizes.length,
+    quickPlayAvgPlayersAtStart:
+      qpStartSizes.length > 0
+        ? round(qpStartSizes.reduce((s, n) => s + n, 0) / qpStartSizes.length, 2)
+        : null,
+    quickPlay1v1Offered: counts.quickplay_1v1_offered ?? 0,
+    quickPlay1v1Accepted: counts.quickplay_1v1_accepted ?? 0,
   };
 }
 

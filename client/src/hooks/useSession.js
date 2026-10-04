@@ -85,6 +85,9 @@ function createSession(data) {
     gameCode: data.gameCode,
     playerName: data.playerName || '',
     lastPhase: data.lastPhase || 'lobby',
+    // Quick Play seats: the secret that proves ownership of the seat on
+    // rejoin (the server stores only its hash).
+    ...(data.seatKey ? { seatKey: data.seatKey, quickPlay: true } : {}),
     timestamp: Date.now(),
   };
   setSession(newSession);

@@ -6,7 +6,9 @@ import {
   fmtDateTime,
   fmtInt,
   fmtPct,
+  fmtWait,
   normalizeCounts,
+  normalizeQuickPlay,
   normalizeDashboard,
   normalizeFunnel,
   normalizeHourly,
@@ -245,5 +247,32 @@ describe("formatting", () => {
     expect(fmtPct(0.5)).toBe("50%");
     expect(fmtPct(0.034)).toBe("3.4%");
     expect(fmtPct(0)).toBe("0%");
+  });
+});
+
+describe("Quick Play", () => {
+  it("normalizes the window totals", () => {
+    const qp = normalizeQuickPlay({
+      clicks: 10,
+      matched: 7,
+      matchRate: 0.7,
+      medianWaitMs: 42_000,
+      leftWaiting: 3,
+      abandonRate: 0.3,
+      gamesStarted: 2,
+      avgPlayersAtStart: 3.5,
+      oneVOneOffered: 1,
+      oneVOneAccepted: 1,
+    });
+    expect(qp).toMatchObject({ clicks: 10, matchRate: 0.7, medianWaitMs: 42_000, leftWaiting: 3, avgPlayersAtStart: 3.5 });
+    expect(normalizeQuickPlay(undefined).clicks).toBeNull();
+    expect(normalizeDashboard({ quickPlay: { clicks: 4 } }, 7, NOW).quickPlay.clicks).toBe(4);
+  });
+
+  it("formats waits in seconds and minutes", () => {
+    expect(fmtWait(42_000)).toBe("42s");
+    expect(fmtWait(65_000)).toBe("1m 5s");
+    expect(fmtWait(120_000)).toBe("2m");
+    expect(fmtWait(null)).toBe("n/a");
   });
 });

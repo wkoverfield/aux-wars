@@ -1,9 +1,13 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { internal } from "../_generated/api";
+import type { Doc } from "../_generated/dataModel";
 import { containsHateSpeech } from "./contentFilter";
 import { presence } from "../presence";
 import { cleanVisitorId, recordVisitorPlayed } from "../siteStats";
+import { kickTallies, leavePublicRoom } from "./publicRooms";
+import { hashSeatKey, isValidSeatKey, mayTakeOverSeat } from "./roomOps";
+import { CLOSE_LEAVE_DELAY_MS, QUICK_PLAY_CAP } from "./quickPlayRules";
 
 function now() {
   return Date.now();
@@ -71,8 +75,12 @@ export const joinGame = mutation({
     connectionId: v.string(),
     name: v.string(),
     visitorId: v.optional(v.string()),
+    // Seat key (see game/roomOps.ts). Required to reconnect to a Quick Play
+    // seat; optional in private rooms, where it is stored when sent so that
+    // seat can then only be taken over with it.
+    seatKey: v.optional(v.string()),
   },
-  handler: async (ctx, { code, playerId, connectionId, name, visitorId }) => {
+  handler: async (ctx, { code, playerId, connectionId, name, visitorId, seatKey }) => {
     // Validate player name
     const trimmedName = name.trim();
     if (!trimmedName || trimmedName.length < 1 || trimmedName.length > 50) {
@@ -80,6 +88,9 @@ export const joinGame = mutation({
     }
     if (containsHateSpeech(trimmedName)) {
       return { success: false, message: "Please choose a different name" };
+    }
+    if (seatKey !== undefined && !isValidSeatKey(seatKey)) {
+      return { success: false, message: "Invalid player" };
     }
 
     const room = await getRoomByCodeInternal(ctx, code);
@@ -98,6 +109,12 @@ export const joinGame = mutation({
       .withIndex("by_player", (q) => q.eq("playerId", playerId).eq("roomCode", code))
       .unique();
 
+    // Quick Play rooms seat new players only through the matchmaker (cap,
+    // countdown and never-mid-game rules); reconnects take the path below.
+    if (!existing && room.isPublic) {
+      return { success: false, message: "Quick Play rooms can only be joined through Quick Play" };
+    }
+
     const playerCap = room.settings?.hostPro ? PRO_PLAYER_CAP : FREE_PLAYER_CAP;
     if (!existing && players.length >= playerCap) {
       return { success: false, message: `Room is full (max ${playerCap} players)` };
@@ -111,7 +128,12 @@ export const joinGame = mutation({
 
     if (existing) {
       // CONNECTION TAKEOVER: This player is rejoining from another tab/device
-      // Deactivate the old connection and activate this new one
+      // Deactivate the old connection and activate this new one. playerIds
+      // are visible to everyone in the room, so a keyed seat also needs its
+      // seat key.
+      if (!(await mayTakeOverSeat(room, existing, seatKey))) {
+        return { success: false, message: "Could not rejoin this game. Please refresh the page." };
+      }
       const oldConnectionId = existing.connectionId;
 
       await ctx.db.patch(existing._id, {
@@ -135,6 +157,7 @@ export const joinGame = mutation({
         roomCode: code,
         playerId,
         connectionId,
+        ...(seatKey !== undefined ? { seatKeyHash: await hashSeatKey(seatKey) } : {}),
         name: trimmedName,
         isHost: isFirst,
         isReady: false,
@@ -177,6 +200,7 @@ export const setRoomLock = mutation({
   handler: async (ctx, { code, playerId, connectionId, locked }) => {
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return { success: false, message: "Game code not found" };
+    if (room.isPublic) return { success: false, message: "Quick Play rooms cannot be locked" };
     const host = await validateConnection(ctx, code, playerId, connectionId);
     if (!host || !host.isHost) return { success: false, message: "Only the host can lock the room" };
     await ctx.db.patch(room._id, { locked });
@@ -206,14 +230,40 @@ export const rejoinGame = mutation({
 });
 
 export const leaveGame = mutation({
-  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
-  handler: async (ctx, { code, playerId, connectionId }) => {
+  args: {
+    code: v.string(),
+    playerId: v.string(),
+    connectionId: v.string(),
+    // Sent by the client's pagehide beacon. A public seat is then released
+    // after CLOSE_LEAVE_DELAY_MS unless the page comes back and calls
+    // quickPlay.resumeSeat (a reload fires the same event as a close).
+    // Private rooms ignore it.
+    onClose: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { code, playerId, connectionId, onClose }) => {
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) return;
 
     const currentPlayer = await validateConnection(ctx, code, playerId, connectionId);
     if (!currentPlayer) {
       return { roomDeleted: false, message: "Connection issue. Please refresh the page." } as const;
+    }
+
+    // Quick Play: no host to reassign; recompute the countdown or keep the
+    // running game moving, and delete the room once empty.
+    if (room.isPublic) {
+      if (onClose) {
+        const closingAt = now();
+        await ctx.db.patch(currentPlayer._id, { closingAt });
+        await ctx.scheduler.runAfter(CLOSE_LEAVE_DELAY_MS, internal.quickPlay.leaveAfterClose, {
+          code,
+          playerId,
+          closingAt,
+        });
+        return { roomDeleted: false, deferred: true } as const;
+      }
+      const { roomDeleted } = await leavePublicRoom(ctx, room, currentPlayer);
+      return { roomDeleted } as const;
     }
 
     const players = await ctx.db
@@ -272,6 +322,9 @@ export const kickPlayer = mutation({
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) {
       return { success: false, message: "Room not found" };
+    }
+    if (room.isPublic) {
+      return { success: false, message: "Quick Play rooms remove players by vote" };
     }
 
     // Verify caller is the host
@@ -402,6 +455,9 @@ export const updateSettings = mutation({
     if (!room) {
       return { success: false, message: "Room not found" } as const;
     }
+    if (room.isPublic) {
+      return { success: false, message: "Quick Play rooms use fixed settings" } as const;
+    }
 
     // Only host can change settings
     const player = await validateConnection(ctx, code, playerId, connectionId);
@@ -437,7 +493,7 @@ export const getRoomByCode = query({
       .query("players")
       .withIndex("by_room", (q) => q.eq("roomCode", code))
       .collect();
-    return { room: publicRoom(room), players: players.map(publicPlayer) };
+    return { room: publicRoom(room, players), players: players.map(publicPlayer) };
   },
 });
 
@@ -470,6 +526,9 @@ export const addCustomPrompt = mutation({
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) {
       return { success: false, message: "Room not found" } as const;
+    }
+    if (room.isPublic) {
+      return { success: false, message: "Quick Play rooms use curated prompts only" } as const;
     }
 
     // Validate custom prompt length
@@ -525,6 +584,9 @@ export const addCustomPrompts = mutation({
     const room = await getRoomByCodeInternal(ctx, code);
     if (!room) {
       return { success: false, message: "Room not found", added: 0, skipped: prompts.length, maxedOut: false, selected: 0 } as const;
+    }
+    if (room.isPublic) {
+      return { success: false, message: "Quick Play rooms use curated prompts only", added: 0, skipped: prompts.length, maxedOut: false, selected: 0 } as const;
     }
 
     const allPrompts = await ctx.db
@@ -640,13 +702,23 @@ function publicPlayer(player: any) {
     connectedAt: player.connectedAt,
     isActive: player.isActive,
     submittedRounds: player.submittedRounds,
+    // Quick Play: seated but still waiting for their first game (e.g. joined
+    // during the auto-rematch countdown, so the finished game is not theirs).
+    ...(player.waitingSince !== undefined ? { isWaiting: true } : {}),
   };
 }
 
-function publicRoom(room: any) {
+/**
+ * Room as clients see it. Kick votes are reduced to anonymous per-target
+ * tallies and the kicked list (raw playerIds) is withheld.
+ */
+function publicRoom(room: Doc<"rooms">, players: Doc<"players">[]) {
+  const { kickVotes, kickedPlayerIds, ...rest } = room;
+  void kickedPlayerIds;
   return {
-    ...room,
-    hostPlayerId: room.hostPlayerId,
+    ...rest,
+    // Quick Play rooms: the fixed seat count, for "Waiting for players (2/6)".
+    ...(room.isPublic ? { playerCap: QUICK_PLAY_CAP, kickTallies: kickTallies(kickVotes, players) } : {}),
   };
 }
 

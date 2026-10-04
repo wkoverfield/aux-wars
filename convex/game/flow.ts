@@ -1,7 +1,21 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
-import { internalMutation, mutation, query } from "../_generated/server";
+import { internalMutation, mutation, query, type MutationCtx } from "../_generated/server";
+import type { Doc } from "../_generated/dataModel";
+import {
+  PROMPT_VOTING_MS,
+  advanceToNextRound,
+  gameEpochOf,
+  isCurrentGame,
+  launchFirstRound,
+  pickPrompt,
+  wipeGameData,
+} from "./roomOps";
+import { pendingPlayers, startPublicRematch } from "./publicRooms";
+import { AUTO_ADVANCE_MS, AUTO_REMATCH_MS } from "./quickPlayRules";
 // Note: internal.analytics.trackEvent is used for fire-and-forget analytics tracking
+// Public (Quick Play) rooms have no host: their start, round advance and
+// rematch are scheduler-driven, and the host-only mutations below no-op on them.
 
 function now() { return Date.now(); }
 
@@ -47,6 +61,7 @@ export const startGame = mutation({
   handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
+    if (room.isPublic) return; // public rooms start on the scheduler (quickPlay)
     const players = await getPlayers(ctx, code);
     const host = await validateConnection(ctx, code, playerId, connectionId);
     if (!host || !host.isHost) return; // only active host tab
@@ -54,57 +69,7 @@ export const startGame = mutation({
     const allReady = players.every((p: any) => p.isReady);
     if (!allReady) return;
 
-    const chosenPrompt = pickPrompt(room.settings.selectedPrompts, []);
-    const enablePromptVoting = room.settings.enablePromptVoting !== false; // default true
-
-    if (enablePromptVoting) {
-      // Go to prompt voting phase
-      await ctx.db.patch(room._id, {
-        phase: "promptVoting",
-        currentRound: 1,
-        currentPrompt: chosenPrompt,
-        usedPrompts: [chosenPrompt],
-        promptVotingStartedAt: now(),
-        skipVotes: [],
-        lastActivityAt: now(),
-      });
-
-      // Schedule prompt voting timeout (15 seconds)
-      await ctx.scheduler.runAfter(
-        15_000,
-        internal.game.flow.endPromptVoting,
-        { code, round: 1 }
-      );
-    } else {
-      // Skip prompt voting, go directly to song selection
-      await ctx.db.patch(room._id, {
-        phase: "songSelection",
-        currentRound: 1,
-        currentPrompt: chosenPrompt,
-        usedPrompts: [chosenPrompt],
-        selectionStartedAt: now(),
-        lastActivityAt: now(),
-      });
-
-      // Schedule round timeout if roundLength is set
-      if (room.settings.roundLength > 0) {
-        await ctx.scheduler.runAfter(
-          room.settings.roundLength * 1000,
-          internal.game.flow.endSelectionPhase,
-          { code, round: 1 }
-        );
-      }
-    }
-
-    // Track game started
-    await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
-      eventType: "game_started",
-      metadata: {
-        roomCode: code,
-        playerCount: players.length,
-        totalRounds: room.settings.numberOfRounds,
-      },
-    });
+    await launchFirstRound(ctx, room, players.length);
   },
 });
 
@@ -189,23 +154,7 @@ export const submitSong = mutation({
       metadata: { roomCode: code, roundNumber: room.currentRound },
     });
 
-    const subs = await ctx.db
-      .query("submissions")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
-      .order("asc")
-      .collect();
-
-    // Robust unique-submitter check
-    const submittedPlayerIds = new Set(subs.map((s) => s.playerId));
-    const allSubmitted = players.every((p: any) => submittedPlayerIds.has(p.playerId));
-
-    if (allSubmitted) {
-      // Use scheduler to avoid direct mutation-to-mutation call
-      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, {
-        code,
-        round: room.currentRound,
-      });
-    }
+    await startRatingIfAllSubmitted(ctx, room, players);
 
     return { success: true };
   },
@@ -288,63 +237,11 @@ export const nextRound = mutation({
   handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
+    if (room.isPublic) return; // public rooms auto-advance (autoAdvance)
     const host = await validateConnection(ctx, code, playerId, connectionId);
     if (!host || !host.isHost) return;
 
-    const isLastRound = room.currentRound >= room.settings.numberOfRounds;
-    if (isLastRound) {
-      await ctx.db.patch(room._id, { phase: "gameOver", lastActivityAt: now() });
-      return;
-    }
-
-    const newRound = room.currentRound + 1;
-    const chosenPrompt = pickPrompt(room.settings.selectedPrompts, room.usedPrompts || []);
-    const enablePromptVoting = room.settings.enablePromptVoting !== false; // default true
-
-    // Clean submittedRounds for all players in new round
-    const players = await getPlayers(ctx, code);
-    await Promise.all(
-      players.map((p: any) => ctx.db.patch(p._id, { submittedRounds: [] }))
-    );
-
-    if (enablePromptVoting) {
-      // Go to prompt voting phase
-      await ctx.db.patch(room._id, {
-        currentRound: newRound,
-        currentPrompt: chosenPrompt,
-        usedPrompts: [...(room.usedPrompts || []), chosenPrompt],
-        phase: "promptVoting",
-        promptVotingStartedAt: now(),
-        skipVotes: [],
-        lastActivityAt: now(),
-      });
-
-      // Schedule prompt voting timeout (15 seconds)
-      await ctx.scheduler.runAfter(
-        15_000,
-        internal.game.flow.endPromptVoting,
-        { code, round: newRound }
-      );
-    } else {
-      // Skip prompt voting, go directly to song selection
-      await ctx.db.patch(room._id, {
-        currentRound: newRound,
-        currentPrompt: chosenPrompt,
-        usedPrompts: [...(room.usedPrompts || []), chosenPrompt],
-        phase: "songSelection",
-        selectionStartedAt: now(),
-        lastActivityAt: now(),
-      });
-
-      // Schedule round timeout if roundLength is set
-      if (room.settings.roundLength > 0) {
-        await ctx.scheduler.runAfter(
-          room.settings.roundLength * 1000,
-          internal.game.flow.endSelectionPhase,
-          { code, round: newRound }
-        );
-      }
-    }
+    await advanceToNextRound(ctx, room);
   },
 });
 
@@ -353,6 +250,8 @@ export const returnToLobby = mutation({
   handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
+    // Public rooms never return to a host lobby: game over auto-rematches.
+    if (room.isPublic) return;
     const player = await validateConnection(ctx, code, playerId, connectionId);
     if (!player) return;
     // Post-game, ANY player can send the group back to the lobby (decoupled from
@@ -360,23 +259,7 @@ export const returnToLobby = mutation({
     if (room.phase !== "gameOver" && !player.isHost) return;
 
     // Clean up all game data from previous game
-    const submissions = await ctx.db
-      .query("submissions")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
-      .collect();
-    await Promise.all(submissions.map(s => ctx.db.delete(s._id)));
-
-    const ratings = await ctx.db
-      .query("ratings")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
-      .collect();
-    await Promise.all(ratings.map(r => ctx.db.delete(r._id)));
-
-    const roundResults = await ctx.db
-      .query("roundResults")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
-      .collect();
-    await Promise.all(roundResults.map(rr => ctx.db.delete(rr._id)));
+    await wipeGameData(ctx, code);
 
     await ctx.db.patch(room._id, {
       phase: "lobby",
@@ -405,6 +288,7 @@ export const startRematch = mutation({
   handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoom(ctx, code);
     if (!room || room.phase !== "gameOver") return;
+    if (room.isPublic) return; // public rooms arm their rematch automatically
     const player = await validateConnection(ctx, code, playerId, connectionId);
     if (!player) return;
     if (room.rematchStartingAt) return; // already counting down — double-taps no-op
@@ -423,6 +307,7 @@ export const cancelRematch = mutation({
   handler: async (ctx, { code, playerId, connectionId }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
+    if (room.isPublic) return; // nobody can stall a public room's auto-rematch
     const player = await validateConnection(ctx, code, playerId, connectionId);
     if (!player) return;
     if (!room.rematchStartingAt) return;
@@ -439,62 +324,65 @@ export const executeRematch = internalMutation({
     // Matching the exact timestamp ignores a stale job from a cancelled countdown.
     if (!room || room.phase !== "gameOver" || room.rematchStartingAt !== startAt) return;
 
+    // Public rooms: start with whoever is seated now (empty seats may have
+    // refilled during the countdown), or go back to waiting if under 2.
+    if (room.isPublic) {
+      await startPublicRematch(ctx, room);
+      return;
+    }
+
     // Wipe previous game data (same as returnToLobby).
-    const submissions = await ctx.db
-      .query("submissions")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
-      .collect();
-    await Promise.all(submissions.map((s) => ctx.db.delete(s._id)));
-    const ratings = await ctx.db
-      .query("ratings")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
-      .collect();
-    await Promise.all(ratings.map((r) => ctx.db.delete(r._id)));
-    const roundResults = await ctx.db
-      .query("roundResults")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code))
-      .collect();
-    await Promise.all(roundResults.map((rr) => ctx.db.delete(rr._id)));
+    await wipeGameData(ctx, code);
 
     const players = await getPlayers(ctx, code);
     await Promise.all(players.map((p: any) => ctx.db.patch(p._id, { isReady: false, submittedRounds: [] })));
 
     // Start a fresh game with the SAME settings (mirrors startGame, minus the ready gate).
-    const chosenPrompt = pickPrompt(room.settings.selectedPrompts, []);
-    const enablePromptVoting = room.settings.enablePromptVoting !== false;
-    if (enablePromptVoting) {
-      await ctx.db.patch(room._id, {
-        phase: "promptVoting",
-        currentRound: 1,
-        currentPrompt: chosenPrompt,
-        usedPrompts: [chosenPrompt],
-        promptVotingStartedAt: now(),
-        skipVotes: [],
-        rematchStartingAt: undefined,
-        lastActivityAt: now(),
-      });
-      await ctx.scheduler.runAfter(15_000, internal.game.flow.endPromptVoting, { code, round: 1 });
-    } else {
-      await ctx.db.patch(room._id, {
-        phase: "songSelection",
-        currentRound: 1,
-        currentPrompt: chosenPrompt,
-        usedPrompts: [chosenPrompt],
-        selectionStartedAt: now(),
-        rematchStartingAt: undefined,
-        lastActivityAt: now(),
-      });
-      if (room.settings.roundLength > 0) {
-        await ctx.scheduler.runAfter(room.settings.roundLength * 1000, internal.game.flow.endSelectionPhase, { code, round: 1 });
-      }
-    }
-
-    await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
-      eventType: "game_started",
-      metadata: { roomCode: code, playerCount: players.length, totalRounds: room.settings.numberOfRounds },
-    });
+    await launchFirstRound(ctx, room, players.length, { rematchStartingAt: undefined });
   },
 });
+
+/**
+ * Public rooms: the results screen's auto-advance fired. Moves to the next
+ * round, or after the last round to game over with the auto-rematch armed.
+ * No-ops unless the room still holds this exact fire time.
+ */
+export const autoAdvance = internalMutation({
+  args: { code: v.string(), fireAt: v.number() },
+  handler: async (ctx, { code, fireAt }) => {
+    const room = await getRoom(ctx, code);
+    if (!room || !room.isPublic || room.phase !== "results" || room.autoAdvanceAt !== fireAt) return;
+
+    if (room.currentRound >= room.settings.numberOfRounds) {
+      const startAt = now() + AUTO_REMATCH_MS;
+      await ctx.db.patch(room._id, {
+        phase: "gameOver",
+        autoAdvanceAt: undefined,
+        rematchStartingAt: startAt,
+        lastActivityAt: now(),
+      });
+      await ctx.scheduler.runAfter(AUTO_REMATCH_MS, internal.game.flow.executeRematch, { code, startAt });
+      return;
+    }
+
+    await ctx.db.patch(room._id, { autoAdvanceAt: undefined });
+    const fresh = await getRoom(ctx, code);
+    if (fresh) await advanceToNextRound(ctx, fresh);
+  },
+});
+
+/** Public rooms: fields that arm the results auto-advance (merge into the results patch). */
+function autoAdvancePatch(room: any): { autoAdvanceAt?: number } {
+  return room.isPublic ? { autoAdvanceAt: now() + AUTO_ADVANCE_MS } : {};
+}
+
+async function scheduleAutoAdvance(ctx: any, code: string, patch: { autoAdvanceAt?: number }) {
+  if (patch.autoAdvanceAt === undefined) return;
+  await ctx.scheduler.runAfter(AUTO_ADVANCE_MS, internal.game.flow.autoAdvance, {
+    code,
+    fireAt: patch.autoAdvanceAt,
+  });
+}
 
 /**
  * Per-voter aggregates for the end-game "judge" awards (The Hater / Easy Grader /
@@ -599,21 +487,23 @@ export const voteSkipPrompt = mutation({
       const usedPrompts = [...(room.usedPrompts || [])];
       const newPrompt = pickPrompt(room.settings.selectedPrompts, usedPrompts);
 
-      // Update room with new prompt and reset votes
+      // Update room with new prompt and restart the voting window. The new
+      // startedAt supersedes the timer armed for the previous prompt.
+      const startedAt = now();
       await ctx.db.patch(room._id, {
         currentPrompt: newPrompt,
         usedPrompts: [...usedPrompts, newPrompt],
         skipVotes: [],
-        promptVotingStartedAt: now(), // Reset timer
-        lastActivityAt: now(),
+        promptVotingStartedAt: startedAt,
+        lastActivityAt: startedAt,
       });
 
-      // Reschedule the prompt voting timeout
-      await ctx.scheduler.runAfter(
-        15_000,
-        internal.game.flow.endPromptVoting,
-        { code, round: room.currentRound }
-      );
+      await ctx.scheduler.runAfter(PROMPT_VOTING_MS, internal.game.flow.endPromptVoting, {
+        code,
+        round: room.currentRound,
+        epoch: gameEpochOf(room),
+        startedAt,
+      });
 
       return { success: true, skipped: true, newPrompt };
     } else {
@@ -654,9 +544,22 @@ export const getPromptVotingStatus = query({
   },
 });
 
+/**
+ * Prompt-voting timeout. No-ops unless the room is still in prompt voting for
+ * this round of this game (`epoch`) and the voting window it was armed for
+ * (`startedAt`) is still the current one: a skip restarts the window, and a
+ * relaunched game reuses round 1. `epoch`/`startedAt` are optional only so jobs
+ * scheduled before they existed still validate (an absent epoch counts as 0, an
+ * absent startedAt skips the window check).
+ */
 export const endPromptVoting = internalMutation({
-  args: { code: v.string(), round: v.number() },
-  handler: async (ctx, { code, round }) => {
+  args: {
+    code: v.string(),
+    round: v.number(),
+    epoch: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+  },
+  handler: async (ctx, { code, round, epoch, startedAt }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
 
@@ -665,6 +568,8 @@ export const endPromptVoting = internalMutation({
       console.log(`[endPromptVoting] Skipping - phase: ${room.phase}, currentRound: ${room.currentRound}, expected: ${round}`);
       return;
     }
+    if (!isCurrentGame(room, epoch)) return; // timer from an abandoned game
+    if (startedAt !== undefined && room.promptVotingStartedAt !== startedAt) return; // superseded window
 
     // Transition to song selection
     await ctx.db.patch(room._id, {
@@ -680,7 +585,7 @@ export const endPromptVoting = internalMutation({
       await ctx.scheduler.runAfter(
         room.settings.roundLength * 1000,
         internal.game.flow.endSelectionPhase,
-        { code, round }
+        { code, round, epoch: gameEpochOf(room) }
       );
     }
   },
@@ -889,9 +794,14 @@ export const getCurrentRatingStatus = query({
   },
 });
 
+/**
+ * Song-selection timeout. No-ops unless the room is still selecting for this
+ * round of this game (`epoch`; optional only for jobs scheduled before it
+ * existed).
+ */
 export const endSelectionPhase = internalMutation({
-  args: { code: v.string(), round: v.number() },
-  handler: async (ctx, { code, round }) => {
+  args: { code: v.string(), round: v.number(), epoch: v.optional(v.number()) },
+  handler: async (ctx, { code, round, epoch }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
 
@@ -900,6 +810,7 @@ export const endSelectionPhase = internalMutation({
       console.log(`[endSelectionPhase] Skipping - phase: ${room.phase}, currentRound: ${room.currentRound}, expected: ${round}`);
       return;
     }
+    if (!isCurrentGame(room, epoch)) return; // timer from an abandoned game
 
     // Check if all players have submitted
     const players = await getPlayers(ctx, code);
@@ -913,14 +824,14 @@ export const endSelectionPhase = internalMutation({
 
     if (allSubmitted) {
       // All submitted - normal transition
-      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code, round });
+      await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code, round, epoch: gameEpochOf(room) });
     } else {
       // Some players didn't submit - force transition anyway
       console.log(`[endSelectionPhase] Time up! ${submittedPlayerIds.size}/${players.length} submitted. Advancing anyway.`);
 
       // If at least one player submitted, proceed to rating
       if (subs.length > 0) {
-        await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code, round });
+        await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, { code, round, epoch: gameEpochOf(room) });
       } else {
         // No submissions at all - skip to results with no winner
         console.log(`[endSelectionPhase] No submissions for round ${round}. Skipping to results.`);
@@ -932,15 +843,17 @@ export const endSelectionPhase = internalMutation({
           results: [],
           calculatedAt: now(),
         });
-        await ctx.db.patch(room._id, { phase: "results", lastActivityAt: now() });
+        const advance = autoAdvancePatch(room);
+        await ctx.db.patch(room._id, { phase: "results", lastActivityAt: now(), ...advance });
+        await scheduleAutoAdvance(ctx, code, advance);
       }
     }
   },
 });
 
 export const startRatingPhaseInternal = internalMutation({
-  args: { code: v.string(), round: v.number() },
-  handler: async (ctx, { code, round }) => {
+  args: { code: v.string(), round: v.number(), epoch: v.optional(v.number()) },
+  handler: async (ctx, { code, round, epoch }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
 
@@ -948,6 +861,7 @@ export const startRatingPhaseInternal = internalMutation({
       console.log(`[startRatingPhaseInternal] Skipping - phase: ${room.phase}, currentRound: ${room.currentRound}, expected: ${round}`);
       return;
     }
+    if (!isCurrentGame(room, epoch)) return; // scheduled by an abandoned game
 
     const subs = await ctx.db
       .query("submissions")
@@ -965,17 +879,19 @@ export const startRatingPhaseInternal = internalMutation({
       round,
       ratingIndex: 0,
       timedOut: false,
+      epoch: gameEpochOf(room),
     });
   },
 });
 
 export const calculateResultsInternal = internalMutation({
-  args: { code: v.string(), round: v.optional(v.number()) },
-  handler: async (ctx, { code, round }) => {
+  args: { code: v.string(), round: v.optional(v.number()), epoch: v.optional(v.number()) },
+  handler: async (ctx, { code, round, epoch }) => {
     const room = await getRoom(ctx, code);
     if (!room) return;
     if (room.phase !== "rating") return;
     if (round !== undefined && room.currentRound !== round) return;
+    if (!isCurrentGame(room, epoch)) return; // scheduled by an abandoned game
     const subs = await ctx.db
       .query("submissions")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
@@ -1021,7 +937,9 @@ export const calculateResultsInternal = internalMutation({
       results,
       calculatedAt: now(),
     });
-    await ctx.db.patch(room._id, { phase: "results", lastActivityAt: now(), currentRatingIndex: undefined });
+    const advance = autoAdvancePatch(room);
+    await ctx.db.patch(room._id, { phase: "results", lastActivityAt: now(), currentRatingIndex: undefined, ...advance });
+    await scheduleAutoAdvance(ctx, code, advance);
 
     // Track game completed when final round is done
     const isLastRound = room.currentRound >= room.settings.numberOfRounds;
@@ -1045,11 +963,14 @@ export const advanceRating = internalMutation({
     round: v.number(),
     ratingIndex: v.number(),
     timedOut: v.optional(v.boolean()),
+    // Game the step was armed in; optional only for jobs scheduled before it existed.
+    epoch: v.optional(v.number()),
   },
-  handler: async (ctx, { code, round, ratingIndex, timedOut = false }) => {
+  handler: async (ctx, { code, round, ratingIndex, timedOut = false, epoch }) => {
     const room = await getRoom(ctx, code);
     if (!room || room.phase !== "rating") return;
     if (room.currentRound !== round || (room.currentRatingIndex ?? 0) !== ratingIndex) return;
+    if (!isCurrentGame(room, epoch)) return; // timer from an abandoned game
 
     const subs = await ctx.db
       .query("submissions")
@@ -1058,7 +979,7 @@ export const advanceRating = internalMutation({
       .collect();
     if (ratingIndex >= subs.length) {
       // Use scheduler to avoid direct mutation-to-mutation call
-      await ctx.scheduler.runAfter(0, internal.game.flow.calculateResultsInternal, { code, round });
+      await ctx.scheduler.runAfter(0, internal.game.flow.calculateResultsInternal, { code, round, epoch: gameEpochOf(room) });
       return;
     }
     // Ensure submitter auto-skip (-1) exists for the current song
@@ -1089,6 +1010,7 @@ export const advanceRating = internalMutation({
         round,
         ratingIndex: nextIndex,
         timedOut: false,
+        epoch: gameEpochOf(room),
       });
       return;
     }
@@ -1098,38 +1020,92 @@ export const advanceRating = internalMutation({
       round,
       ratingIndex,
       timedOut: true,
+      epoch: gameEpochOf(room),
     });
+    // In a public game nobody present may be left to rate this song (everyone
+    // else dropped out); move on now rather than waiting out the timer.
+    if (room.isPublic) await advanceIfAllRated(ctx, room);
   },
 });
 
+/**
+ * Moves to the next song once every player the room still waits on (see
+ * pendingPlayers: everyone in a private room, present players in a public
+ * one) has rated the current song. The submitter does not rate their own.
+ */
+async function advanceIfAllRated(ctx: MutationCtx, room: Doc<"rooms">) {
+  const code = room.code;
+  const subs = await ctx.db
+    .query("submissions")
+    .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
+    .order("asc")
+    .collect();
+  const idx = room.currentRatingIndex ?? 0;
+  const current = subs[idx];
+  if (!current) return;
+  const ratings = await ctx.db
+    .query("ratings")
+    .withIndex("by_song", (q) => q.eq("songId", current._id))
+    .collect();
+  const rated = new Set(ratings.filter((r) => r.rating > 0).map((r) => r.voterId));
+  const voters = (await getPlayers(ctx, code)).filter((p: any) => p.playerId !== current.playerId);
+  const { pending, recheckAt } = await pendingPlayers(ctx, room, voters, (p) => rated.has(p.playerId));
+  if (pending.length === 0) {
+    await ctx.db.patch(room._id, { currentRatingIndex: idx + 1, lastActivityAt: now() });
+    await ctx.scheduler.runAfter(200, internal.game.flow.advanceRating, {
+      code,
+      round: room.currentRound,
+      ratingIndex: idx + 1,
+      timedOut: false,
+      epoch: gameEpochOf(room),
+    });
+  } else if (recheckAt !== undefined) {
+    await ctx.scheduler.runAfter(Math.max(0, recheckAt - now()), internal.game.flow.maybeAdvanceOnAllVotes, { code });
+  }
+}
+
+/**
+ * Starts rating once every player the room still waits on (see
+ * pendingPlayers) has submitted for the current round.
+ */
+async function startRatingIfAllSubmitted(ctx: MutationCtx, room: Doc<"rooms">, players: Doc<"players">[]) {
+  const subs = await ctx.db
+    .query("submissions")
+    .withIndex("by_room_round", (q) => q.eq("roomCode", room.code).eq("round", room.currentRound))
+    .collect();
+  if (subs.length === 0) return; // the selection timer handles an empty round
+  const submitted = new Set(subs.map((s) => s.playerId));
+  const { pending, recheckAt } = await pendingPlayers(ctx, room, players, (p) => submitted.has(p.playerId));
+  const args = { code: room.code, round: room.currentRound, epoch: gameEpochOf(room) };
+  if (pending.length === 0) {
+    await ctx.scheduler.runAfter(0, internal.game.flow.startRatingPhaseInternal, args);
+  } else if (recheckAt !== undefined) {
+    await ctx.scheduler.runAfter(
+      Math.max(0, recheckAt - now()),
+      internal.game.flow.maybeStartRatingOnAllSubmitted,
+      args
+    );
+  }
+}
+
+/** Re-runs the "everyone rated" check (after a rating, a departure, or a lapsed grace). */
 export const maybeAdvanceOnAllVotes = internalMutation({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {
     const room = await getRoom(ctx, code);
     if (!room || room.phase !== "rating") return;
-    const players = await getPlayers(ctx, code);
-    const subs = await ctx.db
-      .query("submissions")
-      .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
-      .collect();
-    const idx = room.currentRatingIndex ?? 0;
-    const current = subs[idx];
-    if (!current) return;
-    const ratings = await ctx.db
-      .query("ratings")
-      .withIndex("by_song", (q) => q.eq("songId", current._id))
-      .collect();
-    const eligibleVoters = players.length - 1; // submitter doesn't vote
-    const validVotes = ratings.filter((r) => r.rating > 0).length;
-    if (validVotes >= eligibleVoters) {
-      await ctx.db.patch(room._id, { currentRatingIndex: idx + 1, lastActivityAt: now() });
-      await ctx.scheduler.runAfter(200, internal.game.flow.advanceRating, {
-        code,
-        round: room.currentRound,
-        ratingIndex: idx + 1,
-        timedOut: false,
-      });
-    }
+    await advanceIfAllRated(ctx, room);
+  },
+});
+
+/** Re-runs the "everyone submitted" check for this round of this game. */
+export const maybeStartRatingOnAllSubmitted = internalMutation({
+  args: { code: v.string(), round: v.number(), epoch: v.optional(v.number()) },
+  handler: async (ctx, { code, round, epoch }) => {
+    const room = await getRoom(ctx, code);
+    if (!room || room.phase !== "songSelection" || room.currentRound !== round) return;
+    if (!isCurrentGame(room, epoch)) return;
+    await startRatingIfAllSubmitted(ctx, room, await getPlayers(ctx, code));
   },
 });
 
@@ -1161,10 +1137,4 @@ async function validateConnection(ctx: any, code: string, playerId: string, conn
     return null;
   }
   return player;
-}
-
-function pickPrompt(prompts: string[], usedPrompts: string[] = []): string {
-  const available = prompts.filter(p => !usedPrompts.includes(p));
-  const pool = available.length > 0 ? available : prompts; // Reset if all used
-  return pool[Math.floor(Math.random() * pool.length)];
 }
