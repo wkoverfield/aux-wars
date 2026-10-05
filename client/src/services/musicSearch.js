@@ -117,9 +117,13 @@ async function performSearch(query, cacheKey) {
  * genuinely matched nothing), or stale cached tracks when a refresh failed.
  * Rejects with a SearchError when the search failed and nothing is cached.
  * @param {string} query - Search query
+ * @param {Object} [options]
+ * @param {boolean} [options.fresh] - Start a new request even if one for this
+ *   query is in flight (a user retry of a slow search). The slower request
+ *   still finishes and fills the cache.
  * @returns {Promise<Array>} Array of track objects
  */
-export async function searchTracks(query) {
+export async function searchTracks(query, { fresh = false } = {}) {
   // Validate input
   if (!query || typeof query !== 'string' || query.trim().length < 2) {
     return [];
@@ -141,7 +145,7 @@ export async function searchTracks(query) {
   }
 
   // Check if request is already pending (deduplication)
-  if (pendingRequests.has(cacheKey)) {
+  if (!fresh && pendingRequests.has(cacheKey)) {
     return pendingRequests.get(cacheKey);
   }
 
@@ -150,7 +154,7 @@ export async function searchTracks(query) {
   try {
     return await requestPromise;
   } finally {
-    pendingRequests.delete(cacheKey);
+    if (pendingRequests.get(cacheKey) === requestPromise) pendingRequests.delete(cacheKey);
   }
 }
 

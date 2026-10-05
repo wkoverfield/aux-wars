@@ -33,6 +33,22 @@ describe("searchTracks", () => {
     await expect(searchTracks("nothing matches")).resolves.toEqual([]);
   });
 
+  it("shares an in-flight request, but a fresh retry starts a new one", async () => {
+    const { searchTracks } = await load();
+    let resolveFirst;
+    fetch
+      .mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [TRACK] }));
+    const first = searchTracks("slow song");
+    const shared = searchTracks("slow song");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await expect(searchTracks("slow song", { fresh: true })).resolves.toEqual([TRACK]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    resolveFirst(jsonResponse({ tracks: [] }));
+    await expect(first).resolves.toEqual([]);
+    await expect(shared).resolves.toEqual([]);
+  });
+
   it("resolves tracks from a 200", async () => {
     const { searchTracks } = await load();
     fetch.mockResolvedValue(jsonResponse({ tracks: [TRACK] }));

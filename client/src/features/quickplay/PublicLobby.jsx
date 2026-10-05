@@ -29,7 +29,11 @@ function Tag({ children }) {
   );
 }
 
-function StatusCard({ status }) {
+/** Status card; owns the countdown tick so only it re-renders each second. */
+function StatusCard({ count, cap, startsAt, armedAt }) {
+  const counting = typeof startsAt === "number";
+  const now = useNow(counting, startsAt);
+  const status = lobbyStatus({ count, cap, startsAt, armedAt, nowMs: now });
   if (status.kind === "countdown") {
     return (
       <div className="lobby-container rounded-md flex flex-col gap-2">
@@ -47,7 +51,7 @@ function StatusCard({ status }) {
           aria-valuenow={Math.round(status.progress * 100)}
         >
           <div
-            className="h-full bg-[#68d570] rounded-full transition-[width] duration-200 ease-linear"
+            className="h-full bg-[#68d570] rounded-full transition-[width] duration-1000 ease-linear"
             style={{ width: `${Math.round(status.progress * 100)}%` }}
           />
         </div>
@@ -190,9 +194,6 @@ export default function PublicLobby() {
 
   const count = players.length;
   const cap = room?.playerCap ?? DEFAULT_QUICK_PLAY_CAP;
-  const counting = typeof room?.startsAt === "number";
-  const now = useNow(counting);
-  const status = lobbyStatus({ count, cap, startsAt: room?.startsAt, armedAt: room?.countdownArmedAt, nowMs: now });
 
   const startVotes = room?.startVotes ?? [];
   const oneVOneAccepts = room?.oneVOneAccepts ?? [];
@@ -278,7 +279,7 @@ export default function PublicLobby() {
               {offerOpen ? (
                 <OneVOneCard accepted={iAccepted1v1} onAccept={handleAccept} onDecline={handleDecline} />
               ) : (
-                <StatusCard status={status} />
+                <StatusCard count={count} cap={cap} startsAt={room?.startsAt} armedAt={room?.countdownArmedAt} />
               )}
 
               {count >= 2 && !offerOpen && (

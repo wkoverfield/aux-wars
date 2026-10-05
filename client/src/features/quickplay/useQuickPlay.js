@@ -1,20 +1,52 @@
 import { useEffect, useState } from "react";
-import { leaveBeaconBody } from "./quickPlayModel";
+import { leaveBeaconBody, secondsUntil } from "./quickPlayModel";
+
+/** Ticks land this long after a second boundary, so the new value has flipped. */
+export const TICK_SLACK_MS = 15;
 
 /**
- * Current time, re-rendering every `intervalMs` while `enabled`. Drives the
- * countdowns, which read server fire times (startsAt, autoAdvanceAt,
- * rematchStartingAt) and tick locally.
+ * Milliseconds from `nowMs` until just after the next whole-second boundary,
+ * counted relative to `alignTo` (a deadline) or to the wall clock. A countdown
+ * computed as ceil((deadline - now) / 1000) changes exactly on those
+ * boundaries, so one tick per second shows each value for a full second.
  */
-export function useNow(enabled, intervalMs = 250) {
+export function msUntilNextSecond(nowMs, alignTo = 0) {
+  const rem = (((alignTo - nowMs) % 1000) + 1000) % 1000;
+  return (rem === 0 ? 1000 : rem) + TICK_SLACK_MS;
+}
+
+/**
+ * Current time, re-rendering once per second while `enabled`, aligned to
+ * the second boundaries of `alignTo` (the deadline being counted down to).
+ * Call it from the leaf component that displays the countdown so only that
+ * component re-renders each second.
+ */
+export function useNow(enabled, alignTo) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!enabled) return undefined;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [enabled, intervalMs]);
+    let id;
+    const tick = () => {
+      const t = Date.now();
+      setNow(t);
+      id = setTimeout(tick, msUntilNextSecond(t, typeof alignTo === "number" ? alignTo : 0));
+    };
+    tick();
+    return () => clearTimeout(id);
+  }, [enabled, alignTo]);
   return now;
+}
+
+/** Whole seconds left until `targetMs` (null when there is no target), ticking on its boundaries. */
+export function useSecondsUntil(targetMs) {
+  const active = typeof targetMs === "number" && Number.isFinite(targetMs);
+  const now = useNow(active, targetMs);
+  return active ? secondsUntil(targetMs, now) : null;
+}
+
+/** Leaf that renders the seconds left until `target`, so only it re-renders per tick. */
+export function SecondsLeft({ target }) {
+  return useSecondsUntil(target);
 }
 
 /** POSTs the leave beacon. Returns false when there is nowhere to send it. */

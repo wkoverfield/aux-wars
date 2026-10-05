@@ -16,6 +16,11 @@ import SnippetSelector from "../../components/SnippetSelector";
 import PromptVoting from "./PromptVoting";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
+import { useNow } from "../quickplay/useQuickPlay";
+import { secondsUntil } from "../quickplay/quickPlayModel";
+
+// After this long without an answer, the search shows "Still searching..." and a Retry.
+export const SEARCH_SLOW_MS = 3000;
 
 const SUBMIT_SONG_FALLBACK_MESSAGE = "Couldn't submit that song. Please try again.";
 
@@ -126,6 +131,10 @@ export default function Round() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchError, setSearchError] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [isSearchSlow, setIsSearchSlow] = useState(false);
+  // Bumped by Retry to re-run the search effect with a fresh request.
+  const [searchRetry, setSearchRetry] = useState(0);
+  const retryingSearchRef = useRef(false);
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState(null);
   const [showSnippetSelector, setShowSnippetSelector] = useState(false);
@@ -159,27 +168,14 @@ export default function Round() {
   // Selection timer logic
   const roundLength = room?.settings?.roundLength || 0; // 0 = no limit
   const selectionStartedAt = room?.selectionStartedAt;
-  const [timeRemaining, setTimeRemaining] = useState(null);
-
-  // Update timer every second during song selection phase
-  useEffect(() => {
-    // Don't show timer during prompt voting (it has its own timer)
-    const isPromptVoting = room?.phase === "promptVoting";
-    if (!selectionStartedAt || roundLength === 0 || hasSongSubmitted || isRatingPhase || isPromptVoting) {
-      setTimeRemaining(null);
-      return;
-    }
-
-    const updateTimer = () => {
-      const elapsed = (Date.now() - selectionStartedAt) / 1000;
-      const remaining = Math.max(0, roundLength - elapsed);
-      setTimeRemaining(Math.ceil(remaining));
-    };
-
-    updateTimer();
-    const interval = setInterval(updateTimer, 1000);
-    return () => clearInterval(interval);
-  }, [selectionStartedAt, roundLength, hasSongSubmitted, isRatingPhase, room?.phase]);
+  // Countdown during song selection (prompt voting has its own timer). Ticks
+  // once per second on the deadline's second boundaries, so each value shows
+  // for a full second and the 3s lock / 2s auto-submit fire on time.
+  const selectionTimerActive = Boolean(selectionStartedAt) && roundLength > 0 &&
+    !hasSongSubmitted && !isRatingPhase && room?.phase !== "promptVoting";
+  const selectionDeadline = selectionTimerActive ? selectionStartedAt + roundLength * 1000 : undefined;
+  const selectionNow = useNow(selectionTimerActive, selectionDeadline);
+  const timeRemaining = selectionTimerActive ? secondsUntil(selectionDeadline, selectionNow) : null;
 
   // Effects
   // =======
@@ -270,12 +266,15 @@ export default function Round() {
    * The Express proxy queries iTunes + Deezer and returns 30s preview clips.
    */
   useEffect(() => {
+    setIsSearchSlow(false);
     if (!searchTerm.trim()) {
       setSearchResults([]);
       setSearchError(null);
       setIsSearching(false);
       return;
     }
+    const isRetry = retryingSearchRef.current;
+    retryingSearchRef.current = false;
 
     // Instant feedback: show the "Searching…" spinner the moment they type — it
     // covers the debounce AND the fetch. (Previously setIsSearching(true) was never
@@ -292,10 +291,14 @@ export default function Round() {
     // Guard against overlapping searches: if a newer keystroke supersedes this one
     // (it resolves after we've moved on), skip its stale results / spinner toggle.
     let cancelled = false;
+    let slowTimer = null;
     const delayDebounce = setTimeout(async () => {
+      slowTimer = setTimeout(() => {
+        if (!cancelled) setIsSearchSlow(true);
+      }, SEARCH_SLOW_MS);
       try {
         setSearchError(null);
-        const result = await searchTracks(searchTerm);
+        const result = await searchTracks(searchTerm, { fresh: isRetry });
         if (cancelled) return;
 
         setSearchResults(result);
@@ -325,13 +328,22 @@ export default function Round() {
           logEvent({ eventType: "search_failed", metadata: { reason: err.reason } });
         }
       } finally {
-        if (!cancelled) setIsSearching(false);
+        clearTimeout(slowTimer);
+        if (!cancelled) {
+          setIsSearching(false);
+          setIsSearchSlow(false);
+        }
       }
-    }, 350);
+    }, isRetry ? 0 : 350);
 
-    return () => { cancelled = true; clearTimeout(delayDebounce); };
+    return () => { cancelled = true; clearTimeout(delayDebounce); clearTimeout(slowTimer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm]);
+  }, [searchTerm, searchRetry]);
+
+  const handleRetrySearch = () => {
+    retryingSearchRef.current = true;
+    setSearchRetry((n) => n + 1);
+  };
 
   // Player count viability checks (optional) can be rendered from submissionStatus
 
@@ -513,6 +525,8 @@ export default function Round() {
             searchResults={searchResults}
             searchError={searchError}
             isSearching={isSearching}
+            isSearchSlow={isSearchSlow}
+            onRetrySearch={handleRetrySearch}
             onSelectSong={handleSelectSong}
             onSelectionChange={selectionLocked ? undefined : setPendingTrack}
             onShowPrompt={() => setShowPromptModal(true)}

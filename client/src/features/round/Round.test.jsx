@@ -33,9 +33,20 @@ vi.mock("./RoundStart", () => ({
   default: ({ onStartSelection }) => <button onClick={onStartSelection}>round start</button>,
 }));
 vi.mock("./SongSelection", () => ({
-  default: ({ onSelectSong }) => (
-    <button onClick={() => onSelectSong({ id: "t1", name: "Track", artists: [{ name: "A" }] })}>pick track</button>
+  default: ({ onSelectSong, onSelectionChange, searchTerm, onSearchChange, isSearchSlow, onRetrySearch }) => (
+    <>
+      <input aria-label="search" value={searchTerm} onChange={onSearchChange} />
+      <button onClick={() => onSelectSong({ id: "t1", name: "Track", artists: [{ name: "A" }] })}>pick track</button>
+      {!onSelectionChange && <span>selection locked</span>}
+      {isSearchSlow && <button onClick={onRetrySearch}>still searching retry</button>}
+    </>
   ),
+}));
+const searchTracks = vi.fn();
+vi.mock("../../services/musicSearch", () => ({
+  searchTracks: (...args) => searchTracks(...args),
+  getCachedResults: () => null,
+  SearchError: class SearchError extends Error {},
 }));
 vi.mock("../../components/SnippetSelector", () => ({
   default: ({ onConfirm, track }) => (
@@ -92,7 +103,7 @@ describe("Round rating phase", () => {
 
   it("keeps the selection screens during song selection", () => {
     setQueries({
-      "game/rooms:getRoomByCode": { phase: "selecting", currentRound: 1, settings: {} },
+      "game/rooms:getRoomByCode": { phase: "songSelection", currentRound: 1, settings: {} },
       "game/flow:getCurrentRatingSong": null,
       "game/flow:getMySubmission": null,
     });
@@ -122,7 +133,7 @@ describe("Round song submit", () => {
 
   function openSnippetSelector() {
     setQueries({
-      "game/rooms:getRoomByCode": { phase: "selecting", currentRound: 1, settings: {} },
+      "game/rooms:getRoomByCode": { phase: "songSelection", currentRound: 1, settings: {} },
       "game/flow:getCurrentRatingSong": null,
       "game/flow:getMySubmission": null,
     });
@@ -146,5 +157,93 @@ describe("Round song submit", () => {
     openSnippetSelector();
     await act(async () => { fireEvent.click(screen.getByText("confirm snippet")); });
     expect(screen.queryByText("confirm snippet")).toBeNull();
+  });
+});
+
+describe("Round selection timer", () => {
+  const START = 1_000_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(START);
+    mutation.mockReset();
+    mutation.mockResolvedValue({ success: true });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  const songSubmits = () => mutation.mock.calls.filter(([args]) => args?.trackId);
+
+  it("locks at 3s and auto-submits the open selection once at 2s", async () => {
+    setQueries({
+      "game/rooms:getRoomByCode": { phase: "songSelection", currentRound: 1, selectionStartedAt: START, settings: { roundLength: 10 } },
+      "game/flow:getCurrentRatingSong": null,
+      "game/flow:getMySubmission": null,
+    });
+    renderRound();
+    expect(screen.getByText(/0:10/)).toBeTruthy();
+    fireEvent.click(screen.getByText("round start"));
+    fireEvent.click(screen.getByText("pick track"));
+
+    await act(async () => { vi.advanceTimersByTime(1015); });
+    expect(screen.getByText(/0:09/)).toBeTruthy();
+
+    await act(async () => { vi.advanceTimersByTime(5984); }); // 6.999s: 4s left
+    expect(screen.queryByText("selection locked")).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(16); }); // 7.015s: 3s left
+    expect(screen.getByText("selection locked")).toBeTruthy();
+    expect(songSubmits()).toHaveLength(0);
+
+    await act(async () => { vi.advanceTimersByTime(1000); }); // 8.015s: 2s left
+    expect(songSubmits()).toHaveLength(1);
+    expect(songSubmits()[0][0].trackId).toBe("t1");
+
+    await act(async () => { vi.advanceTimersByTime(3000); });
+    expect(songSubmits()).toHaveLength(1);
+  });
+});
+
+describe("Round slow search", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mutation.mockReset();
+    searchTracks.mockReset();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("offers Retry after 3s without an answer and retries with a fresh request", async () => {
+    let resolveRetry;
+    searchTracks
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockImplementationOnce(() => new Promise((r) => { resolveRetry = r; }));
+    setQueries({
+      "game/rooms:getRoomByCode": { phase: "songSelection", currentRound: 1, settings: {} },
+      "game/flow:getCurrentRatingSong": null,
+      "game/flow:getMySubmission": null,
+    });
+    renderRound();
+    fireEvent.click(screen.getByText("round start"));
+    fireEvent.change(screen.getByLabelText("search"), { target: { value: "song" } });
+
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(searchTracks).toHaveBeenCalledWith("song", { fresh: false });
+    await act(async () => { vi.advanceTimersByTime(2999); });
+    expect(screen.queryByText("still searching retry")).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(1); });
+
+    fireEvent.click(screen.getByText("still searching retry"));
+    await act(async () => { vi.advanceTimersByTime(0); });
+    expect(searchTracks).toHaveBeenCalledTimes(2);
+    expect(searchTracks).toHaveBeenLastCalledWith("song", { fresh: true });
+    expect(screen.queryByText("still searching retry")).toBeNull();
+
+    await act(async () => { resolveRetry([{ id: "t9" }]); });
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(screen.queryByText("still searching retry")).toBeNull();
   });
 });

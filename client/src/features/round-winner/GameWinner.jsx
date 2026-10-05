@@ -12,13 +12,12 @@ import AdSlot from '../../components/AdSlot';
 import recordLogo from '../../components/record-logo.svg';
 import { captureGameEvent, gameProperties } from '../../services/analytics';
 import { computeAwards } from './computeAwards';
-import { useNow } from '../quickplay/useQuickPlay';
-import { secondsUntil } from '../quickplay/quickPlayModel';
+import { SecondsLeft, useSecondsUntil } from '../quickplay/useQuickPlay';
 
 /**
  * Quick Play top bar: anyone can leave; the next game starts on its own.
  */
-function PublicGameOverBar({ seconds, onLeave, leaving }) {
+function PublicGameOverBar({ rematchAt, onLeave, leaving }) {
   return (
     <div className="absolute top-0 inset-x-0 z-30 pointer-events-none">
       <div className="w-full max-w-2xl mx-auto flex justify-between items-center px-3 pt-3 md:pt-6">
@@ -30,12 +29,12 @@ function PublicGameOverBar({ seconds, onLeave, leaving }) {
         >
           Leave
         </button>
-        {seconds !== null && (
+        {typeof rematchAt === 'number' && (
           <div
             role="timer"
             className="flex items-center gap-1 py-1 px-3 md:py-2 md:px-4 rounded-md text-white font-semibold bg-[#242424] text-sm md:text-base tabular-nums"
           >
-            Next game in <span className="text-[#68d570]">{seconds}s</span>
+            Next game in <span className="text-[#68d570]"><SecondsLeft target={rematchAt} />s</span>
           </div>
         )}
       </div>
@@ -44,14 +43,14 @@ function PublicGameOverBar({ seconds, onLeave, leaving }) {
 }
 
 /** Quick Play: seated during the rematch countdown, so this game was not theirs. */
-function NextGameWait({ seconds }) {
+function NextGameWait({ rematchAt }) {
   return (
     <div className="h-full w-full flex flex-col items-center justify-center px-6 text-center text-white">
       <AnimatedLogo />
       <p className="text-2xl md:text-3xl font-bold mt-2">You&rsquo;re in</p>
       <p className="text-gray-400 text-sm md:text-base mt-2 max-w-sm">
         This room is finishing a game. You&rsquo;ll play the next one
-        {seconds !== null ? <>, starting in <span className="text-[#68d570] font-semibold tabular-nums">{seconds}s</span>.</> : '.'}
+        {typeof rematchAt === 'number' ? <>, starting in <span className="text-[#68d570] font-semibold tabular-nums"><SecondsLeft target={rematchAt} />s</span>.</> : '.'}
       </p>
     </div>
   );
@@ -115,13 +114,7 @@ const SUPERLATIVE_MS = 4000;
 
 /** Shared "running it back in 3…2…1" overlay, driven off the room timestamp. */
 function RematchCountdown({ rematchAt, onCancel }) {
-  const [remaining, setRemaining] = useState(() => Math.max(0, Math.ceil((rematchAt - Date.now()) / 1000)));
-  useEffect(() => {
-    const tick = () => setRemaining(Math.max(0, Math.ceil((rematchAt - Date.now()) / 1000)));
-    tick();
-    const id = setInterval(tick, 200);
-    return () => clearInterval(id);
-  }, [rematchAt]);
+  const remaining = useSecondsUntil(rematchAt) ?? 0;
   return (
     <motion.div
       className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm px-6 text-center"
@@ -217,8 +210,7 @@ export default function GameWinner() {
   const isPublic = Boolean(room?.isPublic);
   const leaveGameMutation = useMutation(api.game.rooms.leaveGame);
   const [leaving, setLeaving] = useState(false);
-  const now = useNow(isPublic && Boolean(rematchAt));
-  const nextGameSeconds = isPublic ? secondsUntil(rematchAt, now) : null;
+  const publicRematchAt = isPublic && typeof rematchAt === 'number' ? rematchAt : null;
   const me = playersQuery?.find((p) => p.playerId === session?.playerId);
   const handleLeavePublic = async () => {
     if (leaving || !session?.playerId || !session?.connectionId) return;
@@ -307,8 +299,8 @@ export default function GameWinner() {
   if (isPublic && me?.isWaiting) {
     return (
       <div className="relative h-full w-full overflow-hidden bg-transparent">
-        <PublicGameOverBar seconds={nextGameSeconds} onLeave={handleLeavePublic} leaving={leaving} />
-        <NextGameWait seconds={nextGameSeconds} />
+        <PublicGameOverBar rematchAt={publicRematchAt} onLeave={handleLeavePublic} leaving={leaving} />
+        <NextGameWait rematchAt={publicRematchAt} />
       </div>
     );
   }
@@ -346,7 +338,7 @@ export default function GameWinner() {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-transparent">
-      {isPublic && <PublicGameOverBar seconds={nextGameSeconds} onLeave={handleLeavePublic} leaving={leaving} />}
+      {isPublic && <PublicGameOverBar rematchAt={publicRematchAt} onLeave={handleLeavePublic} leaving={leaving} />}
 
       {/* ---------- REVEAL (suspense → winner → superlatives) ---------- */}
       {!isFinal && (
