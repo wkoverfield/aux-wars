@@ -86,8 +86,13 @@ const RatingScreen = ({
    * Validates that a rating has been selected before submitting
    */
   const handleSubmit = () => {
+    if (hasSubmitted) return;
     if (selectedRating >= 0) {
       setHasSubmitted(true);
+      // Mark the ref now, not in an effect: the parent may swap this screen
+      // out in the same render, and the unmount auto-submit must not send
+      // this rating a second time.
+      prevSongRef.current = { ...prevSongRef.current, submitted: true };
       // How long they listened before voting (informs clip length / pacing).
       const listenMs = Date.now() - clipStartRef.current;
       logEvent({ eventType: "vote_listen", metadata: { value: listenMs } });
@@ -263,7 +268,7 @@ const RatingScreen = ({
                 key={index}
                 src={record}
                 alt={`rate this song ${index + 1} records`}
-                className={`w-[48px] sm:w-[56px] m-2 sm:m-2.5 cursor-pointer transition-all duration-300 hover:scale-110 ${
+                className={`w-[48px] sm:w-[56px] m-2 sm:m-2.5 cursor-pointer transition-opacity duration-100 active:scale-95 ${
                   index <= selectedRating ? "opacity-100" : "opacity-50"
                 }`}
                 onClick={() => handleRatingClick(index)}
@@ -289,10 +294,10 @@ const RatingScreen = ({
           <div className="w-full max-w-xs mx-auto">
             <button
               className={`bg-[#68d570] text-black font-bold w-full h-[52px] rounded-full cursor-pointer transition-all hover:scale-105 hover:bg-[#7de884] ${
-                selectedRating < 0 ? 'opacity-50 cursor-not-allowed' : ''
+                selectedRating < 0 || hasSubmitted ? 'opacity-50 cursor-not-allowed' : ''
               }`}
               onClick={handleSubmit}
-              disabled={selectedRating < 0}
+              disabled={selectedRating < 0 || hasSubmitted}
             >
               Submit
             </button>

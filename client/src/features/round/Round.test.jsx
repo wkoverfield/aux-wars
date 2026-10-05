@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { getFunctionName } from "convex/server";
 
@@ -24,8 +24,24 @@ vi.mock("../../services/analytics", () => ({
   captureGameEvent: vi.fn(),
   gameProperties: vi.fn(() => ({})),
 }));
-vi.mock("./RatingScreen", () => ({ default: () => <div>rating screen</div> }));
-vi.mock("./RoundStart", () => ({ default: () => <div>round start</div> }));
+vi.mock("./RatingScreen", () => ({
+  default: ({ onSubmitRating, songToRate }) => (
+    <button onClick={() => onSubmitRating(songToRate.songId, 4)}>rating screen</button>
+  ),
+}));
+vi.mock("./RoundStart", () => ({
+  default: ({ onStartSelection }) => <button onClick={onStartSelection}>round start</button>,
+}));
+vi.mock("./SongSelection", () => ({
+  default: ({ onSelectSong }) => (
+    <button onClick={() => onSelectSong({ id: "t1", name: "Track", artists: [{ name: "A" }] })}>pick track</button>
+  ),
+}));
+vi.mock("../../components/SnippetSelector", () => ({
+  default: ({ onConfirm, track }) => (
+    <button onClick={() => onConfirm({ ...track, snippet: null })}>confirm snippet</button>
+  ),
+}));
 vi.mock("./WaitingScreen", () => ({ default: ({ message }) => <div>{message}</div> }));
 
 const { default: Round } = await import("./Round");
@@ -82,5 +98,53 @@ describe("Round rating phase", () => {
     });
     renderRound();
     expect(screen.getByText("round start")).toBeTruthy();
+  });
+
+  it("shows the waiting screen at once on rating submit and reverts on refusal", async () => {
+    setQueries({
+      "game/rooms:getRoomByCode": { phase: "rating", currentRound: 1, settings: {} },
+      "game/flow:getCurrentRatingSong": { songId: "s1", name: "Song", artist: "A", player: { id: "p2" } },
+      "game/flow:getMySubmission": { _id: "x" },
+    });
+    let resolve;
+    mutation.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+    renderRound();
+    fireEvent.click(screen.getByText("rating screen"));
+    expect(screen.getByText(/Waiting for other players to rate/)).toBeTruthy();
+    await act(async () => { resolve({ success: false, message: "nope" }); });
+    expect(screen.getByText("rating screen")).toBeTruthy();
+  });
+});
+
+describe("Round song submit", () => {
+  beforeEach(() => mutation.mockReset());
+  afterEach(cleanup);
+
+  function openSnippetSelector() {
+    setQueries({
+      "game/rooms:getRoomByCode": { phase: "selecting", currentRound: 1, settings: {} },
+      "game/flow:getCurrentRatingSong": null,
+      "game/flow:getMySubmission": null,
+    });
+    renderRound();
+    fireEvent.click(screen.getByText("round start"));
+    fireEvent.click(screen.getByText("pick track"));
+  }
+
+  it("closes the snippet selector before the submit resolves and reopens it on failure", async () => {
+    let resolve;
+    mutation.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+    openSnippetSelector();
+    fireEvent.click(screen.getByText("confirm snippet"));
+    expect(screen.queryByText("confirm snippet")).toBeNull();
+    await act(async () => { resolve({ success: false, message: "Song already taken" }); });
+    expect(screen.getByText("confirm snippet")).toBeTruthy();
+  });
+
+  it("keeps the selector closed after a successful submit", async () => {
+    mutation.mockResolvedValueOnce({ success: true });
+    openSnippetSelector();
+    await act(async () => { fireEvent.click(screen.getByText("confirm snippet")); });
+    expect(screen.queryByText("confirm snippet")).toBeNull();
   });
 });

@@ -145,6 +145,10 @@ export default function Round() {
   // Derive from queries - no local state duplication
   const isRatingPhase = currentRatingSong !== null && currentRatingSong !== undefined;
   const songToRate = currentRatingSong;
+  // The song on screen now. A rating auto-submitted for the previous song
+  // (RatingScreen cleanup on song change) must not flip this song's state.
+  const currentSongIdRef = useRef(null);
+  currentSongIdRef.current = songToRate?.songId ?? null;
   const submittedCount = submissionStatus?.submitted || 0;
   const totalPlayers = submissionStatus?.total || currentRatingStatus?.total || 0;
   const ratingSubmittedCount = currentRatingStatus?.submitted || 0;
@@ -363,6 +367,11 @@ export default function Round() {
       return;
     }
 
+    // Close the snippet selector right away so the confirm feels instant;
+    // reopen it if the submission fails.
+    const reopenSelector = showSnippetSelector;
+    setShowSnippetSelector(false);
+
     try {
       const result = await submitSong({
         code: gameCode,
@@ -384,15 +393,16 @@ export default function Round() {
 
       if (result && result.success === false) {
         showToast(result.message || SUBMIT_SONG_FALLBACK_MESSAGE, "error");
+        if (reopenSelector) setShowSnippetSelector(true);
         return;
       }
     } catch (error) {
       console.error("Song submission failed:", error);
       showToast(getUserSafeSubmitSongError(error), "error");
+      if (reopenSelector) setShowSnippetSelector(true);
       return;
     }
     setIsSongSelectionView(false);
-    setShowSnippetSelector(false);
     setSelectedTrack(null);
   };
 
@@ -415,6 +425,9 @@ export default function Round() {
       return;
     }
 
+    // Show the waiting state immediately; revert if the server refuses.
+    const isCurrentSong = () => songId === currentSongIdRef.current;
+    if (isCurrentSong()) setHasRatingSubmitted(true);
     try {
       const result = await submitRating({
         code: gameCode,
@@ -424,11 +437,11 @@ export default function Round() {
         rating
       });
       if (result?.success === false) {
+        if (isCurrentSong()) setHasRatingSubmitted(false);
         showToast(result.message || "Failed to submit rating.", "warning");
-        return;
       }
-      setHasRatingSubmitted(true);
     } catch {
+      if (isCurrentSong()) setHasRatingSubmitted(false);
       showToast("Failed to submit rating.", "error");
     }
   };
