@@ -59,11 +59,11 @@ const corsOriginFunction = (origin, callback) => {
     return callback(null, true);
   }
 
-  if (allowedOrigins.includes(origin)) {
-    callback(null, true);
-  } else {
-    callback(new Error('Not allowed by CORS'));
-  }
+  // Unknown origins get no CORS headers rather than an error. Browsers still
+  // block cross-origin reads from them, while same-origin requests proxied
+  // through the site's /api rewrite (which forward their Origin header)
+  // succeed instead of failing with a 500.
+  callback(null, allowedOrigins.includes(origin));
 };
 
 // Configure CORS for Express routes
@@ -71,7 +71,9 @@ app.use(cors({
   origin: corsOriginFunction,
   methods: ["GET", "POST"],
   credentials: true,
-  allowedHeaders: ["Content-Type", "X-POSTHOG-DISTINCT-ID"]
+  allowedHeaders: ["Content-Type", "X-POSTHOG-DISTINCT-ID"],
+  // Let browsers reuse a preflight for 2 hours instead of the 5s default.
+  maxAge: 7200
 }));
 
 app.use(express.json());
