@@ -94,6 +94,48 @@ body {
   background-color: #121212;
 }
 
+/* Homepage album wall. Each row's wrapper drifts between +5% and -40% of its
+   own width (100s per leg, alternating), on the compositor via translate3d.
+   Setting data-wall-paused on any ancestor pauses it. */
+@keyframes album-wall-drift {
+  from { transform: translate3d(5%, 0, 0); }
+  to { transform: translate3d(-40%, 0, 0); }
+}
+
+.album-row-track {
+  animation: album-wall-drift 100s linear infinite alternate;
+  will-change: transform;
+}
+
+.album-row-track[data-direction="right"] {
+  animation-direction: alternate-reverse;
+}
+
+[data-wall-paused] .album-row-track {
+  animation-play-state: paused;
+}
+
+/* Landing logo pulse: 1 -> 1.05 -> 1 over 3s. */
+@keyframes logo-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.logo-pulse {
+  animation: logo-pulse 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .album-row-track,
+  .logo-pulse {
+    animation: none;
+  }
+
+  .album-row-track {
+    will-change: auto;
+  }
+}
+
 .album {
   width: 250px;
   border-radius: 8px;

@@ -4,6 +4,7 @@ import './index.css'
 import App from './App.jsx'
 import { Analytics } from "@vercel/analytics/react"
 import { ConvexProvider, ConvexReactClient } from 'convex/react'
+import { MotionConfig } from 'framer-motion'
 import { initPostHog } from './services/posthog'
 import { initClientHealth } from './services/clientHealth'
 
@@ -20,16 +21,19 @@ initClientHealth(convex)
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    {convex ? (
-      <ConvexProvider client={convex}>
-        <App />
-        <Analytics />
-      </ConvexProvider>
-    ) : (
-      <>
-        <App />
-        <Analytics />
-      </>
-    )}
+    {/* Framer Motion honors the OS reduced-motion setting app-wide. */}
+    <MotionConfig reducedMotion="user">
+      {convex ? (
+        <ConvexProvider client={convex}>
+          <App />
+          <Analytics />
+        </ConvexProvider>
+      ) : (
+        <>
+          <App />
+          <Analytics />
+        </>
+      )}
+    </MotionConfig>
   </StrictMode>,
 )
