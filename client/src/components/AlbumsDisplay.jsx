@@ -17,7 +17,10 @@ export default function AlbumsDisplay({ albums }) {
   }
 
   return (
-    <div className="album-display h-screen absolute z-10 flex flex-col justify-center gap-16 md:gap-20">
+    <div
+      aria-hidden="true"
+      className="album-display h-screen absolute z-10 flex flex-col justify-center gap-16 md:gap-20"
+    >
       {chunkedAlbums.map((albumRow, rowIndex) => (
         <AlbumRow
           key={rowIndex}

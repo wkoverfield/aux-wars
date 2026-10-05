@@ -26,7 +26,14 @@ export default function AlbumRow({ albums, direction }) {
       <div className="album-row flex gap-10">
         {albums.map((album, index) => (
           <div key={index} className="album">
-            <img src={album} alt="album-cover" />
+            <img
+              src={album}
+              alt=""
+              width={250}
+              height={250}
+              decoding="async"
+              className="block w-full h-auto aspect-square object-cover"
+            />
           </div>
         ))}
       </div>
