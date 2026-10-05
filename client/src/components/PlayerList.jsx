@@ -7,7 +7,7 @@ import PlayerBox from "./PlayerBox";
  * @param {Array<Object>} props.players - Array of player objects to display
  * @param {boolean} props.isHost - Whether the current user is the host
  * @param {string} props.currentPlayerId - Current user's player ID
- * @param {Function} props.onKick - Callback function to kick player
+ * @param {Function} props.onKick - Callback to kick a player (keep it stable so rows stay memoized)
  * @returns {JSX.Element} Rendered component
  */
 export default function PlayerList({ players, isHost, currentPlayerId, onKick }) {
@@ -18,9 +18,11 @@ export default function PlayerList({ players, isHost, currentPlayerId, onKick })
       {players.map((player) => (
         <PlayerBox
           key={player.playerId || player._id}
-          player={player}
-          isHost={isHost}
-          currentPlayerId={currentPlayerId}
+          playerId={player.playerId}
+          name={player.name}
+          isPlayerHost={!!player.isHost}
+          isReady={!!player.isReady}
+          canKick={!!(isHost && onKick && player.playerId !== currentPlayerId && !player.isHost)}
           onKick={onKick}
         />
       ))}

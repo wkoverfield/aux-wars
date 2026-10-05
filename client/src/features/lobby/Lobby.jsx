@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 // import { useSocket, useSocketConnection } from "../../services/SocketProvider";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -19,6 +19,7 @@ import logo from "../../assets/aux-wars-logo.svg";
 import ScrollFade from "../../components/ScrollFade";
 import { useRoom } from "../../services/RoomProvider";
 import PublicLobby from "../quickplay/PublicLobby";
+import NameInput from "./NameInput";
 
 /**
  * Lobby route: Quick Play rooms get the hostless waiting screen, private rooms
@@ -43,9 +44,12 @@ function PrivateLobby() {
   const { session, updateSession, clearSession } = useSession();
   const { showToast } = useToast();
   const [gameCode, setGameCode] = useState(routeGameCode || "");
-  const [name, setName] = useState(session?.playerName || "");
-  const [isReady, setIsReady] = useState(false);
-  const [animateInput] = useState(false);
+  // Latest nickname draft from NameInput, kept in a ref so typing does not
+  // re-render the whole lobby.
+  const nameDraftRef = useRef(session?.playerName || "");
+  const handleDraftChange = useCallback((draft) => { nameDraftRef.current = draft; }, []);
+  // Optimistic Ready value from a tap, shown until the server row matches.
+  const [readyOverride, setReadyOverride] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [showTakenOverModal, setShowTakenOverModal] = useState(false);
   // const isConnected = useSocketConnection();
@@ -53,9 +57,12 @@ function PrivateLobby() {
   const roomQuery = useQuery(api.game.rooms.getRoomByCode, routeGameCode ? { code: routeGameCode} : 'skip');
 
   // Derive from queries - no local state duplication
-  const players = playersQuery || [];
+  const players = useMemo(() => playersQuery || [], [playersQuery]);
   const room = roomQuery?.room || roomQuery;
-  const isHost = players.find(p => p.playerId === session?.playerId)?.isHost ?? false;
+  const me = players.find(p => p.playerId === session?.playerId);
+  const isHost = me?.isHost ?? false;
+  const serverReady = me?.isReady ?? false;
+  const isReady = readyOverride ?? serverReady;
   const allPlayersReady = players.every((player) => player.isReady);
   const updatePlayerName = useMutation(api.game.rooms.updatePlayerName);
   const leaveGame = useMutation(api.game.rooms.leaveGame);
@@ -76,61 +83,63 @@ function PrivateLobby() {
     }
   };
 
-  // Initialize game code and name once on mount
+  // Initialize game code once on mount
   useEffect(() => {
     if (!routeGameCode) {
       navigate("/");
       return;
     }
     setGameCode(routeGameCode);
-    setName(session?.playerName || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeGameCode]); // Only depend on routeGameCode, not session - prevents resetting name while typing
+  }, [routeGameCode]);
 
-  // Update player's name and ready status (debounced to prevent glitchy typing)
-  const updateNameTimeoutRef = useRef(null);
-
+  // Drop the optimistic Ready value once the server row agrees with it.
   useEffect(() => {
-    // Clear existing timeout
-    if (updateNameTimeoutRef.current) {
-      clearTimeout(updateNameTimeoutRef.current);
+    if (readyOverride !== null && me && me.isReady === readyOverride) {
+      setReadyOverride(null);
     }
+  }, [readyOverride, me]);
 
-    // Only schedule update if we have required data
+  /**
+   * Handles a non-OK updatePlayerName response. Returns true when handled.
+   */
+  const handleUpdateResponse = useCallback((resp) => {
+    // Player not found (e.g. duplicate ID in another tab): force the rejoin flow.
+    if (resp?.code === 'PLAYER_NOT_FOUND') {
+      clearSession();
+      navigate('/', { replace: true });
+      return true;
+    }
+    if (resp?.code === 'CONNECTION_TAKEN_OVER') {
+      setShowTakenOverModal(true);
+      return true;
+    }
+    if (resp?.code === 'INVALID_NAME') {
+      showToast(resp.message || "Please choose a different name", "warning");
+      return true;
+    }
+    return false;
+  }, [clearSession, navigate, showToast]);
+
+  /**
+   * Saves a changed nickname. Never sends isReady, so a name save cannot
+   * overwrite a Ready tap.
+   */
+  const handleSaveName = useCallback(async (trimmedName) => {
     if (!gameCode || !session?.playerId || !session?.connectionId) return;
-
-    // Debounce: wait 500ms after user stops typing before calling mutation
-    updateNameTimeoutRef.current = setTimeout(async () => {
+    try {
       const resp = await updatePlayerName({
         code: gameCode,
         playerId: session.playerId,
         connectionId: session.connectionId,
-        name,
-        isReady
+        name: trimmedName,
       });
-
-      // If update failed because player not found (e.g., duplicate ID in another tab), force rejoin flow
-      if (resp && resp.code === 'PLAYER_NOT_FOUND') {
-        // Clear session so Home will create a fresh playerId on next navigation
-        clearSession();
-        navigate('/', { replace: true });
-        return;
-      }
-      // If connection was taken over, show takeover modal
-      if (resp && resp.code === 'CONNECTION_TAKEN_OVER') {
-        setShowTakenOverModal(true);
-        return;
-      }
-      if (session && name !== session.playerName) updateSession({ playerName: name });
-    }, 500); // 500ms delay - smooth typing experience
-
-    // Cleanup timeout on unmount or when dependencies change
-    return () => {
-      if (updateNameTimeoutRef.current) {
-        clearTimeout(updateNameTimeoutRef.current);
-      }
-    };
-  }, [name, isReady, gameCode, session?.playerId, session?.connectionId, updatePlayerName, clearSession, navigate, updateSession]);
+      if (handleUpdateResponse(resp)) return;
+      updateSession({ playerName: trimmedName });
+    } catch {
+      showToast("Couldn't save your nickname. Please try again.", "error");
+    }
+  }, [gameCode, session?.playerId, session?.connectionId, updatePlayerName, handleUpdateResponse, updateSession, showToast]);
 
   // Settings updates are handled automatically via Convex reactive queries (roomQuery)
   // No need to manually sync - components can read directly from roomQuery.room.settings
@@ -200,7 +209,7 @@ function PrivateLobby() {
   /**
    * Handles kicking a player from the lobby (host only)
    */
-  const handleKickPlayer = async (targetPlayerId) => {
+  const handleKickPlayer = useCallback(async (targetPlayerId) => {
     if (!isHost || !session?.playerId || !session?.connectionId || !gameCode) return;
 
     const result = await kickPlayer({
@@ -215,24 +224,35 @@ function PrivateLobby() {
     } else {
       showToast(result.message || "Failed to kick player", "error");
     }
-  };
-
-  const pulseAnimation = {
-    scale: [1, 1.05, 1],
-    transition: { duration: 1, repeat: 3, ease: "easeInOut" },
-  };
+  }, [isHost, session?.playerId, session?.connectionId, gameCode, kickPlayer, showToast]);
 
   /**
-   * Handles toggling player ready status
+   * Toggles Ready: shown immediately, sent at once as an isReady-only write,
+   * and reverted if the server refuses it.
    */
-  const handleReady = () => {
-    if (!name.trim()) {
+  const handleReady = async () => {
+    if (!nameDraftRef.current.trim() && !me?.name?.trim()) {
       showToast("Please set your nickname before readying up.", "warning");
       return;
     }
+    if (!gameCode || !session?.playerId || !session?.connectionId) return;
     const nextReady = !isReady;
-    setIsReady(nextReady);
-    // The useEffect will handle emitting the update
+    setReadyOverride(nextReady);
+    try {
+      const resp = await updatePlayerName({
+        code: gameCode,
+        playerId: session.playerId,
+        connectionId: session.connectionId,
+        isReady: nextReady,
+      });
+      if (resp?.code && resp.code !== 'OK') {
+        setReadyOverride(null);
+        handleUpdateResponse(resp);
+      }
+    } catch {
+      setReadyOverride(null);
+      showToast("Couldn't update your ready status. Please try again.", "error");
+    }
   };
 
   /**
@@ -292,13 +312,11 @@ function PrivateLobby() {
           <div className="lobby-info flex flex-col sm:items-start container mx-auto px-5 py-4 text-white gap-10 flex-1 min-h-0">
             <p className="text-xl">Nickname:</p>
             <div className="flex flex-col gap-5 w-full">
-              <motion.input
-                type="text"
-                className="w-full rounded-md"
-                placeholder="Enter your nickname"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                animate={animateInput ? pulseAnimation : {}}
+              <NameInput
+                serverName={me?.name}
+                initialName={session?.playerName || ""}
+                onSave={handleSaveName}
+                onDraftChange={handleDraftChange}
               />
               <div className="lobby-code-count flex gap-5">
                 <div className="lobby-container rounded-md lobby-code flex flex-col gap-2">
