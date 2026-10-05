@@ -6,6 +6,7 @@ import SearchBar from '../../components/SearchBar';
 import ScrollFade from '../../components/ScrollFade';
 import TrackPlayer from '../../components/TrackPlayer';
 import { useToast } from '../../contexts/ToastContext';
+import { fallBackToOriginal, largeCoverArt } from "../../utils/coverArt";
 
 /**
  * RatingScreen component provides an interface for rating songs during the game.
@@ -155,7 +156,8 @@ const RatingScreen = ({
         {songToRate?.albumCover && !videoId && (
           <div className="mb-3 flex justify-center">
             <img
-              src={songToRate.albumCover}
+              src={largeCoverArt(songToRate.albumCover)}
+              onError={fallBackToOriginal(songToRate.albumCover)}
               alt={`${songToRate.name} album art`}
               className="w-[min(13rem,30vh)] h-[min(13rem,30vh)] rounded-lg object-cover shadow-lg"
             />

@@ -297,8 +297,10 @@ async function searchYouTube(query) {
 }
 
 function mapYouTubeTrack(item) {
-  const thumbs = item.thumbnail?.thumbnails || [];
-  const thumb = thumbs[thumbs.length - 1]?.url || thumbs[0]?.url || '';
+  // 320x180 (mqdefault) instead of the largest thumbnail YouTube lists
+  // (often 720px, ~70 KB): results render at 64px and the larger rating
+  // card upgrades the URL client side (client/src/utils/coverArt.js).
+  const thumb = `https://i.ytimg.com/vi/${item.id}/mqdefault.jpg`;
   const { name, artist } = cleanTitle(item.title, item.channelTitle);
   return {
     id: `youtube:${item.id}`,
