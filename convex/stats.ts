@@ -101,7 +101,49 @@ const LIVE_COUNT_TYPES = [
   "quickplay_clicked",
   "quickplay_1v1_offered",
   "quickplay_1v1_accepted",
+  "client_error",
+  "client_error_boundary",
 ] as const;
+
+// Sampled web vitals are the highest-volume detail type; today's partial row
+// skips them (the Speed card uses completed days only).
+const SKIP_TODAY_DETAIL = new Set<string>(["web_vital"]);
+
+type VitalDay = {
+  webVitals?: Array<{ metric: string; deviceClass: string; p75: number; samples: number }>;
+  clientErrors?: number;
+  clientErrorBoundaries?: number;
+};
+
+/**
+ * Speed card over a set of day rows. Rows keep no raw samples, so a window's
+ * p75 is the sample-weighted mean of the daily p75s (exact for a single day,
+ * an approximation across days).
+ */
+export function summarizeSpeed(days: VitalDay[]) {
+  const acc = new Map<string, { metric: string; deviceClass: string; weighted: number; samples: number }>();
+  let clientErrors = 0;
+  let boundaryErrors = 0;
+  for (const d of days) {
+    clientErrors += d.clientErrors ?? 0;
+    boundaryErrors += d.clientErrorBoundaries ?? 0;
+    for (const s of d.webVitals ?? []) {
+      if (!(s.samples > 0)) continue;
+      const key = `${s.metric}|${s.deviceClass}`;
+      const cur = acc.get(key) ?? { metric: s.metric, deviceClass: s.deviceClass, weighted: 0, samples: 0 };
+      cur.weighted += s.p75 * s.samples;
+      cur.samples += s.samples;
+      acc.set(key, cur);
+    }
+  }
+  const vitals = [...acc.values()].map((a) => ({
+    metric: a.metric,
+    deviceClass: a.deviceClass,
+    p75: a.metric === "CLS" ? Math.round((a.weighted / a.samples) * 1000) / 1000 : Math.round(a.weighted / a.samples),
+    samples: a.samples,
+  }));
+  return { vitals, errors: { client: clientErrors, boundary: boundaryErrors } };
+}
 
 type QuickPlayDay = {
   quickPlayClicks?: number;
@@ -174,6 +216,10 @@ async function readToday(ctx: QueryCtx, now: number) {
   let truncated = false;
   const detail = {} as DayEvents["detail"];
   for (const t of DETAIL_EVENT_TYPES) {
+    if (SKIP_TODAY_DETAIL.has(t)) {
+      detail[t] = [];
+      continue;
+    }
     const r = await readEventsCapped(ctx, t, start, TODAY_EVENT_CAP);
     detail[t] = r.events;
     truncated ||= r.truncated;
@@ -315,6 +361,11 @@ export const getDashboard = query({
       topNoResultSearches,
       searches: { noResults: searchNoResults, failed: searchFailed, failedByReason: searchFailedByReason },
       abandonmentByPhase,
+      // Vitals from completed days only; error counts include today so far.
+      speed: {
+        ...summarizeSpeed(rows),
+        errors: summarizeSpeed([...rows, todayRow]).errors,
+      },
     };
   },
 });

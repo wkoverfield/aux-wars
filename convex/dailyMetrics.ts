@@ -52,6 +52,7 @@ export const DETAIL_EVENT_TYPES = [
   "search_failed",
   "quickplay_matched",
   "quickplay_left_waiting",
+  "web_vital",
 ] as const;
 export const COUNT_EVENT_TYPES = [
   "game_created",
@@ -61,6 +62,8 @@ export const COUNT_EVENT_TYPES = [
   "quickplay_clicked",
   "quickplay_1v1_offered",
   "quickplay_1v1_accepted",
+  "client_error",
+  "client_error_boundary",
 ] as const;
 type DetailType = (typeof DETAIL_EVENT_TYPES)[number];
 type CountType = (typeof COUNT_EVENT_TYPES)[number];
@@ -76,6 +79,9 @@ export type SlimEvent = {
   reason?: string;
   waitedMs?: number;
   playersAtStart?: number;
+  name?: string;
+  value?: number;
+  deviceClass?: string;
 };
 
 export function slimEvent(metadata: unknown): SlimEvent {
@@ -90,6 +96,9 @@ export function slimEvent(metadata: unknown): SlimEvent {
   if (typeof m.reason === "string") out.reason = m.reason;
   if (typeof m.waitedMs === "number") out.waitedMs = m.waitedMs;
   if (typeof m.playersAtStart === "number") out.playersAtStart = m.playersAtStart;
+  if (typeof m.name === "string") out.name = m.name;
+  if (typeof m.value === "number") out.value = m.value;
+  if (typeof m.deviceClass === "string") out.deviceClass = m.deviceClass;
   return out;
 }
 
@@ -139,6 +148,43 @@ function playerKey(e: SlimEvent): string | null {
 /** Record keys must be plain field names in Convex. */
 function phaseKey(phase: string | undefined): string {
   return phase && /^[A-Za-z0-9]{1,40}$/.test(phase) ? phase : "unknown";
+}
+
+export const VITAL_METRICS = ["LCP", "INP", "CLS", "FCP", "TTFB"] as const;
+export const VITAL_DEVICE_CLASSES = ["mobile", "chromebook", "desktop"] as const;
+
+export type VitalStat = { metric: string; deviceClass: string; p75: number; samples: number };
+
+/**
+ * p75 and sample count per metric, overall (deviceClass "all") and per known
+ * device class. Combinations with no samples are omitted.
+ */
+export function summarizeVitals(events: SlimEvent[]): VitalStat[] {
+  const groups = new Map<string, number[]>();
+  const push = (metric: string, deviceClass: string, value: number) => {
+    const key = `${metric}|${deviceClass}`;
+    const arr = groups.get(key);
+    if (arr) arr.push(value);
+    else groups.set(key, [value]);
+  };
+  for (const e of events) {
+    if (!e.name || !(VITAL_METRICS as readonly string[]).includes(e.name)) continue;
+    if (typeof e.value !== "number" || !Number.isFinite(e.value)) continue;
+    push(e.name, "all", e.value);
+    if (e.deviceClass && (VITAL_DEVICE_CLASSES as readonly string[]).includes(e.deviceClass)) {
+      push(e.name, e.deviceClass, e.value);
+    }
+  }
+  const out: VitalStat[] = [];
+  for (const metric of VITAL_METRICS) {
+    for (const deviceClass of ["all", ...VITAL_DEVICE_CLASSES]) {
+      const values = groups.get(`${metric}|${deviceClass}`);
+      if (!values) continue;
+      values.sort((a, b) => a - b);
+      out.push({ metric, deviceClass, p75: percentile(values, 0.75)!, samples: values.length });
+    }
+  }
+  return out;
 }
 
 export function normalizeSearch(label: string): string {
@@ -290,6 +336,9 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
         : null,
     quickPlay1v1Offered: counts.quickplay_1v1_offered ?? 0,
     quickPlay1v1Accepted: counts.quickplay_1v1_accepted ?? 0,
+    webVitals: summarizeVitals(detail.web_vital ?? []),
+    clientErrors: counts.client_error ?? 0,
+    clientErrorBoundaries: counts.client_error_boundary ?? 0,
   };
 }
 

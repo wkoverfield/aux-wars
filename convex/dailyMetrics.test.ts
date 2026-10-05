@@ -9,6 +9,7 @@ import {
   dayStartMs,
   dstr,
   percentile,
+  summarizeVitals,
   type DayEvents,
   type DayInputs,
   type SlimEvent,
@@ -34,6 +35,7 @@ function emptyEvents(): DayEvents {
       search_failed: [],
       quickplay_matched: [],
       quickplay_left_waiting: [],
+      web_vital: [],
     },
     counts: {
       game_created: 0,
@@ -43,6 +45,8 @@ function emptyEvents(): DayEvents {
       quickplay_clicked: 0,
       quickplay_1v1_offered: 0,
       quickplay_1v1_accepted: 0,
+      client_error: 0,
+      client_error_boundary: 0,
     },
   };
 }
@@ -68,6 +72,48 @@ describe("percentile", () => {
     expect(percentile([4], 0.9)).toBe(4);
     expect(percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.9)).toBe(9);
     expect(percentile([2, 3, 8], 0.9)).toBe(8);
+  });
+});
+
+describe("web vitals rollup", () => {
+  const vital = (name: string, value: number, deviceClass?: string): SlimEvent => ({ name, value, deviceClass });
+
+  test("p75 overall and per device class, with sample counts", () => {
+    const events = [
+      vital("LCP", 1000, "desktop"),
+      vital("LCP", 2000, "desktop"),
+      vital("LCP", 3000, "mobile"),
+      vital("LCP", 4000, "chromebook"),
+      vital("LCP", 5000, "unknown"),
+      vital("CLS", 0.05, "mobile"),
+      vital("CLS", 0.2, "mobile"),
+      vital("FID", 10, "mobile"),
+      { name: "INP" },
+    ];
+    expect(summarizeVitals(events)).toEqual([
+      { metric: "LCP", deviceClass: "all", p75: 4000, samples: 5 },
+      { metric: "LCP", deviceClass: "mobile", p75: 3000, samples: 1 },
+      { metric: "LCP", deviceClass: "chromebook", p75: 4000, samples: 1 },
+      { metric: "LCP", deviceClass: "desktop", p75: 2000, samples: 2 },
+      { metric: "CLS", deviceClass: "all", p75: 0.2, samples: 2 },
+      { metric: "CLS", deviceClass: "mobile", p75: 0.2, samples: 2 },
+    ]);
+  });
+
+  test("computeDayMetrics carries vitals and client error counts", () => {
+    const ev = emptyEvents();
+    ev.detail.web_vital = [vital("FCP", 1200, "mobile")];
+    ev.counts.client_error = 4;
+    ev.counts.client_error_boundary = 1;
+    expect(computeDayMetrics(inputs({ events: ev }))).toMatchObject({
+      webVitals: [
+        { metric: "FCP", deviceClass: "all", p75: 1200, samples: 1 },
+        { metric: "FCP", deviceClass: "mobile", p75: 1200, samples: 1 },
+      ],
+      clientErrors: 4,
+      clientErrorBoundaries: 1,
+    });
+    expect(computeDayMetrics(inputs())).toMatchObject({ webVitals: [], clientErrors: 0, clientErrorBoundaries: 0 });
   });
 });
 
