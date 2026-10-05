@@ -190,11 +190,13 @@ describe("deferred PostHog loading", () => {
     await loaded(client);
   });
 
-  it("loads on the first capture and only once across triggers", async () => {
-    const { mod, client } = await loadModule();
+  it("buffers captures without loading, then loads once across triggers", async () => {
+    const { mod, client, importer } = await loadModule();
 
     mod.initPostHog();
     mod.capture("host_game_clicked");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(importer).not.toHaveBeenCalled();
     window.history.pushState(null, "", "/lobby/ABC123");
     mod.notifyRouteChange();
     idleCallbacks[0]();
@@ -211,6 +213,7 @@ describe("deferred PostHog loading", () => {
     const before = Date.now();
     mod.capture("game_created", { player_count: 1 });
     mod.capture("rating_submitted", { rating_value: 5 }); // not allowlisted
+    idleCallbacks[0]();
     await loaded(client);
 
     const funnel = client.capture.mock.calls.filter(([event]) => event === "game_created");
@@ -228,6 +231,7 @@ describe("deferred PostHog loading", () => {
     mod.initPostHog();
 
     for (let i = 0; i < 60; i += 1) mod.capture("round_completed", { i });
+    idleCallbacks[0]();
     await loaded(client);
 
     expect(client.capture.mock.calls.filter(([event]) => event === "round_completed")).toHaveLength(50);
@@ -250,6 +254,7 @@ describe("deferred PostHog loading", () => {
 
     // Buffer while the import is in flight, then reject.
     mod.capture("session_start");
+    idleCallbacks[0]();
     localStorage.setItem("aux-wars-cookie-consent", "rejected");
     window.dispatchEvent(new Event("aux-wars-consent-changed"));
     await loaded(client);
@@ -279,7 +284,7 @@ describe("deferred PostHog loading", () => {
     });
     mod.initPostHog();
 
-    mod.capture("session_start");
+    idleCallbacks[0]();
     await vi.waitFor(() => expect(importer).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 0));
 

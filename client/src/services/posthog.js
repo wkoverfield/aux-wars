@@ -13,8 +13,10 @@
  *
  * Loading: posthog-js is fetched with a dynamic import so it stays out of the
  * main bundle. The import starts on the first of: an idle callback (3s
- * timeout), the first client-side route change, or the first capture().
- * Captures made before then are buffered with their original timestamps.
+ * timeout) or the first client-side route change. Captures made before then
+ * are buffered, not a load trigger: the homepage captures on mount, and
+ * loading then would put the SDK download back on the critical path.
+ * Buffered captures keep their original timestamps.
  */
 import { CONSENT_EVENT, CONSENT_KEY, getConsent } from "./ads";
 import { getVisitorId } from "../utils/visitorId";
@@ -305,5 +307,4 @@ export function capture(event, properties) {
       pathname: window.location.pathname,
     });
   }
-  load();
 }
