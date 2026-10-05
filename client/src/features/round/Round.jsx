@@ -28,6 +28,46 @@ function getUserSafeSubmitSongError(error) {
   return message;
 }
 
+function formatTimer(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Song-selection countdown pill.
+ * @param {{ timeRemaining: number | null }} props
+ */
+function SelectionTimer({ timeRemaining }) {
+  if (timeRemaining === null) return null;
+
+  const isLow = timeRemaining <= 10;
+
+  return (
+    <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full font-bold text-lg ${
+      isLow
+        ? 'bg-red-600 text-white animate-pulse'
+        : 'bg-[#242424] text-white'
+    }`}>
+      ⏱ {formatTimer(timeRemaining)}
+    </div>
+  );
+}
+
+/**
+ * Shown when the room is in the rating phase but no song is being rated yet
+ * (the phase flipped before the rating query caught up, or the last rating
+ * is being totaled before results).
+ */
+function TallyingState() {
+  return (
+    <div role="status" className="flex flex-col items-center justify-center gap-3 text-white">
+      <div className="h-10 w-10 rounded-full border-4 border-white/15 border-t-[#68d570] animate-spin" aria-hidden="true" />
+      <p className="text-lg font-semibold">Tallying...</p>
+    </div>
+  );
+}
+
 /**
  * Round component manages the game round flow including song selection and rating phases.
  * Handles socket events for game state updates, player interactions, and phase transitions.
@@ -136,14 +176,6 @@ export default function Round() {
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
   }, [selectionStartedAt, roundLength, hasSongSubmitted, isRatingPhase, room?.phase]);
-
-  // Format timer display
-  const formatTimer = (seconds) => {
-    if (seconds === null) return null;
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
   // Effects
   // =======
@@ -416,6 +448,12 @@ export default function Round() {
       return <PromptVoting gameCode={gameCode} />;
     }
 
+    // Rating phase but no song from the query yet: never fall through to the
+    // song-selection screens.
+    if (room?.phase === "rating" && !songToRate) {
+      return <TallyingState />;
+    }
+
     if (isRatingPhase) {
       // Check if this is the player's own song
       const isOwnSong = songToRate?.player?.id === session?.playerId;
@@ -479,26 +517,9 @@ export default function Round() {
     }
   };
 
-  // Selection timer component
-  const SelectionTimer = () => {
-    if (timeRemaining === null || hasSongSubmitted || isRatingPhase) return null;
-
-    const isLow = timeRemaining <= 10;
-
-    return (
-      <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full font-bold text-lg ${
-        isLow
-          ? 'bg-red-600 text-white animate-pulse'
-          : 'bg-[#242424] text-white'
-      }`}>
-        ⏱ {formatTimer(timeRemaining)}
-      </div>
-    );
-  };
-
   return (
     <>
-      <SelectionTimer />
+      {!hasSongSubmitted && !isRatingPhase && room?.phase !== "rating" && <SelectionTimer timeRemaining={timeRemaining} />}
       <div className={`round-start flex flex-col items-center justify-center text-white p-4 min-h-screen ${showSnippetSelector ? 'blur-sm' : ''}`}>
         {renderContent()}
 
