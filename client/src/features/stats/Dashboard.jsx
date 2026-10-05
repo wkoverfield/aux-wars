@@ -12,8 +12,11 @@ import {
   fmtPct,
   fmtShortDate,
   fmtWait,
+  fmtVital,
   normalizeDashboard,
   normalizeLive,
+  SPEED_DEVICES,
+  VITAL_THRESHOLDS,
 } from "./statsModel";
 
 const TRENDS = [
@@ -311,6 +314,68 @@ function QuickPlay({ qp, windowDays }) {
   );
 }
 
+const DEVICE_LABELS = { all: "All", mobile: "Mobile", chromebook: "Chromebook", desktop: "Desktop" };
+const RATING_CLASS = {
+  good: "text-[#68d570]",
+  "needs-improvement": "text-amber-300",
+  poor: "text-red-400",
+};
+
+function Speed({ speed, windowDays }) {
+  return (
+    <Card title="Speed (real devices)" aside={`p75, last ${windowDays} days`}>
+      {speed.hasData ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm tabular-nums">
+            <thead>
+              <tr className="text-xs uppercase tracking-wide text-gray-400">
+                <th scope="col" className="text-left font-semibold pb-2 pr-3">Metric</th>
+                {SPEED_DEVICES.map((d) => (
+                  <th key={d} scope="col" className="text-right font-semibold pb-2 pl-3">
+                    {DEVICE_LABELS[d]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {speed.rows.map((row) => (
+                <tr key={row.metric} className="border-t border-white/5">
+                  <th scope="row" className="text-left font-semibold text-white py-2 pr-3">
+                    {row.metric}
+                    <span className="block text-xs font-normal text-gray-500">
+                      good under {fmtVital(row.metric, VITAL_THRESHOLDS[row.metric].good)}
+                    </span>
+                  </th>
+                  {SPEED_DEVICES.map((d) => {
+                    const c = row.cells[d];
+                    return (
+                      <td key={d} className={`text-right py-2 pl-3 font-semibold ${RATING_CLASS[c.rating] ?? "text-gray-500"}`}>
+                        {fmtVital(row.metric, c.p75)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              <tr className="border-t border-white/5 text-xs text-gray-500">
+                <th scope="row" className="text-left font-normal py-2 pr-3">Samples</th>
+                {SPEED_DEVICES.map((d) => (
+                  <td key={d} className="text-right py-2 pl-3">{fmtInt(speed.samples[d])}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyNote>No speed samples yet. About 1 in 4 page loads reports, and days show up after their nightly rollup.</EmptyNote>
+      )}
+      <div className="grid grid-cols-2 gap-5 mt-5">
+        <Stat label="Uncaught errors" value={fmtInt(speed.errors.client)} detail="Max 3 per page load, includes today" />
+        <Stat label="Error screens shown" value={fmtInt(speed.errors.boundary)} detail="Crash fallback rendered" />
+      </div>
+    </Card>
+  );
+}
+
 /**
  * The stats dashboard. Rendered only after `checkKey` accepted the key: both
  * queries throw on a bad key, and StatsPage wraps this in an error boundary
@@ -372,6 +437,7 @@ export default function Dashboard({ adminKey }) {
           <Trends dashboard={dashboard} windowDays={windowDays} />
           <HourlyCurve hourly={hourly} />
           <QuickPlay qp={dashboard.quickPlay} windowDays={windowDays} />
+          <Speed speed={dashboard.speed} windowDays={windowDays} />
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <Funnel funnel={dashboard.funnel} windowDays={windowDays} />
             <Retention retention={dashboard.retention} />

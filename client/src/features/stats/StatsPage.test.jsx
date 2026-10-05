@@ -171,3 +171,38 @@ describe("StatsPage key gate", () => {
     }
   });
 });
+
+describe("Speed card", () => {
+  afterEach(() => cleanup());
+
+  it("shows p75 vitals by device class and error counts", async () => {
+    localStorage.clear();
+    convexQuery.mockReset();
+    convexQuery.mockResolvedValue({ ok: true });
+    useQuery.mockReset();
+    useQuery.mockImplementation((_fn, args) =>
+      args && "days" in args
+        ? {
+            days: [],
+            speed: {
+              vitals: [
+                { metric: "LCP", deviceClass: "all", p75: 2400, samples: 12 },
+                { metric: "LCP", deviceClass: "chromebook", p75: 4600, samples: 3 },
+                { metric: "INP", deviceClass: "all", p75: 180, samples: 9 },
+              ],
+              errors: { client: 5, boundary: 1 },
+            },
+          }
+        : {},
+    );
+    renderPage();
+    submitKey("right");
+
+    await screen.findByText("Speed (real devices)");
+    expect(screen.getByText("2.4s").className).toContain("text-[#68d570]");
+    expect(screen.getByText("4.6s").className).toContain("text-red-400");
+    expect(screen.getByText("180ms")).toBeTruthy();
+    expect(screen.getByText("Uncaught errors").nextSibling.textContent).toBe("5");
+    expect(screen.getByText("Error screens shown").nextSibling.textContent).toBe("1");
+  });
+});
