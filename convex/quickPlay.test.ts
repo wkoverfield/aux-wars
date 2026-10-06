@@ -15,6 +15,7 @@ import {
   PUBLIC_IN_GAME_OFFLINE_MS,
   PUBLIC_WAITING_TIMEOUT_MS,
   CLOSE_LEAVE_DELAY_MS,
+  PRIVATE_CLOSE_LEAVE_DELAY_MS,
   PLACEMENT_RECENT_MS,
   NO_HEARTBEAT_GRACE_MS,
   JOIN_RATE_LIMIT,
@@ -1396,12 +1397,15 @@ describe("ghosts (closed or abandoned tabs)", () => {
     expect(await players(t, code)).toHaveLength(2);
   });
 
-  test("private rooms ignore onClose and leave at once, as before", async () => {
+  test("private rooms defer onClose by their own, longer delay", async () => {
     const t = setup();
     const { code } = await t.mutation(api.game.rooms.hostGame, {});
     await t.mutation(api.game.rooms.joinGame, { code, playerId: "h", connectionId: "c-h", name: "QA-h" });
     await t.mutation(api.game.rooms.joinGame, { code, playerId: "g", connectionId: "c-g", name: "QA-g" });
     await t.mutation(api.game.rooms.leaveGame, { code, playerId: "g", connectionId: "c-g", onClose: true });
+    await advance(t, CLOSE_LEAVE_DELAY_MS + 1000);
+    expect((await players(t, code)).map((p) => p.playerId)).toEqual(["h", "g"]);
+    await advance(t, PRIVATE_CLOSE_LEAVE_DELAY_MS);
     expect((await players(t, code)).map((p) => p.playerId)).toEqual(["h"]);
   });
 });

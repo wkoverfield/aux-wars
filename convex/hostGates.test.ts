@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import presenceComponent from "@convex-dev/presence/test";
+import { PRIVATE_CLOSE_LEAVE_DELAY_MS } from "./game/quickPlayRules";
 
 // Private (hosted) rooms: the host gates and lifecycle every Quick Play change
 // must leave untouched.
@@ -204,5 +205,66 @@ describe("private rooms keep their host", () => {
     expect((await room(t, code))!.hostPlayerId).toBe(g._id);
     expect(await t.mutation(api.game.rooms.leaveGame, as(code, "g"))).toMatchObject({ roomDeleted: true });
     expect(await room(t, code)).toBeNull();
+  });
+});
+
+describe("private lobby close and reload", () => {
+  async function advance(t: T, ms: number) {
+    vi.advanceTimersByTime(ms);
+    await t.finishInProgressScheduledFunctions();
+  }
+
+  test("a reload keeps the seat when the page resumes in time", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h", "g"]);
+    const res = await t.mutation(api.game.rooms.leaveGame, { ...as(code, "h"), onClose: true });
+    expect(res).toMatchObject({ deferred: true });
+    // The reloaded page mounts and resumes before the delay runs out.
+    await advance(t, 3_000);
+    expect((await t.mutation(api.game.rooms.resumeSeat, as(code, "h"))).success).toBe(true);
+    await advance(t, PRIVATE_CLOSE_LEAVE_DELAY_MS);
+    const ps = await players(t, code);
+    expect(ps.map((p) => p.playerId).sort()).toEqual(["g", "h"]);
+    expect(ps.find((p) => p.playerId === "h")!.isHost).toBe(true);
+    expect(ps.find((p) => p.playerId === "h")!.closingAt).toBeUndefined();
+  });
+
+  test("a closed tab gives the seat and the host role up after the delay", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h", "g"]);
+    await t.mutation(api.game.rooms.leaveGame, { ...as(code, "h"), onClose: true });
+    await advance(t, PRIVATE_CLOSE_LEAVE_DELAY_MS - 1_000);
+    expect(await players(t, code)).toHaveLength(2);
+    await advance(t, 2_000);
+    const ps = await players(t, code);
+    expect(ps.map((p) => p.playerId)).toEqual(["g"]);
+    expect(ps[0].isHost).toBe(true);
+    expect((await room(t, code))!.hostPlayerId).toBe(ps[0]._id);
+  });
+
+  test("the last player closing deletes the room after the delay", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h"]);
+    await t.mutation(api.game.rooms.leaveGame, { ...as(code, "h"), onClose: true });
+    expect(await room(t, code)).not.toBeNull();
+    await advance(t, PRIVATE_CLOSE_LEAVE_DELAY_MS + 1_000);
+    expect(await room(t, code)).toBeNull();
+  });
+
+  test("the Leave button still leaves at once", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h", "g"]);
+    await t.mutation(api.game.rooms.leaveGame, as(code, "h"));
+    expect((await players(t, code)).map((p) => p.playerId)).toEqual(["g"]);
+  });
+
+  test("resumeSeat refuses a connection that does not own the seat", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h", "g"]);
+    await t.mutation(api.game.rooms.leaveGame, { ...as(code, "h"), onClose: true });
+    const res = await t.mutation(api.game.rooms.resumeSeat, { code, playerId: "h", connectionId: "someone-else" });
+    expect(res.success).toBe(false);
+    await advance(t, PRIVATE_CLOSE_LEAVE_DELAY_MS + 1_000);
+    expect((await players(t, code)).map((p) => p.playerId)).toEqual(["g"]);
   });
 });

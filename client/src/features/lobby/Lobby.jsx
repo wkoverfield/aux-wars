@@ -157,28 +157,6 @@ function PrivateLobby() {
   );
 
   /**
-   * Clean disconnection when user closes the browser tab or navigates away
-   * This ensures immediate room cleanup if they were the last player
-   */
-  useEffect(() => {
-    if (!gameCode || !session?.playerId || !session?.connectionId) return;
-
-    const handleBeforeUnload = () => {
-      // Note: In production, you might want to call leaveGame via navigator.sendBeacon
-      // For now, we rely on the mutation being called synchronously
-      leaveGame({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId }).catch(() => {
-        // Ignore errors during unload
-      });
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [gameCode, session?.playerId, session?.connectionId, leaveGame]);
-
-  /**
    * Verify player still exists in room on mount/refresh
    * Catches expired sessions BEFORE user tries to interact
    */

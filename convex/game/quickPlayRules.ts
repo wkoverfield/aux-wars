@@ -69,6 +69,12 @@ export const JOIN_RATE_WINDOW_MS = 60_000;
  */
 export const CLOSE_LEAVE_DELAY_MS = 5_000;
 /**
+ * The same delay for a private-room lobby. Longer than Quick Play's because
+ * nobody is waiting on a stranger's seat, and a reload on a slow school
+ * network can take well over 5 seconds to come back and call resumeSeat.
+ */
+export const PRIVATE_CLOSE_LEAVE_DELAY_MS = 15_000;
+/**
  * A player in a running Quick Play game the presence component has reported
  * offline for longer than this is removed by the cleanup cron (instead of the
  * private-room grace window).
