@@ -1,18 +1,25 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
+import { revealPrefetch } from './revealPrefetch';
 
 const RoomContext = createContext(null);
 
 export function RoomProvider({ children }) {
   const { gameCode } = useParams();
   const roomData = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
-  const value = {
+  const prefetch = revealPrefetch(roomData?.room || roomData);
+  useQuery(api.game.flow.getRoundResults, gameCode && prefetch.round ? { code: gameCode, round: prefetch.round } : 'skip');
+  useQuery(api.game.flow.getAllRoundResults, gameCode && prefetch.finalRound ? { code: gameCode } : 'skip');
+  useQuery(api.game.flow.getVoterAwards, gameCode && prefetch.finalRound ? { code: gameCode } : 'skip');
+  // Memoized on the room query alone, so prefetch results arriving do not
+  // re-render every useRoom() consumer.
+  const value = useMemo(() => ({
     room: roomData?.room || roomData || null,
     players: roomData?.players || [],
     loading: roomData === undefined,
-  };
+  }), [roomData]);
   return (
     <RoomContext.Provider value={value}>
       {children}

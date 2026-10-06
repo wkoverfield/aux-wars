@@ -37,6 +37,10 @@ export default function SongItem({ track, selected, onSelect, onSelectSong }) {
           <img
             src={albumCover}
             alt={track.name}
+            width={64}
+            height={64}
+            loading="lazy"
+            decoding="async"
             className="w-16 h-16 object-cover rounded-md"
           />
         )}

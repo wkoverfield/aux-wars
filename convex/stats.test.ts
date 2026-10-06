@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import schema from "./schema";
 import { api } from "./_generated/api";
 import presenceComponent from "@convex-dev/presence/test";
-import { constantTimeEqual, isValidAdminKey, summarizeQuickPlay } from "./stats";
+import { constantTimeEqual, isValidAdminKey, summarizeQuickPlay, summarizeSpeed } from "./stats";
 import { addDays, dstr } from "./dailyMetrics";
 
 const modules = import.meta.glob(["./**/*.ts", "./**/*.js", "!./**/*.test.ts", "!./**/*.d.ts"]);
@@ -161,6 +161,8 @@ describe("stats queries", () => {
         topNoResultSearches: [{ query: "song a", count: 2 }],
         searchFailed: 3,
         searchFailedByReason: { network: 2, timeout: 1 },
+        webVitals: [{ metric: "LCP", deviceClass: "all", p75: 3000, samples: 2 }],
+        clientErrors: 2,
         hourlyPeaks: [{ hourUTC: 20, playersOnline: 2, playersInGame: 2 }],
         retention: { d1: { cohort: 3, returned: 1 } },
       });
@@ -211,6 +213,11 @@ describe("stats queries", () => {
       { phase: "rating", count: 3 },
       { phase: "lobby", count: 1 },
     ]);
+    // Rows without vitals contribute nothing; error counts sum.
+    expect(d.speed).toEqual({
+      vitals: [{ metric: "LCP", deviceClass: "all", p75: 3000, samples: 2 }],
+      errors: { client: 2, boundary: 0 },
+    });
     expect(d.today).toMatchObject({ date: today, partial: true, songsSubmitted: null, gamesStarted: 0 });
     // Rows rolled up before Quick Play existed read as zeros, never fabricated.
     expect(d.quickPlay).toEqual({
@@ -242,6 +249,8 @@ describe("stats queries", () => {
       await ev("game_started", { roomCode: "QAQP01", playerCount: 3, label: "quickplay" });
       await ev("game_started", { roomCode: "QAPRIV", playerCount: 5 });
       await ev("quickplay_1v1_offered");
+      await ev("client_error", { name: "TypeError", route: "/" });
+      await ev("web_vital", { name: "LCP", value: 1000, deviceClass: "mobile" });
     });
     const d = await t.query(api.stats.getDashboard, { adminKey: KEY, days: 7 });
     expect(d.quickPlay).toEqual({
@@ -256,7 +265,9 @@ describe("stats queries", () => {
       oneVOneOffered: 1,
       oneVOneAccepted: 0,
     });
-    expect(d.today).toMatchObject({ quickPlayClicks: 4, quickPlayMedianWaitMs: 40_000 });
+    expect(d.today).toMatchObject({ quickPlayClicks: 4, quickPlayMedianWaitMs: 40_000, webVitals: [] });
+    // Today's errors count live; today's vitals wait for the rollup.
+    expect(d.speed).toEqual({ vitals: [], errors: { client: 1, boundary: 0 } });
   });
 });
 
@@ -268,5 +279,31 @@ describe("summarizeQuickPlay", () => {
       {},
     ]);
     expect(s).toMatchObject({ clicks: 12, matched: 9, matchRate: 0.75, medianWaitMs: 30_000, gamesStarted: 3, avgPlayersAtStart: 3 });
+  });
+});
+
+describe("summarizeSpeed", () => {
+  test("sample-weighted p75 across days, summed error counts", () => {
+    const out = summarizeSpeed([
+      {
+        webVitals: [
+          { metric: "LCP", deviceClass: "all", p75: 2000, samples: 3 },
+          { metric: "CLS", deviceClass: "all", p75: 0.1, samples: 1 },
+        ],
+        clientErrors: 2,
+        clientErrorBoundaries: 1,
+      },
+      { webVitals: [{ metric: "LCP", deviceClass: "all", p75: 4000, samples: 1 }], clientErrors: 1 },
+      {},
+    ]);
+    expect(out.vitals).toEqual([
+      { metric: "LCP", deviceClass: "all", p75: 2500, samples: 4 },
+      { metric: "CLS", deviceClass: "all", p75: 0.1, samples: 1 },
+    ]);
+    expect(out.errors).toEqual({ client: 3, boundary: 1 });
+  });
+
+  test("empty window", () => {
+    expect(summarizeSpeed([])).toEqual({ vitals: [], errors: { client: 0, boundary: 0 } });
   });
 });

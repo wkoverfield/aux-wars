@@ -14,8 +14,46 @@ import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { captureGameEvent, gameProperties } from "../../services/analytics";
 import ScrollFade from "../../components/ScrollFade";
-import { useNow } from "../quickplay/useQuickPlay";
-import { autoAdvanceLabel, secondsUntil } from "../quickplay/quickPlayModel";
+import { useSecondsUntil } from "../quickplay/useQuickPlay";
+import { autoAdvanceLabel } from "../quickplay/quickPlayModel";
+
+/** Quick Play auto-advance pill text; a leaf so only it re-renders each second. */
+function AutoAdvanceText({ autoAdvanceAt, isFinalRound }) {
+  return autoAdvanceLabel({ seconds: useSecondsUntil(autoAdvanceAt), isFinalRound });
+}
+
+// Placeholder shown until the round results arrive.
+const LoadingSkeleton = () => (
+  <motion.div 
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    className="flex flex-col items-center w-full"
+  >
+    {/* Winner skeleton */}
+    <div className="flex flex-col items-center mb-8">
+      <div className="w-44 h-44 md:w-[180px] md:h-[180px] bg-[#242424] rounded-lg animate-pulse mb-4"></div>
+      <div className="h-8 w-32 bg-[#242424] rounded animate-pulse mb-2"></div>
+      <div className="h-6 w-40 bg-[#242424] rounded animate-pulse mb-1"></div>
+      <div className="h-4 w-24 bg-[#242424] rounded animate-pulse"></div>
+    </div>
+    
+    {/* Other songs skeleton */}
+    {[...Array(2)].map((_, idx) => (
+      <div key={idx} className="flex items-center w-[95%] max-w-[580px] mx-auto my-4 p-3">
+        <div className="w-[60px] h-[60px] md:w-[80px] md:h-[80px] bg-[#242424] rounded-md animate-pulse mr-4"></div>
+        <div className="flex-1">
+          <div className="h-6 w-32 bg-[#242424] rounded animate-pulse mb-2"></div>
+          <div className="h-4 w-48 bg-[#242424] rounded animate-pulse mb-1"></div>
+          <div className="h-4 w-36 bg-[#242424] rounded animate-pulse"></div>
+        </div>
+        <div className="flex items-center">
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-[#242424] rounded-full animate-pulse mr-2"></div>
+          <div className="h-8 w-8 bg-[#242424] rounded animate-pulse"></div>
+        </div>
+      </div>
+    ))}
+  </motion.div>
+);
 
 /**
  * RoundWinner component displays the results of a completed round.
@@ -101,8 +139,6 @@ export default function RoundWinner() {
   // Next Round button becomes a timer.
   const isPublic = Boolean(room?.isPublic);
   const autoAdvanceAt = isPublic ? room?.autoAdvanceAt : undefined;
-  const now = useNow(typeof autoAdvanceAt === "number");
-  const autoAdvanceText = autoAdvanceLabel({ seconds: secondsUntil(autoAdvanceAt, now), isFinalRound });
 
   /**
    * Handles the transition to the next round or final results
@@ -125,50 +161,18 @@ export default function RoundWinner() {
     }
   }, [isFinalRound, isTransitioning]);
 
-  // Loading skeleton component
-  const LoadingSkeleton = () => (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="flex flex-col items-center w-full"
-    >
-      {/* Winner skeleton */}
-      <div className="flex flex-col items-center mb-8">
-        <div className="w-44 h-44 md:w-[180px] md:h-[180px] bg-[#242424] rounded-lg animate-pulse mb-4"></div>
-        <div className="h-8 w-32 bg-[#242424] rounded animate-pulse mb-2"></div>
-        <div className="h-6 w-40 bg-[#242424] rounded animate-pulse mb-1"></div>
-        <div className="h-4 w-24 bg-[#242424] rounded animate-pulse"></div>
-      </div>
-      
-      {/* Other songs skeleton */}
-      {[...Array(2)].map((_, idx) => (
-        <div key={idx} className="flex items-center w-[95%] max-w-[580px] mx-auto my-4 p-3">
-          <div className="w-[60px] h-[60px] md:w-[80px] md:h-[80px] bg-[#242424] rounded-md animate-pulse mr-4"></div>
-          <div className="flex-1">
-            <div className="h-6 w-32 bg-[#242424] rounded animate-pulse mb-2"></div>
-            <div className="h-4 w-48 bg-[#242424] rounded animate-pulse mb-1"></div>
-            <div className="h-4 w-36 bg-[#242424] rounded animate-pulse"></div>
-          </div>
-          <div className="flex items-center">
-            <div className="w-12 h-12 md:w-16 md:h-16 bg-[#242424] rounded-full animate-pulse mr-2"></div>
-            <div className="h-8 w-8 bg-[#242424] rounded animate-pulse"></div>
-          </div>
-        </div>
-      ))}
-    </motion.div>
-  );
 
   return (
     <div className="relative flex flex-col h-screen w-full max-w-7xl mx-auto pt-2 pb-6 px-2 md:p-6 bg-transparent items-center overflow-hidden">
       {/* Quick Play: auto-advance timer in the host button's spot */}
-      {isPublic && autoAdvanceText && (
+      {isPublic && typeof autoAdvanceAt === "number" && (
         <div className="w-full flex flex-row justify-end mb-1 mt-2 md:mb-2 md:mt-4">
           <div
             className="flex items-center gap-2 py-1 px-3 md:py-2 md:px-4 rounded-md text-gray-300 font-semibold bg-[#242424] text-sm md:text-base tabular-nums"
             role="timer"
             aria-live="off"
           >
-            {autoAdvanceText}
+            <AutoAdvanceText autoAdvanceAt={autoAdvanceAt} isFinalRound={isFinalRound} />
           </div>
         </div>
       )}

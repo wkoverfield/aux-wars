@@ -4,7 +4,9 @@ import './index.css'
 import App from './App.jsx'
 import { Analytics } from "@vercel/analytics/react"
 import { ConvexProvider, ConvexReactClient } from 'convex/react'
+import { MotionConfig } from 'framer-motion'
 import { initPostHog } from './services/posthog'
+import { initClientHealth } from './services/clientHealth'
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL
 const convex = convexUrl ? new ConvexReactClient(convexUrl) : null
@@ -14,18 +16,24 @@ const convex = convexUrl ? new ConvexReactClient(convexUrl) : null
 // unaffected.
 initPostHog()
 
+// Sampled web vitals and uncaught-error counts, reported to Convex.
+initClientHealth(convex)
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    {convex ? (
-      <ConvexProvider client={convex}>
-        <App />
-        <Analytics />
-      </ConvexProvider>
-    ) : (
-      <>
-        <App />
-        <Analytics />
-      </>
-    )}
+    {/* Framer Motion honors the OS reduced-motion setting app-wide. */}
+    <MotionConfig reducedMotion="user">
+      {convex ? (
+        <ConvexProvider client={convex}>
+          <App />
+          <Analytics />
+        </ConvexProvider>
+      ) : (
+        <>
+          <App />
+          <Analytics />
+        </>
+      )}
+    </MotionConfig>
   </StrictMode>,
 )

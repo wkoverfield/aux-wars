@@ -20,6 +20,12 @@ const eventMetadata = v.optional(v.object({
   reason: v.optional(v.string()), // search_failed: see searchFailReason
   waitedMs: v.optional(v.number()), // quickplay_matched / quickplay_left_waiting
   playersAtStart: v.optional(v.number()), // quickplay_matched
+  // web_vital / client_error / client_error_boundary (see sanitizers below)
+  name: v.optional(v.string()), // metric name, or error class name
+  rating: v.optional(v.string()),
+  route: v.optional(v.string()), // route pattern, never a concrete path
+  deviceClass: v.optional(v.string()),
+  effectiveType: v.optional(v.string()),
 }));
 export type EventMetadata = NonNullable<Infer<typeof eventMetadata>>;
 
@@ -35,7 +41,55 @@ export function searchFailReason(reason: unknown): string {
   return typeof reason === "string" && SEARCH_FAIL_REASON_RE.test(reason) ? reason : "unknown";
 }
 
+export const WEB_VITAL_NAMES = new Set(["LCP", "INP", "CLS", "FCP", "TTFB"]);
+const VITAL_RATINGS = new Set(["good", "needs-improvement", "poor"]);
+export const DEVICE_CLASSES = new Set(["mobile", "chromebook", "desktop"]);
+const EFFECTIVE_TYPES = new Set(["slow-2g", "2g", "3g", "4g"]);
+const ROUTE_RE = /^\/[A-Za-z0-9/:_-]{0,60}$/;
+const ERROR_NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$]{0,40}$/;
+// Upper bound for a reported vital (ms; CLS is unitless and far below this).
+const MAX_VITAL_VALUE = 120_000;
+
+function sanitizeRoute(route: unknown): string {
+  return typeof route === "string" && ROUTE_RE.test(route) ? route : "other";
+}
+
+/**
+ * web_vital metadata reduced to known values, or null when the metric or
+ * value is unusable. Values are rounded: ms for timings, 3 places for CLS.
+ */
+export function sanitizeWebVital(m: EventMetadata | undefined): EventMetadata | null {
+  const name = m?.name;
+  const value = m?.value;
+  if (typeof name !== "string" || !WEB_VITAL_NAMES.has(name)) return null;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  const clamped = Math.min(value, MAX_VITAL_VALUE);
+  const out: EventMetadata = {
+    name,
+    value: name === "CLS" ? Math.round(clamped * 1000) / 1000 : Math.round(clamped),
+    rating: typeof m?.rating === "string" && VITAL_RATINGS.has(m.rating) ? m.rating : "unknown",
+    route: sanitizeRoute(m?.route),
+    deviceClass:
+      typeof m?.deviceClass === "string" && DEVICE_CLASSES.has(m.deviceClass) ? m.deviceClass : "unknown",
+  };
+  if (typeof m?.effectiveType === "string" && EFFECTIVE_TYPES.has(m.effectiveType)) {
+    out.effectiveType = m.effectiveType;
+  }
+  return out;
+}
+
+/** client_error / client_error_boundary: error class name and route pattern only. */
+export function sanitizeClientError(m: EventMetadata | undefined): EventMetadata {
+  return {
+    name: typeof m?.name === "string" && ERROR_NAME_RE.test(m.name) ? m.name : "Error",
+    route: sanitizeRoute(m?.route),
+  };
+}
+
 const PUBLIC_EVENT_TYPES = new Set([
+  "client_error",
+  "client_error_boundary",
+  "web_vital",
   "pro_cta_viewed",
   "pro_checkout_started",
   "search_failed",
@@ -110,6 +164,12 @@ export const logEvent = mutation({
     if (eventType === "search_failed") {
       // Only the failure class is kept: never query text or other fields.
       metadata = { reason: searchFailReason(metadata?.reason) };
+    } else if (eventType === "web_vital") {
+      const clean = sanitizeWebVital(metadata);
+      if (!clean) return { success: false, message: "Invalid metric" } as const;
+      metadata = clean;
+    } else if (eventType === "client_error" || eventType === "client_error_boundary") {
+      metadata = sanitizeClientError(metadata);
     }
     await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, { eventType, metadata });
     return { success: true } as const;

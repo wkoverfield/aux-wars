@@ -16,6 +16,11 @@ import SnippetSelector from "../../components/SnippetSelector";
 import PromptVoting from "./PromptVoting";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
+import { useNow } from "../quickplay/useQuickPlay";
+import { secondsUntil } from "../quickplay/quickPlayModel";
+
+// After this long without an answer, the search shows "Still searching..." and a Retry.
+export const SEARCH_SLOW_MS = 3000;
 
 const SUBMIT_SONG_FALLBACK_MESSAGE = "Couldn't submit that song. Please try again.";
 
@@ -26,6 +31,46 @@ function getUserSafeSubmitSongError(error) {
   }
 
   return message;
+}
+
+function formatTimer(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Song-selection countdown pill.
+ * @param {{ timeRemaining: number | null }} props
+ */
+function SelectionTimer({ timeRemaining }) {
+  if (timeRemaining === null) return null;
+
+  const isLow = timeRemaining <= 10;
+
+  return (
+    <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full font-bold text-lg ${
+      isLow
+        ? 'bg-red-600 text-white animate-pulse'
+        : 'bg-[#242424] text-white'
+    }`}>
+      ⏱ {formatTimer(timeRemaining)}
+    </div>
+  );
+}
+
+/**
+ * Shown when the room is in the rating phase but no song is being rated yet
+ * (the phase flipped before the rating query caught up, or the last rating
+ * is being totaled before results).
+ */
+function TallyingState() {
+  return (
+    <div role="status" className="flex flex-col items-center justify-center gap-3 text-white">
+      <div className="h-10 w-10 rounded-full border-4 border-white/15 border-t-[#68d570] animate-spin" aria-hidden="true" />
+      <p className="text-lg font-semibold">Tallying...</p>
+    </div>
+  );
 }
 
 /**
@@ -86,6 +131,10 @@ export default function Round() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchError, setSearchError] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [isSearchSlow, setIsSearchSlow] = useState(false);
+  // Bumped by Retry to re-run the search effect with a fresh request.
+  const [searchRetry, setSearchRetry] = useState(0);
+  const retryingSearchRef = useRef(false);
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState(null);
   const [showSnippetSelector, setShowSnippetSelector] = useState(false);
@@ -105,6 +154,10 @@ export default function Round() {
   // Derive from queries - no local state duplication
   const isRatingPhase = currentRatingSong !== null && currentRatingSong !== undefined;
   const songToRate = currentRatingSong;
+  // The song on screen now. A rating auto-submitted for the previous song
+  // (RatingScreen cleanup on song change) must not flip this song's state.
+  const currentSongIdRef = useRef(null);
+  currentSongIdRef.current = songToRate?.songId ?? null;
   const submittedCount = submissionStatus?.submitted || 0;
   const totalPlayers = submissionStatus?.total || currentRatingStatus?.total || 0;
   const ratingSubmittedCount = currentRatingStatus?.submitted || 0;
@@ -115,35 +168,14 @@ export default function Round() {
   // Selection timer logic
   const roundLength = room?.settings?.roundLength || 0; // 0 = no limit
   const selectionStartedAt = room?.selectionStartedAt;
-  const [timeRemaining, setTimeRemaining] = useState(null);
-
-  // Update timer every second during song selection phase
-  useEffect(() => {
-    // Don't show timer during prompt voting (it has its own timer)
-    const isPromptVoting = room?.phase === "promptVoting";
-    if (!selectionStartedAt || roundLength === 0 || hasSongSubmitted || isRatingPhase || isPromptVoting) {
-      setTimeRemaining(null);
-      return;
-    }
-
-    const updateTimer = () => {
-      const elapsed = (Date.now() - selectionStartedAt) / 1000;
-      const remaining = Math.max(0, roundLength - elapsed);
-      setTimeRemaining(Math.ceil(remaining));
-    };
-
-    updateTimer();
-    const interval = setInterval(updateTimer, 1000);
-    return () => clearInterval(interval);
-  }, [selectionStartedAt, roundLength, hasSongSubmitted, isRatingPhase, room?.phase]);
-
-  // Format timer display
-  const formatTimer = (seconds) => {
-    if (seconds === null) return null;
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  // Countdown during song selection (prompt voting has its own timer). Ticks
+  // once per second on the deadline's second boundaries, so each value shows
+  // for a full second and the 3s lock / 2s auto-submit fire on time.
+  const selectionTimerActive = Boolean(selectionStartedAt) && roundLength > 0 &&
+    !hasSongSubmitted && !isRatingPhase && room?.phase !== "promptVoting";
+  const selectionDeadline = selectionTimerActive ? selectionStartedAt + roundLength * 1000 : undefined;
+  const selectionNow = useNow(selectionTimerActive, selectionDeadline);
+  const timeRemaining = selectionTimerActive ? secondsUntil(selectionDeadline, selectionNow) : null;
 
   // Effects
   // =======
@@ -234,12 +266,15 @@ export default function Round() {
    * The Express proxy queries iTunes + Deezer and returns 30s preview clips.
    */
   useEffect(() => {
+    setIsSearchSlow(false);
     if (!searchTerm.trim()) {
       setSearchResults([]);
       setSearchError(null);
       setIsSearching(false);
       return;
     }
+    const isRetry = retryingSearchRef.current;
+    retryingSearchRef.current = false;
 
     // Instant feedback: show the "Searching…" spinner the moment they type — it
     // covers the debounce AND the fetch. (Previously setIsSearching(true) was never
@@ -256,10 +291,14 @@ export default function Round() {
     // Guard against overlapping searches: if a newer keystroke supersedes this one
     // (it resolves after we've moved on), skip its stale results / spinner toggle.
     let cancelled = false;
+    let slowTimer = null;
     const delayDebounce = setTimeout(async () => {
+      slowTimer = setTimeout(() => {
+        if (!cancelled) setIsSearchSlow(true);
+      }, SEARCH_SLOW_MS);
       try {
         setSearchError(null);
-        const result = await searchTracks(searchTerm);
+        const result = await searchTracks(searchTerm, { fresh: isRetry });
         if (cancelled) return;
 
         setSearchResults(result);
@@ -289,13 +328,22 @@ export default function Round() {
           logEvent({ eventType: "search_failed", metadata: { reason: err.reason } });
         }
       } finally {
-        if (!cancelled) setIsSearching(false);
+        clearTimeout(slowTimer);
+        if (!cancelled) {
+          setIsSearching(false);
+          setIsSearchSlow(false);
+        }
       }
-    }, 350);
+    }, isRetry ? 0 : 350);
 
-    return () => { cancelled = true; clearTimeout(delayDebounce); };
+    return () => { cancelled = true; clearTimeout(delayDebounce); clearTimeout(slowTimer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm]);
+  }, [searchTerm, searchRetry]);
+
+  const handleRetrySearch = () => {
+    retryingSearchRef.current = true;
+    setSearchRetry((n) => n + 1);
+  };
 
   // Player count viability checks (optional) can be rendered from submissionStatus
 
@@ -331,6 +379,11 @@ export default function Round() {
       return;
     }
 
+    // Close the snippet selector right away so the confirm feels instant;
+    // reopen it if the submission fails.
+    const reopenSelector = showSnippetSelector;
+    setShowSnippetSelector(false);
+
     try {
       const result = await submitSong({
         code: gameCode,
@@ -352,15 +405,16 @@ export default function Round() {
 
       if (result && result.success === false) {
         showToast(result.message || SUBMIT_SONG_FALLBACK_MESSAGE, "error");
+        if (reopenSelector) setShowSnippetSelector(true);
         return;
       }
     } catch (error) {
       console.error("Song submission failed:", error);
       showToast(getUserSafeSubmitSongError(error), "error");
+      if (reopenSelector) setShowSnippetSelector(true);
       return;
     }
     setIsSongSelectionView(false);
-    setShowSnippetSelector(false);
     setSelectedTrack(null);
   };
 
@@ -383,6 +437,9 @@ export default function Round() {
       return;
     }
 
+    // Show the waiting state immediately; revert if the server refuses.
+    const isCurrentSong = () => songId === currentSongIdRef.current;
+    if (isCurrentSong()) setHasRatingSubmitted(true);
     try {
       const result = await submitRating({
         code: gameCode,
@@ -392,11 +449,11 @@ export default function Round() {
         rating
       });
       if (result?.success === false) {
+        if (isCurrentSong()) setHasRatingSubmitted(false);
         showToast(result.message || "Failed to submit rating.", "warning");
-        return;
       }
-      setHasRatingSubmitted(true);
     } catch {
+      if (isCurrentSong()) setHasRatingSubmitted(false);
       showToast("Failed to submit rating.", "error");
     }
   };
@@ -414,6 +471,12 @@ export default function Round() {
     // Handle prompt voting phase first
     if (isPromptVotingPhase) {
       return <PromptVoting gameCode={gameCode} />;
+    }
+
+    // Rating phase but no song from the query yet: never fall through to the
+    // song-selection screens.
+    if (room?.phase === "rating" && !songToRate) {
+      return <TallyingState />;
     }
 
     if (isRatingPhase) {
@@ -462,6 +525,8 @@ export default function Round() {
             searchResults={searchResults}
             searchError={searchError}
             isSearching={isSearching}
+            isSearchSlow={isSearchSlow}
+            onRetrySearch={handleRetrySearch}
             onSelectSong={handleSelectSong}
             onSelectionChange={selectionLocked ? undefined : setPendingTrack}
             onShowPrompt={() => setShowPromptModal(true)}
@@ -479,26 +544,9 @@ export default function Round() {
     }
   };
 
-  // Selection timer component
-  const SelectionTimer = () => {
-    if (timeRemaining === null || hasSongSubmitted || isRatingPhase) return null;
-
-    const isLow = timeRemaining <= 10;
-
-    return (
-      <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full font-bold text-lg ${
-        isLow
-          ? 'bg-red-600 text-white animate-pulse'
-          : 'bg-[#242424] text-white'
-      }`}>
-        ⏱ {formatTimer(timeRemaining)}
-      </div>
-    );
-  };
-
   return (
     <>
-      <SelectionTimer />
+      {!hasSongSubmitted && !isRatingPhase && room?.phase !== "rating" && <SelectionTimer timeRemaining={timeRemaining} />}
       <div className={`round-start flex flex-col items-center justify-center text-white p-4 min-h-screen ${showSnippetSelector ? 'blur-sm' : ''}`}>
         {renderContent()}
 

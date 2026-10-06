@@ -364,6 +364,58 @@ export function normalizeDashboard(raw, windowDays, nowMs = Date.now()) {
     searches: normalizeSearches(src.searches),
     abandonment: normalizeCounts(src.abandonmentByPhase ?? src.abandonment, ["phase", "label"]),
     quickPlay: normalizeQuickPlay(src.quickPlay),
+    speed: normalizeSpeed(src.speed),
+  };
+}
+
+// Google's Core Web Vitals thresholds: at or under `good` is good, over
+// `poor` is poor, in between needs improvement. Times in ms, CLS unitless.
+export const VITAL_THRESHOLDS = {
+  LCP: { good: 2500, poor: 4000 },
+  INP: { good: 200, poor: 500 },
+  CLS: { good: 0.1, poor: 0.25 },
+  FCP: { good: 1800, poor: 3000 },
+};
+export const SPEED_METRICS = ["LCP", "INP", "CLS", "FCP"];
+export const SPEED_DEVICES = ["all", "mobile", "chromebook", "desktop"];
+
+export function vitalRating(metric, value) {
+  const t = VITAL_THRESHOLDS[metric];
+  const n = num(value);
+  if (!t || n === null) return null;
+  if (n <= t.good) return "good";
+  return n <= t.poor ? "needs-improvement" : "poor";
+}
+
+export function fmtVital(metric, value) {
+  const n = num(value);
+  if (n === null) return EMPTY;
+  if (metric === "CLS") return n.toFixed(2);
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}s` : `${Math.round(n)}ms`;
+}
+
+/**
+ * Speed card: p75 per metric and device class (null when no samples), plus
+ * error counts.
+ */
+export function normalizeSpeed(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const list = Array.isArray(src.vitals) ? src.vitals : [];
+  const cell = (metric, device) => {
+    const hit = list.find((v) => v && v.metric === metric && v.deviceClass === device);
+    const p75 = hit ? num(hit.p75) : null;
+    return { p75, samples: hit ? num(hit.samples) ?? 0 : 0, rating: vitalRating(metric, p75) };
+  };
+  const rows = SPEED_METRICS.map((metric) => ({
+    metric,
+    cells: Object.fromEntries(SPEED_DEVICES.map((d) => [d, cell(metric, d)])),
+  }));
+  const errors = src.errors && typeof src.errors === "object" ? src.errors : {};
+  return {
+    rows,
+    hasData: rows.some((r) => r.cells.all.samples > 0),
+    samples: Object.fromEntries(SPEED_DEVICES.map((d) => [d, Math.max(0, ...rows.map((r) => r.cells[d].samples))])),
+    errors: { client: num(errors.client) ?? 0, boundary: num(errors.boundary) ?? 0 },
   };
 }
 

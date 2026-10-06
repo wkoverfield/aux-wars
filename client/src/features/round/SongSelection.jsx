@@ -14,6 +14,8 @@ import ScrollFade from "../../components/ScrollFade";
  * @param {Array} props.searchResults - List of search results
  * @param {string|null} props.searchError - Error message to display
  * @param {boolean} props.isSearching - Whether a search is currently in progress
+ * @param {boolean} [props.isSearchSlow] - The search has been running for a while
+ * @param {Function} [props.onRetrySearch] - Starts the search again
  * @param {Function} props.onSelectSong - Callback when a song is confirmed (opens snippet selector)
  * @param {Function} props.onSelectionChange - Callback when selection changes (for auto-submit on timer expiry)
  * @param {Function} props.onShowPrompt - Callback to show the prompt modal
@@ -26,6 +28,8 @@ export default function SongSelection({
   searchResults,
   searchError,
   isSearching,
+  isSearchSlow = false,
+  onRetrySearch,
   onSelectSong,
   onSelectionChange,
   onShowPrompt,
@@ -95,9 +99,18 @@ export default function SongSelection({
                     animate={{ opacity: [0.7, 1, 0.7] }}
                     transition={{ duration: 1.5, repeat: Infinity }}
                   >
-                    Searching for songs...
+                    {isSearchSlow ? "Still searching..." : "Searching for songs..."}
                   </motion.span>
                 </div>
+                {isSearchSlow && onRetrySearch && (
+                  <button
+                    type="button"
+                    onClick={onRetrySearch}
+                    className="mt-3 rounded-full border border-white/20 px-4 py-1.5 text-sm text-white hover:bg-white/10 active:scale-95 transition-colors"
+                  >
+                    Retry
+                  </button>
+                )}
               </motion.div>
             )}
           </AnimatePresence>

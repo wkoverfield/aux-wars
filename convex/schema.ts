@@ -55,6 +55,15 @@ export const dailyMetricsFields = {
   quickPlayAvgPlayersAtStart: v.optional(v.union(v.number(), v.null())),
   quickPlay1v1Offered: v.optional(v.number()),
   quickPlay1v1Accepted: v.optional(v.number()),
+  // Sampled real-user web vitals: p75 per metric, overall (deviceClass "all")
+  // and per device class, with sample counts. Optional: older rows lack them.
+  webVitals: v.optional(
+    v.array(
+      v.object({ metric: v.string(), deviceClass: v.string(), p75: v.number(), samples: v.number() })
+    )
+  ),
+  clientErrors: v.optional(v.number()), // uncaught errors / rejections (max 3 per page load)
+  clientErrorBoundaries: v.optional(v.number()), // React error boundary catches
 };
 
 const retentionPoint = v.object({ cohort: v.number(), returned: v.number() });

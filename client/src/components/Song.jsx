@@ -1,4 +1,5 @@
 import recordLogo from './record-logo.svg'
+import { fallBackToOriginal, largeCoverArt } from "../utils/coverArt";
 
 /**
  * Song component displays a song's details including album cover, track info, and rating.
@@ -20,8 +21,9 @@ export default function Song({ track, artist, albumCover, player, rating, winner
                 {/* Album cover */}
                 <div className="relative flex flex-col items-center mb-2 md:mb-4">
                     <img 
-                        src={albumCover} 
-                        className="w-32 h-32 md:w-44 md:h-44 lg:w-[180px] lg:h-[180px] rounded-lg shadow-lg" 
+                        src={largeCoverArt(albumCover)}
+                        onError={fallBackToOriginal(albumCover)}
+                        className="w-32 h-32 md:w-44 md:h-44 lg:w-[180px] lg:h-[180px] rounded-lg shadow-lg object-cover" 
                         alt="Album Cover"
                     />
                 </div>
@@ -41,7 +43,7 @@ export default function Song({ track, artist, albumCover, player, rating, winner
                 <div className="mr-4">
                     <img 
                         src={albumCover} 
-                        className="w-[60px] h-[60px] md:w-[80px] md:h-[80px] rounded-md shadow-md" 
+                        className="w-[60px] h-[60px] md:w-[80px] md:h-[80px] rounded-md shadow-md object-cover" 
                         alt="Album Cover"
                     />
                 </div>

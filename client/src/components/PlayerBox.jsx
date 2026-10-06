@@ -1,40 +1,39 @@
+import { memo } from 'react';
 import kickIcon from '../assets/kick-icon.svg';
 
 /**
- * PlayerBox component displays a single player's information in the game lobby.
- * Shows the player's name and ready status with appropriate styling.
- * If viewing player is the host, shows kick button for other players.
+ * One player row in the game lobby: name, host weight, ready status, and a
+ * kick button when the viewer may kick this player.
+ *
+ * Props are primitives (plus a stable onKick) so React.memo skips rows whose
+ * player did not change when the players query re-delivers new objects.
  *
  * @param {Object} props - Component props
- * @param {Object} props.player - Player object containing name and status
- * @param {string} props.player.name - Player's name
- * @param {boolean} props.player.isHost - Whether the player is the game host
- * @param {boolean} props.player.isReady - Whether the player is ready to start
- * @param {boolean} props.isHost - Whether the current user is the host
- * @param {string} props.currentPlayerId - Current user's player ID
- * @param {Function} props.onKick - Callback function to kick player
+ * @param {string} props.playerId - Player's id (passed to onKick)
+ * @param {string} props.name - Player's name
+ * @param {boolean} props.isPlayerHost - Whether this player hosts the game
+ * @param {boolean} props.isReady - Whether this player is ready
+ * @param {boolean} props.canKick - Whether the viewer may kick this player
+ * @param {Function} [props.onKick] - Called with playerId after confirmation
  * @returns {JSX.Element} Rendered component
  */
-export default function PlayerBox({ player, isHost, currentPlayerId, onKick }) {
-  const isCurrentPlayer = player.playerId === currentPlayerId;
-  const canKick = isHost && !isCurrentPlayer && !player.isHost && onKick;
-
+function PlayerBox({ playerId, name, isPlayerHost, isReady, canKick, onKick }) {
   const handleKickClick = () => {
-    const confirmed = window.confirm(`Are you sure you want to kick ${player.name}?`);
+    const confirmed = window.confirm(`Are you sure you want to kick ${name}?`);
     if (confirmed) {
-      onKick(player.playerId);
+      onKick(playerId);
     }
   };
 
   return (
     <div className="lobby-player rounded-md">
       {/* Player name with host indicator */}
-      <p className={player.isHost ? "font-bold" : ""}>{player.name}</p>
+      <p className={isPlayerHost ? "font-bold" : ""}>{name}</p>
 
       <div className="flex items-center gap-3">
         {/* Ready status */}
-        <p className={player.isReady ? "ready" : "not-ready"}>
-          {player.isReady ? "Ready" : "Not Ready"}
+        <p className={isReady ? "ready" : "not-ready"}>
+          {isReady ? "Ready" : "Not Ready"}
         </p>
 
         {/* Kick button (only for host, only for other players) */}
@@ -51,3 +50,5 @@ export default function PlayerBox({ player, isHost, currentPlayerId, onKick }) {
     </div>
   );
 }
+
+export default memo(PlayerBox);

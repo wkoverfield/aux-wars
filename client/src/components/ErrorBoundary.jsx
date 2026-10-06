@@ -1,4 +1,5 @@
 import React from 'react';
+import { reportBoundaryError } from '../services/clientHealth';
 
 /**
  * ErrorBoundary component catches React errors in child components
@@ -17,6 +18,7 @@ class ErrorBoundary extends React.Component {
   componentDidCatch(error, errorInfo) {
     // Log error details for debugging
     console.error('[ErrorBoundary] Caught error:', error, errorInfo);
+    reportBoundaryError(error);
   }
 
   render() {

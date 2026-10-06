@@ -14,6 +14,9 @@ import {
   normalizeHourly,
   normalizeLive,
   normalizeRetention,
+  normalizeSpeed,
+  fmtVital,
+  vitalRating,
   readStoredKey,
   summarizeWindow,
   windowDates,
@@ -274,5 +277,50 @@ describe("Quick Play", () => {
     expect(fmtWait(65_000)).toBe("1m 5s");
     expect(fmtWait(120_000)).toBe("2m");
     expect(fmtWait(null)).toBe("n/a");
+  });
+});
+
+describe("speed", () => {
+  it("rates against Google thresholds", () => {
+    expect(vitalRating("LCP", 2500)).toBe("good");
+    expect(vitalRating("LCP", 2501)).toBe("needs-improvement");
+    expect(vitalRating("LCP", 4001)).toBe("poor");
+    expect(vitalRating("INP", 200)).toBe("good");
+    expect(vitalRating("CLS", 0.11)).toBe("needs-improvement");
+    expect(vitalRating("FCP", 1800)).toBe("good");
+    expect(vitalRating("TTFB", 100)).toBeNull();
+    expect(vitalRating("LCP", null)).toBeNull();
+  });
+
+  it("formats vitals", () => {
+    expect(fmtVital("LCP", 2512)).toBe("2.5s");
+    expect(fmtVital("INP", 180)).toBe("180ms");
+    expect(fmtVital("CLS", 0.123)).toBe("0.12");
+    expect(fmtVital("LCP", null)).toBe("n/a");
+  });
+
+  it("builds a metric by device grid with ratings and samples", () => {
+    const s = normalizeSpeed({
+      vitals: [
+        { metric: "LCP", deviceClass: "all", p75: 3000, samples: 10 },
+        { metric: "LCP", deviceClass: "chromebook", p75: 5000, samples: 4 },
+        { metric: "TTFB", deviceClass: "all", p75: 300, samples: 10 },
+      ],
+      errors: { client: 3, boundary: 1 },
+    });
+    expect(s.hasData).toBe(true);
+    expect(s.rows.map((r) => r.metric)).toEqual(["LCP", "INP", "CLS", "FCP"]);
+    expect(s.rows[0].cells.all).toEqual({ p75: 3000, samples: 10, rating: "needs-improvement" });
+    expect(s.rows[0].cells.chromebook).toEqual({ p75: 5000, samples: 4, rating: "poor" });
+    expect(s.rows[0].cells.mobile).toEqual({ p75: null, samples: 0, rating: null });
+    expect(s.samples).toEqual({ all: 10, mobile: 0, chromebook: 4, desktop: 0 });
+    expect(s.errors).toEqual({ client: 3, boundary: 1 });
+  });
+
+  it("handles a missing payload", () => {
+    const s = normalizeSpeed(undefined);
+    expect(s.hasData).toBe(false);
+    expect(s.errors).toEqual({ client: 0, boundary: 0 });
+    expect(normalizeDashboard({}, 7, NOW).speed.hasData).toBe(false);
   });
 });

@@ -3,7 +3,13 @@ import { describe, expect, test, vi } from "vitest";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import presenceComponent from "@convex-dev/presence/test";
-import { LISTEN_MS_SAMPLES, LISTEN_MS_TOTAL, searchFailReason } from "./analytics";
+import {
+  LISTEN_MS_SAMPLES,
+  LISTEN_MS_TOTAL,
+  sanitizeClientError,
+  sanitizeWebVital,
+  searchFailReason,
+} from "./analytics";
 
 const modules = import.meta.glob(["./**/*.ts", "./**/*.js", "!./**/*.test.ts", "!./**/*.d.ts"]);
 const DAY = 24 * 60 * 60 * 1000;
@@ -175,6 +181,83 @@ describe("search_failed", () => {
       expect(raw.map((e) => [e.eventType, e.metadata])).toEqual([
         ["search_failed", { reason: "http_503" }],
         ["search_failed", { reason: "unknown" }],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("web_vital and client errors", () => {
+  test("sanitizeWebVital keeps known fields and rounds values", () => {
+    expect(
+      sanitizeWebVital({
+        name: "LCP",
+        value: 2512.7,
+        rating: "needs-improvement",
+        route: "/lobby/:code",
+        deviceClass: "chromebook",
+        effectiveType: "4g",
+        label: "dropped",
+      })
+    ).toEqual({
+      name: "LCP",
+      value: 2513,
+      rating: "needs-improvement",
+      route: "/lobby/:code",
+      deviceClass: "chromebook",
+      effectiveType: "4g",
+    });
+    expect(sanitizeWebVital({ name: "CLS", value: 0.12345, rating: "x", route: "/lobby/ABC123?x=1", deviceClass: "tv" }))
+      .toEqual({ name: "CLS", value: 0.123, rating: "unknown", route: "other", deviceClass: "unknown" });
+    expect(sanitizeWebVital({ name: "LCP", value: 1e9 })?.value).toBe(120_000);
+    expect(sanitizeWebVital({ name: "FID", value: 10 })).toBeNull();
+    expect(sanitizeWebVital({ name: "LCP", value: Number.NaN })).toBeNull();
+    expect(sanitizeWebVital({ name: "LCP", value: -1 })).toBeNull();
+    expect(sanitizeWebVital(undefined)).toBeNull();
+  });
+
+  test("sanitizeClientError keeps only the error class name and route", () => {
+    expect(sanitizeClientError({ name: "TypeError", route: "/", label: "secret message" })).toEqual({
+      name: "TypeError",
+      route: "/",
+    });
+    expect(sanitizeClientError({ name: "Cannot read properties of undefined", route: "https://x" })).toEqual({
+      name: "Error",
+      route: "other",
+    });
+    expect(sanitizeClientError(undefined)).toEqual({ name: "Error", route: "other" });
+  });
+
+  test("logEvent stores sanitized vitals and errors, rejects bad metrics", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup();
+      const ok = await t.mutation(api.analytics.logEvent, {
+        eventType: "web_vital",
+        metadata: { name: "INP", value: 180.4, rating: "good", route: "/", deviceClass: "mobile" },
+      });
+      expect(ok.success).toBe(true);
+      const bad = await t.mutation(api.analytics.logEvent, {
+        eventType: "web_vital",
+        metadata: { name: "nope", value: 1 },
+      });
+      expect(bad.success).toBe(false);
+      await t.mutation(api.analytics.logEvent, {
+        eventType: "client_error",
+        metadata: { name: "RangeError", route: "/lobby/:code/round", label: "stack text" },
+      });
+      await t.mutation(api.analytics.logEvent, {
+        eventType: "client_error_boundary",
+        metadata: { name: "TypeError", route: "/stats" },
+      });
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+      const raw = await t.run(async (ctx) => ctx.db.query("analyticsEvents").collect());
+      expect(raw.map((e) => [e.eventType, e.metadata])).toEqual([
+        ["web_vital", { name: "INP", value: 180, rating: "good", route: "/", deviceClass: "mobile" }],
+        ["client_error", { name: "RangeError", route: "/lobby/:code/round" }],
+        ["client_error_boundary", { name: "TypeError", route: "/stats" }],
       ]);
     } finally {
       vi.useRealTimers();

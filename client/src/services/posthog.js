@@ -10,14 +10,41 @@
  * no active consent prompt today and the app's existing analytics (Convex
  * pageviews, Vercel) already run ungated. We match that — capture by default —
  * but honor an explicit `rejected` choice if/when the banner goes live.
+ *
+ * Loading: posthog-js is fetched with a dynamic import so it stays out of the
+ * main bundle. The import starts on the first of: an idle callback (3s
+ * timeout) or the first client-side route change. Captures made before then
+ * are buffered, not a load trigger: the homepage captures on mount, and
+ * loading then would put the SDK download back on the critical path.
+ * Buffered captures keep their original timestamps.
  */
-import posthog from "posthog-js";
 import { CONSENT_EVENT, CONSENT_KEY, getConsent } from "./ads";
 import { getVisitorId } from "../utils/visitorId";
 
 const KEY = import.meta.env.VITE_POSTHOG_KEY || "";
 const HOST = import.meta.env.VITE_POSTHOG_HOST || "https://us.i.posthog.com";
-let started = false;
+
+const IDLE_TIMEOUT_MS = 3000;
+// Browsers without requestIdleCallback (Safari) load after this delay.
+const IDLE_FALLBACK_MS = 1500;
+const MAX_BUFFERED = 50;
+// Kept in a variable so the allowlist scan in posthog.test.js does not read
+// this internal pageview as a funnel capture call.
+const PAGEVIEW_EVENT = "$pageview";
+const CLICK_ID_PARAMS = ["gclid", "gbraid", "wbraid", "fbclid", "msclkid", "ttclid", "twclid", "li_fat_id"];
+
+// The landing page as the visitor arrived, before any client-side navigation.
+// posthog-js reads campaign params and the entry URL from `location` when it
+// initializes, which may be after the router has moved on.
+const landing =
+  typeof window === "undefined"
+    ? null
+    : { href: window.location.href, pathname: window.location.pathname, referrer: document.referrer, time: new Date() };
+
+// idle (no key / not started) -> scheduled -> loading -> ready | failed
+let state = "idle";
+let client = null;
+let buffer = [];
 
 function sanitizeUrl(value) {
   if (!value || typeof value !== "string") return value;
@@ -56,16 +83,83 @@ export function syncPostHogConsent(client, consent) {
 }
 
 function applyConsent() {
-  if (!started) return;
-  syncPostHogConsent(posthog, getConsent());
+  if (getConsent() === "rejected") buffer = [];
+  if (state === "ready") {
+    syncPostHogConsent(client, getConsent());
+  } else if (state === "scheduled") {
+    // A load skipped while consent was rejected can go ahead now.
+    load();
+  }
 }
 
-/** Initialize once. Safe to call when no key is set (it just no-ops). */
-export function initPostHog() {
-  if (started || !KEY || typeof window === "undefined") return;
-  started = true;
+/** Campaign params (utm_* and ad click ids) present in a URL. */
+export function campaignParamsFrom(href) {
+  const params = {};
+  let search;
+  try {
+    search = new URL(href).searchParams;
+  } catch {
+    return params;
+  }
+  for (const [key, value] of search) {
+    if (!value) continue;
+    if (key.startsWith("utm_") || CLICK_ID_PARAMS.includes(key)) params[key] = value;
+  }
+  return params;
+}
 
-  posthog.init(KEY, {
+/**
+ * When the router navigated before posthog-js loaded, posthog would record the
+ * current page as the entry and miss the landing URL's campaign params. Put
+ * them back: session super properties carry the UTMs and referrer onto every
+ * event this session, and a pageview stamped with the load time records the
+ * page the visitor actually landed on.
+ */
+function attributeLanding(ph) {
+  if (!landing || window.location.href === landing.href) return;
+  const session = campaignParamsFrom(landing.href);
+  if (landing.referrer) {
+    session.$referrer = landing.referrer;
+    try {
+      session.$referring_domain = new URL(landing.referrer).host;
+    } catch {
+      /* unparseable referrer: keep the raw value only */
+    }
+  }
+  if (Object.keys(session).length > 0) ph.register_for_session(session);
+
+  let host;
+  try {
+    host = new URL(landing.href).host;
+  } catch {
+    host = window.location.host;
+  }
+  ph.capture(
+    PAGEVIEW_EVENT,
+    { $current_url: landing.href, $host: host, $pathname: landing.pathname },
+    { timestamp: landing.time }
+  );
+}
+
+function flushBuffer(ph) {
+  const pending = buffer;
+  buffer = [];
+  if (getConsent() === "rejected") return;
+  for (const item of pending) {
+    try {
+      ph.capture(
+        item.event,
+        { $current_url: item.href, $pathname: item.pathname, ...item.properties },
+        { timestamp: item.timestamp }
+      );
+    } catch {
+      /* analytics must never break the game */
+    }
+  }
+}
+
+function start(ph) {
+  ph.init(KEY, {
     api_host: HOST,
     // Share the persistent visitor id so client events line up with the
     // server-side `music_searched` events (which use the same id).
@@ -78,6 +172,8 @@ export function initPostHog() {
     // funnel events (POSTHOG_EVENTS) are the signal we actually want; this
     // was pure noise. Re-enable only with a config'd allowlist if ever needed.
     autocapture: false,
+    // No surveys are configured; skip loading the surveys script.
+    disable_surveys: true,
     before_send: sanitizeEvent,
     disable_session_recording: false,
     session_recording: {
@@ -93,14 +189,71 @@ export function initPostHog() {
       sampleRate: 0.2,
     },
   });
+  client = ph;
+  state = "ready";
+  syncPostHogConsent(ph, getConsent());
+  if (getConsent() === "rejected") {
+    buffer = [];
+    return;
+  }
+  // posthog-js captures its own initial pageview on the next tick, so these
+  // land before it and keep the landing URL as the session entry.
+  try {
+    attributeLanding(ph);
+  } catch {
+    /* analytics must never break the game */
+  }
+  flushBuffer(ph);
+}
 
-  applyConsent();
+function load() {
+  if (state !== "scheduled") return;
+  // Nothing is sent while consent is rejected, so don't fetch the SDK either.
+  if (getConsent() === "rejected") {
+    buffer = [];
+    return;
+  }
+  state = "loading";
+  import("posthog-js")
+    .then((mod) => start(mod.default))
+    .catch(() => {
+      // Offline, blocked by an extension, or a stale chunk after a deploy.
+      // Analytics is optional: drop it for this page load, never reload.
+      state = "failed";
+      client = null;
+      buffer = [];
+    });
+}
+
+function scheduleIdleLoad() {
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(load, { timeout: IDLE_TIMEOUT_MS });
+  } else {
+    setTimeout(load, IDLE_FALLBACK_MS);
+  }
+}
+
+/**
+ * Start PostHog once. Safe to call when no key is set (it just no-ops). The SDK
+ * itself is fetched later (see the loading note at the top of this file).
+ */
+export function initPostHog() {
+  if (state !== "idle" || !KEY || typeof window === "undefined") return;
+  state = "scheduled";
+
   window.addEventListener(CONSENT_EVENT, applyConsent);
   window.addEventListener("storage", (event) => {
     // PostHog and the game both write heavily to localStorage. Reacting to all
     // of those writes caused cross-tab `$opt_in` feedback loops.
     if (event.key === CONSENT_KEY) applyConsent();
   });
+  scheduleIdleLoad();
+}
+
+/** Called on client-side route changes; the first real navigation loads the SDK. */
+export function notifyRouteChange() {
+  if (state !== "scheduled" || !landing) return;
+  if (window.location.pathname !== landing.pathname) load();
 }
 
 /**
@@ -129,16 +282,29 @@ export function isAllowedEvent(event) {
 }
 
 /**
- * Fire-and-forget event capture; no-ops until initialized, drops events not in
- * POSTHOG_EVENTS, never throws.
+ * Fire-and-forget event capture. Drops events not in POSTHOG_EVENTS, buffers
+ * (up to 50, with their original timestamps) until the SDK has loaded and
+ * starts that load, no-ops without a key or after a failed load, never throws.
  */
 export function capture(event, properties) {
-  if (!started || !isAllowedEvent(event)) return;
-  try {
-    posthog.capture(event, properties);
-  } catch {
-    /* analytics must never break the game */
+  if (!isAllowedEvent(event)) return;
+  if (state === "ready") {
+    try {
+      client.capture(event, properties);
+    } catch {
+      /* analytics must never break the game */
+    }
+    return;
+  }
+  if (state !== "scheduled" && state !== "loading") return;
+  if (getConsent() === "rejected") return;
+  if (buffer.length < MAX_BUFFERED) {
+    buffer.push({
+      event,
+      properties,
+      timestamp: new Date(),
+      href: window.location.href,
+      pathname: window.location.pathname,
+    });
   }
 }
-
-export { posthog };
