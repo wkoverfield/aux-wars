@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, mutation, query } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Doc } from "../_generated/dataModel";
 import { containsHateSpeech } from "./contentFilter";
@@ -7,7 +7,7 @@ import { presence } from "../presence";
 import { cleanVisitorId, recordVisitorPlayed } from "../siteStats";
 import { kickTallies, leavePublicRoom } from "./publicRooms";
 import { hashSeatKey, isValidSeatKey, mayTakeOverSeat } from "./roomOps";
-import { CLOSE_LEAVE_DELAY_MS, QUICK_PLAY_CAP } from "./quickPlayRules";
+import { CLOSE_LEAVE_DELAY_MS, PRIVATE_CLOSE_LEAVE_DELAY_MS, QUICK_PLAY_CAP } from "./quickPlayRules";
 
 function now() {
   return Date.now();
@@ -234,10 +234,10 @@ export const leaveGame = mutation({
     code: v.string(),
     playerId: v.string(),
     connectionId: v.string(),
-    // Sent by the client's pagehide beacon. A public seat is then released
-    // after CLOSE_LEAVE_DELAY_MS unless the page comes back and calls
-    // quickPlay.resumeSeat (a reload fires the same event as a close).
-    // Private rooms ignore it.
+    // Sent by the client's pagehide beacon (a reload fires the same event as
+    // a close). The seat is then released after a delay unless the page comes
+    // back and calls resumeSeat: CLOSE_LEAVE_DELAY_MS for Quick Play,
+    // PRIVATE_CLOSE_LEAVE_DELAY_MS for private rooms.
     onClose: v.optional(v.boolean()),
   },
   handler: async (ctx, { code, playerId, connectionId, onClose }) => {
@@ -249,65 +249,103 @@ export const leaveGame = mutation({
       return { roomDeleted: false, message: "Connection issue. Please refresh the page." } as const;
     }
 
-    // Quick Play: no host to reassign; recompute the countdown or keep the
-    // running game moving, and delete the room once empty.
-    if (room.isPublic) {
-      if (onClose) {
-        const closingAt = now();
-        await ctx.db.patch(currentPlayer._id, { closingAt });
+    if (onClose) {
+      const closingAt = now();
+      await ctx.db.patch(currentPlayer._id, { closingAt });
+      if (room.isPublic) {
         await ctx.scheduler.runAfter(CLOSE_LEAVE_DELAY_MS, internal.quickPlay.leaveAfterClose, {
           code,
           playerId,
           closingAt,
         });
-        return { roomDeleted: false, deferred: true } as const;
+      } else {
+        await ctx.scheduler.runAfter(PRIVATE_CLOSE_LEAVE_DELAY_MS, internal.game.rooms.leavePrivateAfterClose, {
+          code,
+          playerId,
+          closingAt,
+        });
       }
+      return { roomDeleted: false, deferred: true } as const;
+    }
+
+    // Quick Play: no host to reassign; recompute the countdown or keep the
+    // running game moving, and delete the room once empty.
+    if (room.isPublic) {
       const { roomDeleted } = await leavePublicRoom(ctx, room, currentPlayer);
       return { roomDeleted } as const;
     }
 
-    const players = await ctx.db
-      .query("players")
-      .withIndex("by_room", (q) => q.eq("roomCode", code))
-      .collect();
+    return await leavePrivateRoom(ctx, room, currentPlayer);
+  },
+});
 
-    const leaving = players.find((p) => p.playerId === playerId);
-    if (leaving) {
-      await ctx.db.delete(leaving._id);
+/**
+ * Removes a player from a private room: deletes the room once empty and
+ * hands the host role to the longest-seated remaining player.
+ */
+async function leavePrivateRoom(ctx: any, room: Doc<"rooms">, leaving: Doc<"players">) {
+  const code = room.code;
+  await ctx.db.delete(leaving._id);
+  await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+    eventType: "player_left",
+    metadata: { roomCode: code, playerId: leaving.playerId },
+  });
 
-      // Track player left
-      await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
-        eventType: "player_left",
-        metadata: { roomCode: code, playerId },
-      });
+  const remaining = await ctx.db
+    .query("players")
+    .withIndex("by_room", (q: any) => q.eq("roomCode", code))
+    .collect();
+
+  if (remaining.length === 0) {
+    console.log(`[leaveGame] Room ${code} is now empty - deleting`);
+    await deleteRoomAndData(ctx, room);
+    return { roomDeleted: true } as const;
+  }
+
+  // Convex Ids are branded strings: compare them directly (`.id` does not
+  // exist on them; `a.id === b.id` is undefined === undefined, always true).
+  if (room.hostPlayerId && room.hostPlayerId === leaving._id) {
+    const sortedRemaining = [...remaining].sort((a, b) => a._creationTime - b._creationTime);
+    if (sortedRemaining[0]) {
+      await ctx.db.patch(room._id, { hostPlayerId: sortedRemaining[0]._id });
+      await ctx.db.patch(sortedRemaining[0]._id, { isHost: true });
     }
+  }
 
-    // Check remaining players
-    const remaining = await ctx.db
-      .query("players")
-      .withIndex("by_room", (q) => q.eq("roomCode", code))
-      .collect();
+  await touchRoom(ctx, room._id);
+  return { roomDeleted: false } as const;
+}
 
-    // If room is now empty, delete it immediately
-    if (remaining.length === 0) {
-      console.log(`[leaveGame] Room ${code} is now empty - deleting`);
-      await deleteRoomAndData(ctx, room);
-      return { roomDeleted: true } as const;
+/**
+ * Releases a private-room seat whose tab sent the close beacon, unless the
+ * page came back since (resumeSeat, or a rejoin, cleared or replaced
+ * closingAt).
+ */
+export const leavePrivateAfterClose = internalMutation({
+  args: { code: v.string(), playerId: v.string(), closingAt: v.number() },
+  handler: async (ctx, { code, playerId, closingAt }) => {
+    const room = await getRoomByCodeInternal(ctx, code);
+    if (!room || room.isPublic) return;
+    const player = await getPlayer(ctx, code, playerId);
+    if (!player || player.closingAt !== closingAt) return;
+    await leavePrivateRoom(ctx, room, player);
+  },
+});
+
+/**
+ * The page is (still or again) open: cancel a pending close-leave in any
+ * room. Called by the client when a game route mounts and when a page
+ * returns from the back/forward cache. Writes only when a close is pending.
+ */
+export const resumeSeat = mutation({
+  args: { code: v.string(), playerId: v.string(), connectionId: v.string() },
+  handler: async (ctx, { code, playerId, connectionId }) => {
+    const player = await validateConnection(ctx, code, playerId, connectionId);
+    if (!player) return { success: false, message: "Connection issue. Please refresh the page." } as const;
+    if (player.closingAt !== undefined) {
+      await ctx.db.patch(player._id, { closingAt: undefined });
     }
-
-    // Reassign host if needed
-    // Convex Ids are branded strings: compare them directly (`.id` does not
-    // exist on them; `a.id === b.id` is undefined === undefined, always true).
-    if (room.hostPlayerId && leaving && room.hostPlayerId === leaving._id) {
-      const sortedRemaining = [...remaining].sort((a, b) => a._creationTime - b._creationTime);
-      if (sortedRemaining[0]) {
-        await ctx.db.patch(room._id, { hostPlayerId: sortedRemaining[0]._id });
-        await ctx.db.patch(sortedRemaining[0]._id, { isHost: true });
-      }
-    }
-
-    await touchRoom(ctx, room._id);
-    return { roomDeleted: false } as const;
+    return { success: true } as const;
   },
 });
 

@@ -22,11 +22,17 @@ export default function GameRouteGuard() {
   const hasInitialized = useRef(false);
   const roomData = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
 
-  // Quick Play: closing the tab gives the seat up (every game route).
-  const resumeSeat = useMutation(api.quickPlay.resumeSeat);
+  // Closing the tab gives the seat up a few seconds later unless the page
+  // comes back (a reload fires the same pagehide event as a close): on every
+  // Quick Play route, and in a private room's lobby.
+  const resumeSeat = useMutation(api.game.rooms.resumeSeat);
+  const guardedRoom = roomData?.room || roomData;
   useLeaveOnClose({
     resume: resumeSeat,
-    enabled: Boolean((roomData?.room || roomData)?.isPublic) && session?.gameCode === gameCode,
+    enabled:
+      Boolean(guardedRoom) &&
+      (guardedRoom.isPublic || guardedRoom.phase === 'lobby') &&
+      session?.gameCode === gameCode,
     code: gameCode,
     playerId: session?.playerId,
     connectionId: session?.connectionId,
