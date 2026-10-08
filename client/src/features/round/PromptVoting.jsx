@@ -3,6 +3,33 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useSession } from "../../hooks/useSession";
+import { usePendingAction } from "../../hooks/usePendingAction";
+import { useSecondsUntil } from "../quickplay/useQuickPlay";
+
+/**
+ * The voting countdown. The query reports whole seconds left; this turns that
+ * into a local deadline and ticks on its own, so only this leaf re-renders
+ * each second.
+ */
+function VoteTimer({ seconds }) {
+  const [deadline, setDeadline] = useState(null);
+  useEffect(() => {
+    setDeadline(Date.now() + seconds * 1000);
+  }, [seconds]);
+  const left = useSecondsUntil(deadline) ?? seconds;
+  const isLowTime = left <= 5;
+  return (
+    <motion.div
+      className={`px-6 py-3 rounded-full font-bold text-2xl ${
+        isLowTime ? "bg-red-600 text-white" : "bg-[#242424] text-white"
+      }`}
+      animate={isLowTime ? { scale: [1, 1.05, 1] } : {}}
+      transition={{ duration: 0.5, repeat: isLowTime ? Infinity : 0 }}
+    >
+      {left}s
+    </motion.div>
+  );
+}
 
 /**
  * PromptVoting component displays the current prompt and allows players to vote to skip it.
@@ -20,26 +47,9 @@ export default function PromptVoting({ gameCode }) {
   );
   const voteSkipMutation = useMutation(api.game.flow.voteSkipPrompt);
   const [hasVoted, setHasVoted] = useState(false);
-  const [isVoting, setIsVoting] = useState(false);
+  const { pending: isVoting, run } = usePendingAction();
   const [promptAnimation, setPromptAnimation] = useState(false);
   const [displayedPrompt, setDisplayedPrompt] = useState("");
-
-  // Track local time remaining (more responsive than server)
-  const [localTimeRemaining, setLocalTimeRemaining] = useState(15);
-
-  // Update local timer every second
-  useEffect(() => {
-    if (!votingStatus) return;
-
-    // Sync with server time when it updates
-    setLocalTimeRemaining(votingStatus.timeRemaining);
-
-    const interval = setInterval(() => {
-      setLocalTimeRemaining((prev) => Math.max(0, prev - 1));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [votingStatus?.timeRemaining]);
 
   // Track if current user has voted
   useEffect(() => {
@@ -56,7 +66,6 @@ export default function PromptVoting({ gameCode }) {
         setDisplayedPrompt(votingStatus.currentPrompt);
         setPromptAnimation(false);
         setHasVoted(false); // Reset vote state on new prompt
-        setLocalTimeRemaining(15); // Reset timer
       }, 300);
     }
   }, [votingStatus?.currentPrompt, displayedPrompt]);
@@ -68,22 +77,20 @@ export default function PromptVoting({ gameCode }) {
     }
   }, [votingStatus?.currentPrompt, displayedPrompt]);
 
-  const handleVoteSkip = async () => {
-    if (!session?.playerId || !session?.connectionId || hasVoted || isVoting) return;
-
-    setIsVoting(true);
-    try {
-      await voteSkipMutation({
-        code: gameCode,
-        playerId: session.playerId,
-        connectionId: session.connectionId,
-      });
-      setHasVoted(true);
-    } catch (error) {
-      console.error("Failed to vote:", error);
-    } finally {
-      setIsVoting(false);
-    }
+  const handleVoteSkip = () => {
+    if (!session?.playerId || !session?.connectionId || hasVoted) return;
+    run(async () => {
+      try {
+        await voteSkipMutation({
+          code: gameCode,
+          playerId: session.playerId,
+          connectionId: session.connectionId,
+        });
+        setHasVoted(true);
+      } catch (error) {
+        console.error("Failed to vote:", error);
+      }
+    });
   };
 
   if (!votingStatus) {
@@ -94,22 +101,16 @@ export default function PromptVoting({ gameCode }) {
     );
   }
 
-  const { skipVotes, majorityNeeded } = votingStatus;
-  const votesNeeded = majorityNeeded - skipVotes;
-  const isLowTime = localTimeRemaining <= 5;
+  // The tap counts at once; the server's tally takes over when it answers.
+  const voted = hasVoted || isVoting;
+  const skipVotes = votingStatus.skipVotes + (isVoting && !hasVoted ? 1 : 0);
+  const { majorityNeeded } = votingStatus;
+  const votesNeeded = Math.max(0, majorityNeeded - skipVotes);
 
   return (
     <div className="flex flex-col items-center justify-center gap-8 max-w-4xl mx-auto px-4 min-h-[70vh]">
       {/* Timer */}
-      <motion.div
-        className={`px-6 py-3 rounded-full font-bold text-2xl ${
-          isLowTime ? "bg-red-600 text-white" : "bg-[#242424] text-white"
-        }`}
-        animate={isLowTime ? { scale: [1, 1.05, 1] } : {}}
-        transition={{ duration: 0.5, repeat: isLowTime ? Infinity : 0 }}
-      >
-        {localTimeRemaining}s
-      </motion.div>
+      <VoteTimer key={displayedPrompt} seconds={votingStatus.timeRemaining} />
 
       {/* Prompt Display */}
       <div className="w-full">
@@ -138,25 +139,17 @@ export default function PromptVoting({ gameCode }) {
 
         <motion.button
           onClick={handleVoteSkip}
-          disabled={hasVoted || isVoting}
-          className={`w-full py-4 px-6 rounded-lg font-semibold text-lg transition-all ${
-            hasVoted
+          disabled={voted}
+          aria-pressed={voted}
+          className={`w-full py-4 px-6 rounded-lg font-semibold text-lg transition-colors ${
+            voted
               ? "bg-green-600/30 text-green-400 cursor-default"
               : "bg-[#242424] text-white hover:bg-[#333] cursor-pointer"
           }`}
-          whileHover={hasVoted ? {} : { scale: 1.02 }}
-          whileTap={hasVoted ? {} : { scale: 0.98 }}
+          whileHover={voted ? {} : { scale: 1.02 }}
+          whileTap={voted ? {} : { scale: 0.98 }}
         >
-          {isVoting ? (
-            <span className="flex items-center justify-center gap-2">
-              <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
-              Voting...
-            </span>
-          ) : hasVoted ? (
-            "You voted to skip"
-          ) : (
-            `Skip Prompt (${votesNeeded} more needed)`
-          )}
+          {voted ? "You voted to skip" : `Skip Prompt (${votesNeeded} more needed)`}
         </motion.button>
 
         {/* Vote Progress */}
@@ -168,7 +161,7 @@ export default function PromptVoting({ gameCode }) {
             <motion.div
               className="h-full bg-green-500"
               initial={{ width: 0 }}
-              animate={{ width: `${(skipVotes / majorityNeeded) * 100}%` }}
+              animate={{ width: `${Math.min(1, skipVotes / majorityNeeded) * 100}%` }}
               transition={{ duration: 0.3 }}
             />
           </div>

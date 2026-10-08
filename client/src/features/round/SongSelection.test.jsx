@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 vi.mock("../../components/ScrollFade", () => ({ default: ({ children }) => <div>{children}</div> }));
 vi.mock("../../components/SongList", () => ({ default: () => null }));
 
-const { default: SongSelection } = await import("./SongSelection");
+const { SongSelectionView: SongSelection } = await import("./SongSelection");
 
 const base = { searchTerm: "song", onSearchChange: () => {}, searchResults: [], searchError: null, onSelectSong: () => {}, onShowPrompt: () => {} };
 

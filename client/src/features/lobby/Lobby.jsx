@@ -10,6 +10,7 @@ import SettingsPreview from "../../components/SettingsPreview";
 import AdSlot from "../../components/AdSlot";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 // GameContext removed - using RoomProvider's Convex queries directly
+import { usePendingAction } from "../../hooks/usePendingAction";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
@@ -68,6 +69,10 @@ function PrivateLobby() {
   const leaveGame = useMutation(api.game.rooms.leaveGame);
   const kickPlayer = useMutation(api.game.rooms.kickPlayer);
   const startGame = useMutation(api.game.flow.startGame);
+  const startAction = usePendingAction();
+  // Once the game has started the route guard moves on a render later; keep
+  // the button reading "Starting..." until then instead of flashing back.
+  const launching = startAction.pending || Boolean(room?.phase && room.phase !== "lobby");
   const logPromptPacksUsed = useMutation(api.analytics.logPromptPacksUsed);
 
   // Streamer-safe display state: lock indicator + hide-code. Both toggles live in
@@ -250,8 +255,17 @@ function PrivateLobby() {
       return;
     }
     if (!session?.playerId || !session?.connectionId) return;
-    const result = await startGame({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
-    if (result?.success === false) return;
+    let sent = false;
+    try {
+      await startAction.run(() => {
+        sent = true;
+        return startGame({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
+      });
+    } catch {
+      showToast("Couldn't start the game. Please try again.", "error");
+      return;
+    }
+    if (!sent) return; // a start was already in flight
     captureGameEvent("game_started", gameProperties({ code: gameCode, room, players, session }));
 
     // Track which prompt packs were used (fire-and-forget; never block game start)
@@ -360,8 +374,10 @@ function PrivateLobby() {
             <button
               className="green-btn fixed bottom-0 w-full text-black py-3 text-center"
               onClick={handleStartGame}
+              disabled={launching}
+              aria-busy={launching}
             >
-              Start Game
+              {launching ? "Starting..." : "Start Game"}
             </button>
           )}
         </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { usePendingAction } from "../hooks/usePendingAction";
 import { motion, AnimatePresence } from "framer-motion";
 // GameContext removed - using Convex queries directly
 // import { useSocket } from "../services/SocketProvider";
@@ -70,10 +71,20 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
   // Extract settings from room data
   const room = roomQuery?.room || roomQuery;
   const roomSettings = room?.settings;
-  const locked = !!room?.locked;
-  const handleToggleLock = async () => {
+  const lockAction = usePendingAction();
+  const saveAction = usePendingAction();
+  // The switch flips on the tap; the room's value takes over when the server answers.
+  const locked = lockAction.pending ? lockAction.pendingKey : !!room?.locked;
+  const handleToggleLock = () => {
     if (!playerId || !connectionId) return;
-    await setRoomLockMutation({ code: gameCode, playerId, connectionId, locked: !locked });
+    const next = !locked;
+    lockAction.run(async () => {
+      try {
+        await setRoomLockMutation({ code: gameCode, playerId, connectionId, locked: next });
+      } catch {
+        showToast("Couldn't update the room lock. Please try again.", "error");
+      }
+    }, next);
   };
 
   const [rounds, setRounds] = useState(roomSettings?.numberOfRounds ?? 3);
@@ -333,7 +344,10 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
 
     // Update settings in Convex and wait for completion (host only)
     try {
-      const result = await updateSettingsMutation({
+      let sent = false;
+      const result = await saveAction.run(() => {
+        sent = true;
+        return updateSettingsMutation({
         code: gameCode,
         playerId,
         connectionId,
@@ -343,7 +357,9 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
         selectedPrompts,
         enablePromptVoting,
         anonymousMode
+        });
       });
+      if (!sent) return; // a save was already in flight
       if (result?.success === false) {
         showToast(result.message || "Failed to update settings. Please try again.", "warning");
         return;
@@ -647,9 +663,10 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
 	              <button
 	                onClick={applySettings}
 	                className="w-full py-3 green-btn rounded-md text-black font-semibold transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-	                disabled={selectedPrompts.length < MIN_PROMPT_POOL_SIZE || selectedPrompts.length > MAX_PROMPT_POOL_SIZE}
+	                disabled={saveAction.pending || selectedPrompts.length < MIN_PROMPT_POOL_SIZE || selectedPrompts.length > MAX_PROMPT_POOL_SIZE}
+	                aria-busy={saveAction.pending}
 	              >
-	                Apply Settings
+	                {saveAction.pending ? "Saving..." : "Apply Settings"}
 	              </button>
 	            )}
 	            <button

@@ -147,7 +147,14 @@ export default function RoundWinner() {
     if (isTransitioning || !session?.playerId || !session?.connectionId) return;
     setIsTransitioning(true);
     setGameTransition(true);
-    await nextRoundMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
+    try {
+      await nextRoundMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
+    } catch (error) {
+      // Let the host try again instead of leaving the button stuck disabled.
+      console.error("Failed to advance round:", error);
+      setIsTransitioning(false);
+      setGameTransition(false);
+    }
   };
 
   // Use state to prevent button text flickering
