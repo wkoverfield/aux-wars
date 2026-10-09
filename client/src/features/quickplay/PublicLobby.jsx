@@ -81,6 +81,7 @@ function OneVOneCard({ accepted, busy, onAccept, onDecline }) {
       <div className="flex gap-3">
         <button
           type="button"
+          data-vital="one-v-one"
           onClick={onAccept}
           disabled={accepted || busy}
           aria-pressed={accepted}
@@ -90,6 +91,7 @@ function OneVOneCard({ accepted, busy, onAccept, onDecline }) {
         </button>
         <button
           type="button"
+          data-vital="one-v-one"
           onClick={onDecline}
           disabled={busy}
           className="rounded-full py-2 px-4 flex-1 font-semibold text-sm border border-gray-500 text-white hover:border-white transition-colors disabled:opacity-70"
@@ -116,6 +118,7 @@ function PlayerRow({ player, isMe, startVoted, wants1v1, tally, canKick, kickVot
         {canKick && (
           <button
             type="button"
+            data-vital="kick"
             onClick={onKick}
             disabled={kickVoted}
             aria-pressed={kickVoted}
@@ -264,7 +267,7 @@ export default function PublicLobby() {
 
   return (
     <>
-      <div className="player-lobby h-screen flex flex-col w-full text-white">
+      <div data-vital="qp-lobby" className="player-lobby h-screen flex flex-col w-full text-white">
         <header className="flex justify-between items-center mt-10 md:mt-12 w-full max-w-5xl mx-auto p-5">
           <div className="flex items-center gap-2">
             <img src={logo} alt="Logo" className="min-w-10" />
@@ -290,6 +293,7 @@ export default function PublicLobby() {
               <div className="flex flex-col gap-1">
                 <input
                   id="qp-name"
+                  data-vital="name"
                   type="text"
                   className="w-full rounded-md"
                   maxLength={50}
@@ -316,6 +320,7 @@ export default function PublicLobby() {
                 <motion.div whileHover={{ scale: 1.02 }} transition={{ type: "spring", stiffness: 300, damping: 15 }}>
                   <button
                     type="button"
+                    data-vital="start-now"
                     onClick={handleStartNow}
                     aria-pressed={iVotedStart}
                     className={

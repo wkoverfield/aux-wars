@@ -189,6 +189,31 @@ describe("search_failed", () => {
 });
 
 describe("web_vital and client errors", () => {
+  test("sanitizeWebVital keeps INP attribution only in its known shapes", () => {
+    expect(
+      sanitizeWebVital({
+        name: "INP", value: 312.4, rating: "poor", route: "/lobby/:code/round", deviceClass: "mobile",
+        target: "rating>record:button", interactionType: "pointer",
+        inputDelay: 12.6, processing: 250.2, presentation: 49.9, script: "app",
+      })
+    ).toEqual({
+      name: "INP", value: 312, rating: "poor", route: "/lobby/:code/round", deviceClass: "mobile",
+      target: "rating>record:button", interactionType: "pointer",
+      inputDelay: 13, processing: 250, presentation: 50, script: "app",
+    });
+    const junk = sanitizeWebVital({
+      name: "INP", value: 300, target: "Velvet Bassline's button", interactionType: "hover",
+      inputDelay: -1, processing: Number.NaN, script: "https://evil.example/x.js",
+    });
+    expect(junk).not.toHaveProperty("target");
+    expect(junk).not.toHaveProperty("interactionType");
+    expect(junk).not.toHaveProperty("inputDelay");
+    expect(junk).not.toHaveProperty("processing");
+    expect(junk).not.toHaveProperty("script");
+    // Attribution belongs to INP only.
+    expect(sanitizeWebVital({ name: "LCP", value: 2000, target: "home:img" })).not.toHaveProperty("target");
+  });
+
   test("sanitizeWebVital keeps known fields and rounds values", () => {
     expect(
       sanitizeWebVital({

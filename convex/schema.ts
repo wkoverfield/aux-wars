@@ -64,6 +64,35 @@ export const dailyMetricsFields = {
   ),
   clientErrors: v.optional(v.number()), // uncaught errors / rejections (max 3 per page load)
   clientErrorBoundaries: v.optional(v.number()), // React error boundary catches
+  // INP samples by route and interaction target, most slow samples first
+  // (see summarizeSlowInteractions). Optional: older rows lack them.
+  slowInteractions: v.optional(
+    v.array(
+      v.object({
+        route: v.string(),
+        target: v.string(),
+        samples: v.number(),
+        slow: v.number(),
+        p75: v.number(),
+        inputDelay: v.union(v.number(), v.null()),
+        processing: v.union(v.number(), v.null()),
+        presentation: v.union(v.number(), v.null()),
+        mobileShare: v.number(),
+        script: v.union(v.string(), v.null()),
+      })
+    )
+  ),
+  // Errors by kind ("error" | "boundary"), class name and route.
+  clientErrorKinds: v.optional(
+    v.array(
+      v.object({
+        kind: v.union(v.literal("error"), v.literal("boundary")),
+        name: v.string(),
+        route: v.string(),
+        count: v.number(),
+      })
+    )
+  ),
 };
 
 const retentionPoint = v.object({ cohort: v.number(), returned: v.number() });

@@ -191,6 +191,13 @@ describe("Speed card", () => {
                 { metric: "INP", deviceClass: "all", p75: 180, samples: 9 },
               ],
               errors: { client: 5, boundary: 1 },
+              slowInteractions: [
+                {
+                  route: "/lobby/:code/round", target: "rating>record:img", samples: 12, slow: 7, p75: 340,
+                  inputDelay: 20, processing: 260, presentation: 60, mobileShare: 0.9, script: "app",
+                },
+              ],
+              errorKinds: [{ kind: "error", name: "ChunkLoadError", route: "/lobby/:code", count: 4 }],
             },
           }
         : {},
@@ -204,5 +211,10 @@ describe("Speed card", () => {
     expect(screen.getByText("180ms")).toBeTruthy();
     expect(screen.getByText("Uncaught errors").nextSibling.textContent).toBe("5");
     expect(screen.getByText("Error screens shown").nextSibling.textContent).toBe("1");
+    expect(screen.getByText("rating > record (img)")).toBeTruthy();
+    expect(screen.getByText("340ms").className).toContain("text-amber-300");
+    expect(screen.getByText("7/12")).toBeTruthy();
+    expect(screen.getByText("Our tap handler (260ms)")).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Errors by type" }).textContent).toContain("ChunkLoadError on /lobby/:code4");
   });
 });

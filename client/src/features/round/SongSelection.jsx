@@ -58,6 +58,7 @@ export function SongSelectionView({
 
   return (
     <div
+      data-vital="song-select"
       className={`song-selection-view flex flex-col h-screen w-full ${
         showPromptModal ? "blur-sm" : ""
       }`}

@@ -278,6 +278,7 @@ function PrivateLobby() {
   return (
     <>
       <div
+        data-vital="lobby"
         className={`player-lobby h-screen flex flex-col w-full ${
           showModal ? "blur-sm" : ""
         }`}
@@ -342,6 +343,7 @@ function PrivateLobby() {
                         ? "green-btn rounded-full py-2 px-8 text-black font-semibold w-full max-w-md"
                         : "bg-white rounded-full py-2 px-8 text-black w-full max-w-md font-semibold"
                     }
+                    data-vital="ready"
                     onClick={handleReady}
                   >
                     <p className="text-sm md:text-base">
@@ -373,6 +375,7 @@ function PrivateLobby() {
           {isHost && allPlayersReady && players.length > 1 && (
             <button
               className="green-btn fixed bottom-0 w-full text-black py-3 text-center"
+              data-vital="start"
               onClick={handleStartGame}
               disabled={launching}
               aria-busy={launching}

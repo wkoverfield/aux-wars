@@ -3,7 +3,14 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import schema from "./schema";
 import { api } from "./_generated/api";
 import presenceComponent from "@convex-dev/presence/test";
-import { constantTimeEqual, isValidAdminKey, summarizeQuickPlay, summarizeSpeed } from "./stats";
+import {
+  constantTimeEqual,
+  isValidAdminKey,
+  mergeErrorKinds,
+  mergeSlowInteractions,
+  summarizeQuickPlay,
+  summarizeSpeed,
+} from "./stats";
 import { addDays, dstr } from "./dailyMetrics";
 
 const modules = import.meta.glob(["./**/*.ts", "./**/*.js", "!./**/*.test.ts", "!./**/*.d.ts"]);
@@ -217,6 +224,8 @@ describe("stats queries", () => {
     expect(d.speed).toEqual({
       vitals: [{ metric: "LCP", deviceClass: "all", p75: 3000, samples: 2 }],
       errors: { client: 2, boundary: 0 },
+      slowInteractions: [],
+      errorKinds: [],
     });
     expect(d.today).toMatchObject({ date: today, partial: true, songsSubmitted: null, gamesStarted: 0 });
     // Rows rolled up before Quick Play existed read as zeros, never fabricated.
@@ -267,7 +276,12 @@ describe("stats queries", () => {
     });
     expect(d.today).toMatchObject({ quickPlayClicks: 4, quickPlayMedianWaitMs: 40_000, webVitals: [] });
     // Today's errors count live; today's vitals wait for the rollup.
-    expect(d.speed).toEqual({ vitals: [], errors: { client: 1, boundary: 0 } });
+    expect(d.speed).toEqual({
+      vitals: [],
+      errors: { client: 1, boundary: 0 },
+      slowInteractions: [],
+      errorKinds: [{ kind: "error", name: "TypeError", route: "/", count: 1 }],
+    });
   });
 });
 
@@ -305,5 +319,43 @@ describe("summarizeSpeed", () => {
 
   test("empty window", () => {
     expect(summarizeSpeed([])).toEqual({ vitals: [], errors: { client: 0, boundary: 0 } });
+  });
+});
+
+describe("mergeSlowInteractions", () => {
+  const group = (over: Record<string, unknown>) => ({
+    route: "/lobby/:code/round", target: "rating>record:button", samples: 1, slow: 1, p75: 300,
+    inputDelay: 10, processing: 200, presentation: 90, mobileShare: 1, script: "app", ...over,
+  });
+
+  test("adds counts and sample-weights p75, phases and mobile share across days", () => {
+    const out = mergeSlowInteractions([
+      { slowInteractions: [group({ samples: 3, slow: 2, p75: 400, mobileShare: 1 })] },
+      { slowInteractions: [group({ samples: 1, slow: 0, p75: 100, mobileShare: 0, inputDelay: null, processing: null, presentation: null })] },
+      { slowInteractions: [group({ target: "song-select>search:input", samples: 2, slow: 2, p75: 250, script: "youtube" })] },
+      {},
+    ]);
+    expect(out).toEqual([
+      {
+        route: "/lobby/:code/round", target: "rating>record:button", samples: 4, slow: 2, p75: 325,
+        inputDelay: 10, processing: 200, presentation: 90, mobileShare: 0.75, script: "app",
+      },
+      {
+        route: "/lobby/:code/round", target: "song-select>search:input", samples: 2, slow: 2, p75: 250,
+        inputDelay: 10, processing: 200, presentation: 90, mobileShare: 1, script: "youtube",
+      },
+    ]);
+  });
+
+  test("mergeErrorKinds sums the same kind, name and route", () => {
+    expect(
+      mergeErrorKinds([
+        { clientErrorKinds: [{ kind: "error", name: "ScriptError", route: "/", count: 2 }] },
+        { clientErrorKinds: [{ kind: "error", name: "ScriptError", route: "/", count: 3 }, { kind: "boundary", name: "TypeError", route: "/", count: 1 }] },
+      ])
+    ).toEqual([
+      { kind: "error", name: "ScriptError", route: "/", count: 5 },
+      { kind: "boundary", name: "TypeError", route: "/", count: 1 },
+    ]);
   });
 });

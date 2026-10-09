@@ -10,6 +10,7 @@ import {
   dstr,
   percentile,
   summarizeVitals,
+  summarizeSlowInteractions,
   type DayEvents,
   type DayInputs,
   type SlimEvent,
@@ -36,6 +37,8 @@ function emptyEvents(): DayEvents {
       quickplay_matched: [],
       quickplay_left_waiting: [],
       web_vital: [],
+      client_error: [],
+      client_error_boundary: [],
     },
     counts: {
       game_created: 0,
@@ -45,8 +48,6 @@ function emptyEvents(): DayEvents {
       quickplay_clicked: 0,
       quickplay_1v1_offered: 0,
       quickplay_1v1_accepted: 0,
-      client_error: 0,
-      client_error_boundary: 0,
     },
   };
 }
@@ -100,11 +101,44 @@ describe("web vitals rollup", () => {
     ]);
   });
 
+  test("summarizeSlowInteractions groups INP by route and target, most slow samples first", () => {
+    const inp = (value: number, target: string | undefined, extra: Record<string, unknown> = {}) => ({
+      name: "INP", value, route: "/lobby/:code/round", deviceClass: "mobile", target, ...extra,
+    });
+    const rows = summarizeSlowInteractions([
+      inp(400, "rating>record:button", { inputDelay: 10, processing: 300, presentation: 90, script: "app" }),
+      inp(300, "rating>record:button", { inputDelay: 20, processing: 200, presentation: 80, script: "app" }),
+      inp(120, "rating>record:button"),
+      inp(250, "song-select>search:input", { deviceClass: "desktop", inputDelay: 5, processing: 5, presentation: 240, script: "youtube" }),
+      inp(90, undefined),
+      { name: "LCP", value: 5000, route: "/" },
+    ]);
+    expect(rows).toEqual([
+      {
+        route: "/lobby/:code/round", target: "rating>record:button", samples: 3, slow: 2, p75: 400,
+        inputDelay: 15, processing: 250, presentation: 85, mobileShare: 1, script: "app",
+      },
+      {
+        route: "/lobby/:code/round", target: "song-select>search:input", samples: 1, slow: 1, p75: 250,
+        inputDelay: 5, processing: 5, presentation: 240, mobileShare: 0, script: "youtube",
+      },
+      {
+        route: "/lobby/:code/round", target: "unknown", samples: 1, slow: 0, p75: 90,
+        inputDelay: null, processing: null, presentation: null, mobileShare: 1, script: null,
+      },
+    ]);
+  });
+
   test("computeDayMetrics carries vitals and client error counts", () => {
     const ev = emptyEvents();
     ev.detail.web_vital = [vital("FCP", 1200, "mobile")];
-    ev.counts.client_error = 4;
-    ev.counts.client_error_boundary = 1;
+    ev.detail.client_error = [
+      { name: "ScriptError", route: "/" },
+      { name: "ScriptError", route: "/" },
+      { name: "TypeError", route: "/lobby/:code/round" },
+      { name: "ScriptError", route: "/" },
+    ];
+    ev.detail.client_error_boundary = [{ name: "TypeError", route: "/lobby/:code/round" }];
     expect(computeDayMetrics(inputs({ events: ev }))).toMatchObject({
       webVitals: [
         { metric: "FCP", deviceClass: "all", p75: 1200, samples: 1 },
@@ -112,6 +146,11 @@ describe("web vitals rollup", () => {
       ],
       clientErrors: 4,
       clientErrorBoundaries: 1,
+      clientErrorKinds: [
+        { kind: "error", name: "ScriptError", route: "/", count: 3 },
+        { kind: "error", name: "TypeError", route: "/lobby/:code/round", count: 1 },
+        { kind: "boundary", name: "TypeError", route: "/lobby/:code/round", count: 1 },
+      ],
     });
     expect(computeDayMetrics(inputs())).toMatchObject({ webVitals: [], clientErrors: 0, clientErrorBoundaries: 0 });
   });

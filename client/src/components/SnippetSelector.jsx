@@ -148,7 +148,7 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
   };
 
   return (
-    <div className="snippet-modal z-50 fixed inset-0 flex items-center justify-center p-4">
+    <div data-vital="snippet" className="snippet-modal z-50 fixed inset-0 flex items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}

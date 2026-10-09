@@ -108,7 +108,7 @@ export default function PromptVoting({ gameCode }) {
   const votesNeeded = Math.max(0, majorityNeeded - skipVotes);
 
   return (
-    <div className="flex flex-col items-center justify-center gap-8 max-w-4xl mx-auto px-4 min-h-[70vh]">
+    <div data-vital="prompt-vote" className="flex flex-col items-center justify-center gap-8 max-w-4xl mx-auto px-4 min-h-[70vh]">
       {/* Timer */}
       <VoteTimer key={displayedPrompt} seconds={votingStatus.timeRemaining} />
 
@@ -138,6 +138,7 @@ export default function PromptVoting({ gameCode }) {
         </p>
 
         <motion.button
+          data-vital="skip"
           onClick={handleVoteSkip}
           disabled={voted}
           aria-pressed={voted}

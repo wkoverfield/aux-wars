@@ -18,7 +18,7 @@ export default function WaitingScreen({ completedCount, totalCount, message }) {
   const playerIndicators = Array.from({ length: totalCount || 0 }, (_, i) => i < completedCount);
   
   return (
-    <div className="waiting-screen flex flex-col items-center justify-center min-h-[80vh] w-full px-4">
+    <div data-vital="waiting" className="waiting-screen flex flex-col items-center justify-center min-h-[80vh] w-full px-4">
       <div className="text-center p-4 md:p-8 max-w-md">
         <h2 className="text-2xl md:text-3xl font-bold mb-4 md:mb-6 text-white">
           Waiting for other players

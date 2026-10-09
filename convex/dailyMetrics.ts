@@ -53,6 +53,8 @@ export const DETAIL_EVENT_TYPES = [
   "quickplay_matched",
   "quickplay_left_waiting",
   "web_vital",
+  "client_error",
+  "client_error_boundary",
 ] as const;
 export const COUNT_EVENT_TYPES = [
   "game_created",
@@ -62,8 +64,6 @@ export const COUNT_EVENT_TYPES = [
   "quickplay_clicked",
   "quickplay_1v1_offered",
   "quickplay_1v1_accepted",
-  "client_error",
-  "client_error_boundary",
 ] as const;
 type DetailType = (typeof DETAIL_EVENT_TYPES)[number];
 type CountType = (typeof COUNT_EVENT_TYPES)[number];
@@ -82,6 +82,13 @@ export type SlimEvent = {
   name?: string;
   value?: number;
   deviceClass?: string;
+  route?: string;
+  target?: string;
+  interactionType?: string;
+  inputDelay?: number;
+  processing?: number;
+  presentation?: number;
+  script?: string;
 };
 
 export function slimEvent(metadata: unknown): SlimEvent {
@@ -99,6 +106,12 @@ export function slimEvent(metadata: unknown): SlimEvent {
   if (typeof m.name === "string") out.name = m.name;
   if (typeof m.value === "number") out.value = m.value;
   if (typeof m.deviceClass === "string") out.deviceClass = m.deviceClass;
+  for (const k of ["route", "target", "interactionType", "script"] as const) {
+    if (typeof m[k] === "string") out[k] = m[k] as string;
+  }
+  for (const k of ["inputDelay", "processing", "presentation"] as const) {
+    if (typeof m[k] === "number") out[k] = m[k] as number;
+  }
   return out;
 }
 
@@ -185,6 +198,89 @@ export function summarizeVitals(events: SlimEvent[]): VitalStat[] {
     }
   }
   return out;
+}
+
+/** An INP above this is not "good" (web.dev threshold). */
+export const INP_GOOD_MS = 200;
+const SLOW_INTERACTIONS_KEPT = 8;
+
+export type SlowInteraction = {
+  route: string;
+  target: string;
+  samples: number;
+  slow: number; // samples above INP_GOOD_MS
+  p75: number;
+  inputDelay: number | null; // mean ms of the samples that carried phases
+  processing: number | null;
+  presentation: number | null;
+  mobileShare: number; // 0-1
+  script: string | null; // most common longest-script source
+};
+
+/**
+ * INP samples grouped by route and interaction target, the groups with the
+ * most slow samples first. Samples from clients that sent no target group
+ * under "unknown".
+ */
+export function summarizeSlowInteractions(events: SlimEvent[]): SlowInteraction[] {
+  type Acc = { route: string; target: string; values: number[]; phases: number[][]; mobile: number; scripts: Map<string, number> };
+  const groups = new Map<string, Acc>();
+  for (const e of events) {
+    if (e.name !== "INP" || typeof e.value !== "number" || !Number.isFinite(e.value)) continue;
+    const route = e.route ?? "other";
+    const target = e.target ?? "unknown";
+    const key = `${route}|${target}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { route, target, values: [], phases: [], mobile: 0, scripts: new Map() };
+      groups.set(key, g);
+    }
+    g.values.push(e.value);
+    if (typeof e.inputDelay === "number" && typeof e.processing === "number" && typeof e.presentation === "number") {
+      g.phases.push([e.inputDelay, e.processing, e.presentation]);
+    }
+    if (e.deviceClass === "mobile") g.mobile += 1;
+    if (e.script) g.scripts.set(e.script, (g.scripts.get(e.script) ?? 0) + 1);
+  }
+  const mean = (rows: number[][], i: number) =>
+    rows.length > 0 ? Math.round(rows.reduce((sum, r) => sum + r[i], 0) / rows.length) : null;
+  return [...groups.values()]
+    .map((g) => {
+      g.values.sort((a, b) => a - b);
+      const script = [...g.scripts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+      return {
+        route: g.route,
+        target: g.target,
+        samples: g.values.length,
+        slow: g.values.filter((x) => x > INP_GOOD_MS).length,
+        p75: percentile(g.values, 0.75)!,
+        inputDelay: mean(g.phases, 0),
+        processing: mean(g.phases, 1),
+        presentation: mean(g.phases, 2),
+        mobileShare: round(g.mobile / g.values.length, 2),
+        script,
+      };
+    })
+    .sort((a, b) => b.slow - a.slow || b.p75 - a.p75)
+    .slice(0, SLOW_INTERACTIONS_KEPT);
+}
+
+export type ErrorKind = { kind: "error" | "boundary"; name: string; route: string; count: number };
+
+/** Uncaught errors and boundary catches counted by class name and route. */
+export function summarizeErrorKinds(errors: SlimEvent[], boundary: SlimEvent[]): ErrorKind[] {
+  const counts = new Map<string, ErrorKind>();
+  const add = (kind: ErrorKind["kind"], e: SlimEvent) => {
+    const name = e.name ?? "Error";
+    const route = e.route ?? "other";
+    const key = `${kind}|${name}|${route}`;
+    const cur = counts.get(key) ?? { kind, name, route, count: 0 };
+    cur.count += 1;
+    counts.set(key, cur);
+  };
+  for (const e of errors) add("error", e);
+  for (const e of boundary) add("boundary", e);
+  return [...counts.values()].sort((a, b) => b.count - a.count).slice(0, 12);
 }
 
 export function normalizeSearch(label: string): string {
@@ -337,8 +433,10 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
     quickPlay1v1Offered: counts.quickplay_1v1_offered ?? 0,
     quickPlay1v1Accepted: counts.quickplay_1v1_accepted ?? 0,
     webVitals: summarizeVitals(detail.web_vital ?? []),
-    clientErrors: counts.client_error ?? 0,
-    clientErrorBoundaries: counts.client_error_boundary ?? 0,
+    slowInteractions: summarizeSlowInteractions(detail.web_vital ?? []),
+    clientErrors: (detail.client_error ?? []).length,
+    clientErrorBoundaries: (detail.client_error_boundary ?? []).length,
+    clientErrorKinds: summarizeErrorKinds(detail.client_error ?? [], detail.client_error_boundary ?? []),
   };
 }
 

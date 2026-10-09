@@ -21,7 +21,7 @@ export default function SearchBar({
   // Readonly mode: Clean text display without icon
   if (readOnly) {
     return (
-      <div className="search-area flex justify-center w-full">
+      <div data-vital="search" className="search-area flex justify-center w-full">
         <div className="search-bar flex items-center justify-center rounded-md">
           <div className="text-white opacity-50 text-center break-words text-lg md:text-xl w-full">
             {value}
@@ -33,7 +33,7 @@ export default function SearchBar({
 
   // Editable mode: Horizontal layout with search input
   return (
-    <div className="search-area flex justify-center w-full">
+    <div data-vital="search" className="search-area flex justify-center w-full">
       <div className="search-bar flex gap-2.5 rounded-md">
         <img src={searchIcon} alt="Search Icon" className="w-5 flex-shrink-0" />
         <input
