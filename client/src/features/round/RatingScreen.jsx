@@ -142,7 +142,7 @@ const RatingScreen = ({
   }, [songToRate?.songId]);
 
   return (
-    <div className="h-[100svh] w-full flex flex-col">
+    <div data-vital="rating" className="h-[100svh] w-full flex flex-col">
     <ScrollFade className="flex-1 min-h-0 w-full" contentClassName="min-h-full flex flex-col items-center justify-center w-full py-4 px-2">
         {/* Prompt at the top */}
         <div className="w-full mb-2 sm:mb-4 overflow-x-auto">
@@ -200,6 +200,7 @@ const RatingScreen = ({
             <div className="flex items-center gap-3 rounded-[8px] border border-white/10 bg-[#111]/90 px-3 py-3">
               <button
                 type="button"
+                data-vital="play"
                 onClick={handleTogglePlayback}
                 aria-label={isPlaying ? 'Pause clip' : 'Play clip'}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#68d570] text-black transition hover:bg-[#7de884] active:scale-95"
@@ -266,6 +267,7 @@ const RatingScreen = ({
             {[...Array(5)].map((_, index) => (
               <img
                 key={index}
+                data-vital="record"
                 src={record}
                 alt={`rate this song ${index + 1} records`}
                 className={`w-[48px] sm:w-[56px] m-2 sm:m-2.5 cursor-pointer transition-opacity duration-100 active:scale-95 ${
@@ -293,6 +295,7 @@ const RatingScreen = ({
         <div className="shrink-0 w-full px-2 pt-2 pb-4">
           <div className="w-full max-w-xs mx-auto">
             <button
+              data-vital="submit"
               className={`bg-[#68d570] text-black font-bold w-full h-[52px] rounded-full cursor-pointer transition-all hover:scale-105 hover:bg-[#7de884] ${
                 selectedRating < 0 || hasSubmitted ? 'opacity-50 cursor-not-allowed' : ''
               }`}

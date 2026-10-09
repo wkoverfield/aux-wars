@@ -53,6 +53,7 @@ export default function QuickPlayLine({ visitorId }) {
   return (
     <button
       type="button"
+      data-vital="quick-play"
       onClick={handleClick}
       disabled={joining}
       aria-live="polite"

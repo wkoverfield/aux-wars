@@ -12,6 +12,7 @@ import {
   fmtPct,
   fmtShortDate,
   fmtWait,
+  fmtInteractionTarget,
   fmtVital,
   normalizeDashboard,
   normalizeLive,
@@ -368,10 +369,63 @@ function Speed({ speed, windowDays }) {
       ) : (
         <EmptyNote>No speed samples yet. About 1 in 4 page loads reports, and days show up after their nightly rollup.</EmptyNote>
       )}
+      {speed.slowInteractions.length > 0 && (
+        <div className="mt-6">
+          <p className="text-xs uppercase tracking-wide text-gray-400 font-semibold mb-2">Slowest taps and keystrokes (INP)</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm tabular-nums">
+              <thead>
+                <tr className="text-xs text-gray-400">
+                  <th scope="col" className="text-left font-semibold pb-2 pr-3">Where</th>
+                  <th scope="col" className="text-right font-semibold pb-2 px-3">p75</th>
+                  <th scope="col" className="text-right font-semibold pb-2 px-3">Slow</th>
+                  <th scope="col" className="text-left font-semibold pb-2 pl-3">Most time in</th>
+                </tr>
+              </thead>
+              <tbody>
+                {speed.slowInteractions.map((r) => (
+                  <tr key={`${r.route}|${r.target}`} className="border-t border-white/5">
+                    <th scope="row" className="text-left font-normal py-2 pr-3">
+                      <span className="text-white">{fmtInteractionTarget(r.target)}</span>
+                      <span className="block text-xs text-gray-500">
+                        {r.route}
+                        {r.mobileShare !== null ? `, ${fmtPct(r.mobileShare)} mobile` : ""}
+                        {r.script && r.script !== "app" ? `, ${r.script} script` : ""}
+                      </span>
+                    </th>
+                    <td className={`text-right py-2 px-3 font-semibold ${RATING_CLASS[r.rating] ?? "text-gray-500"}`}>
+                      {fmtVital("INP", r.p75)}
+                    </td>
+                    <td className="text-right py-2 px-3 text-gray-300">
+                      {fmtInt(r.slow)}/{fmtInt(r.samples)}
+                    </td>
+                    <td className="text-left py-2 pl-3 text-gray-300">
+                      {r.phase ? `${r.phase.label} (${fmtVital("INP", r.phase.ms)})` : "Not reported"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-5 mt-5">
         <Stat label="Uncaught errors" value={fmtInt(speed.errors.client)} detail="Max 3 per page load, includes today" />
         <Stat label="Error screens shown" value={fmtInt(speed.errors.boundary)} detail="Crash fallback rendered" />
       </div>
+      {speed.errorKinds.length > 0 && (
+        <ul className="mt-4 text-sm space-y-1" aria-label="Errors by type">
+          {speed.errorKinds.map((e) => (
+            <li key={`${e.kind}|${e.name}|${e.route}`} className="flex justify-between gap-3 tabular-nums">
+              <span className="text-gray-300">
+                {e.name}
+                <span className="text-gray-500"> on {e.route}{e.kind === "boundary" ? ", error screen" : ""}</span>
+              </span>
+              <span className="text-white font-semibold">{fmtInt(e.count)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   );
 }

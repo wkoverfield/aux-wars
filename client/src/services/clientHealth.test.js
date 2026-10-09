@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("web-vitals", () => ({
+const inpOpts = vi.fn();
+vi.mock("web-vitals/attribution", () => ({
   onLCP: (cb) => cb({ name: "LCP", value: 2345.6, rating: "good" }),
-  onINP: () => {},
+  onINP: (_cb, opts) => inpOpts(opts),
   onCLS: (cb) => cb({ name: "CLS", value: 0.12345, rating: "needs-improvement" }),
   onFCP: () => {},
   onTTFB: () => {},
@@ -13,6 +14,8 @@ import {
   deviceClass,
   errorName,
   initClientHealth,
+  interactionLabel,
+  scriptSource,
   reportBoundaryError,
   reportClientError,
   routePattern,
@@ -63,6 +66,46 @@ describe("errorName", () => {
     expect(errorName("a string reason", "UnhandledRejection")).toBe("UnhandledRejection");
     expect(errorName({ name: "has spaces in it" })).toBe("Error");
   });
+
+  it("names Convex, stale-chunk and network failures by kind, not message", () => {
+    expect(errorName(new Error("[CONVEX M(game/flow:startGame)] [Request ID: abc] Server Error"))).toBe("ConvexServerError");
+    expect(errorName(new TypeError("Failed to fetch dynamically imported module: https://x/assets/a.js"))).toBe("ChunkLoadError");
+    expect(errorName(new TypeError("Importing a module script failed."))).toBe("ChunkLoadError");
+    expect(errorName(new TypeError("Failed to fetch"))).toBe("NetworkError");
+    expect(errorName(new TypeError("Load failed"))).toBe("NetworkError");
+    expect(errorName(new TypeError("x is undefined"))).toBe("TypeError");
+  });
+});
+
+describe("interactionLabel", () => {
+  it("joins up to two data-vital names with the control's tag", () => {
+    document.body.innerHTML = `
+      <div data-vital="round"><div data-vital="rating"><div data-vital="record">
+        <button><span id="hit">Velvet Bassline</span></button>
+      </div></div></div>
+      <div data-vital="lobby"><input id="name" /></div>
+      <p id="plain">text</p>
+      <div data-vital="Bad Name!"><a id="link">x</a></div>`;
+    expect(interactionLabel(document.getElementById("hit"))).toBe("rating>record:button");
+    expect(interactionLabel(document.getElementById("hit").firstChild)).toBe("rating>record:button");
+    expect(interactionLabel(document.getElementById("name"))).toBe("lobby:input");
+    expect(interactionLabel(document.getElementById("plain"))).toBe(":p");
+    expect(interactionLabel(document.getElementById("link"))).toBe(":a");
+    expect(interactionLabel(null)).toBeUndefined();
+    document.body.innerHTML = "";
+  });
+});
+
+describe("scriptSource", () => {
+  it("buckets the longest script's URL", () => {
+    const origin = "https://aux-wars.com";
+    expect(scriptSource("https://aux-wars.com/assets/index-abc.js", origin)).toBe("app");
+    expect(scriptSource("https://www.youtube.com/s/player/x/base.js", origin)).toBe("youtube");
+    expect(scriptSource("https://i.ytimg.com/x.js", origin)).toBe("youtube");
+    expect(scriptSource("chrome-extension://abc/content.js", origin)).toBe("extension");
+    expect(scriptSource("https://pagead2.googlesyndication.com/x.js", origin)).toBe("third-party");
+    expect(scriptSource("", origin)).toBeUndefined();
+  });
 });
 
 describe("vitalMetadata", () => {
@@ -84,6 +127,35 @@ describe("vitalMetadata", () => {
       route: "/lobby/:code/round",
       deviceClass: "desktop",
     });
+  });
+});
+
+describe("INP attribution", () => {
+  it("adds target, interaction type, phases and script source to INP only", () => {
+    window.history.replaceState(null, "", "/lobby/XYZ999/round");
+    const attribution = {
+      interactionTarget: "rating>record:button",
+      interactionType: "pointer",
+      inputDelay: 12.4,
+      processingDuration: 250.6,
+      presentationDelay: 40.2,
+      longestScript: { entry: { sourceURL: `${location.origin}/assets/index.js` } },
+    };
+    expect(vitalMetadata({ name: "INP", value: 303, rating: "poor", attribution }, { userAgent: "Android Mobi" })).toEqual({
+      name: "INP",
+      value: 303,
+      rating: "poor",
+      route: "/lobby/:code/round",
+      deviceClass: "mobile",
+      target: "rating>record:button",
+      interactionType: "pointer",
+      inputDelay: 12,
+      processing: 251,
+      presentation: 40,
+      script: "app",
+    });
+    expect(vitalMetadata({ name: "LCP", value: 2000, rating: "good", attribution: { target: "img" } }, { userAgent: "" }))
+      .not.toHaveProperty("target");
   });
 });
 
@@ -115,6 +187,12 @@ describe("error reporting", () => {
 });
 
 describe("web vitals sampling", () => {
+  it("passes our label builder to onINP", async () => {
+    initClientHealth(fakeClient(), { sampleRate: 1, random: () => 0 });
+    await vi.waitFor(() => expect(inpOpts).toHaveBeenCalled());
+    expect(inpOpts.mock.calls.at(-1)[0]).toEqual({ generateTarget: interactionLabel });
+  });
+
   it("reports vitals when the load is sampled", async () => {
     const client = fakeClient();
     initClientHealth(client, { random: () => 0.1 });

@@ -61,6 +61,7 @@ export default function NameInput({ serverName, initialName = "", onSave, onDraf
 
   return (
     <input
+      data-vital="name"
       type="text"
       className="w-full rounded-md"
       placeholder="Enter your nickname"

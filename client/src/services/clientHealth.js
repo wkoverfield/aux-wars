@@ -58,9 +58,26 @@ function send(eventType, metadata) {
   }
 }
 
-/** Error class name only: never the message or stack. */
+// Generic errors are told apart by their message so the report says what
+// failed. Only the resulting label is sent, never the message itself.
+const ERROR_KINDS = [
+  // A Convex query, mutation or action failed on the server.
+  { name: "ConvexServerError", test: /^\[CONVEX [QMA]\(|\[Request ID: / },
+  // A lazy chunk from an older deploy is gone.
+  { name: "ChunkLoadError", test: /dynamically imported module|Importing a module script failed|error loading dynamically imported/i },
+  // fetch() itself failed (offline, blocked, CORS).
+  { name: "NetworkError", test: /^(Failed to fetch|Load failed|NetworkError when attempting to fetch)/ },
+];
+
+/** Error class name only (or a kind derived from the message): never the message or stack. */
 export function errorName(error, fallback = "Error") {
-  const name = error && typeof error === "object" ? error.name : undefined;
+  const isObject = error && typeof error === "object";
+  const message = isObject && typeof error.message === "string" ? error.message : "";
+  if (message) {
+    const kind = ERROR_KINDS.find((k) => k.test.test(message));
+    if (kind) return kind.name;
+  }
+  const name = isObject ? error.name : undefined;
   return typeof name === "string" && /^[A-Za-z_$][A-Za-z0-9_$]{0,40}$/.test(name) ? name : fallback;
 }
 
@@ -83,7 +100,37 @@ export function roundVital(name, value) {
   return name === "CLS" ? Math.round(value * 1000) / 1000 : Math.round(value);
 }
 
-/** Builds the web_vital metadata for a web-vitals Metric. */
+const VITAL_LABEL_RE = /^[a-z0-9-]{1,24}$/;
+const CONTROL_SELECTOR = "button, a, input, textarea, select, label, [role=button]";
+
+/**
+ * Label for an interaction target: up to two enclosing data-vital names
+ * (outermost first) and the tag of the control that was hit, e.g.
+ * "rating>record:button". Built from the app's own markup only, so it never
+ * carries page text such as player names or song titles.
+ */
+export function interactionLabel(node) {
+  const el = node && node.nodeType === 1 ? node : node?.parentElement;
+  if (!el || typeof el.closest !== "function") return undefined;
+  const control = el.closest(CONTROL_SELECTOR) || el;
+  const names = [];
+  for (let cur = el.closest("[data-vital]"); cur && names.length < 2; cur = cur.parentElement?.closest("[data-vital]")) {
+    const n = cur.getAttribute("data-vital");
+    if (VITAL_LABEL_RE.test(n)) names.unshift(n);
+  }
+  return `${names.join(">")}:${control.tagName.toLowerCase().slice(0, 10)}`;
+}
+
+/** Where the longest script in a slow interaction came from. */
+export function scriptSource(url, origin = typeof location === "undefined" ? "" : location.origin) {
+  if (typeof url !== "string" || !url) return undefined;
+  if (/^(chrome|moz|safari-web)-extension:/.test(url)) return "extension";
+  if (origin && url.startsWith(origin)) return "app";
+  if (/^https:\/\/([a-z0-9-]+\.)*(youtube\.com|ytimg\.com|googlevideo\.com|youtube-nocookie\.com)\//.test(url)) return "youtube";
+  return "third-party";
+}
+
+/** Builds the web_vital metadata for a web-vitals Metric (attribution build). */
 export function vitalMetadata(metric, nav) {
   const meta = {
     name: metric.name,
@@ -94,6 +141,16 @@ export function vitalMetadata(metric, nav) {
   };
   const type = effectiveType(nav);
   if (type) meta.effectiveType = type;
+  const a = metric.attribution;
+  if (metric.name === "INP" && a) {
+    if (typeof a.interactionTarget === "string" && a.interactionTarget) meta.target = a.interactionTarget;
+    if (a.interactionType) meta.interactionType = a.interactionType;
+    for (const [key, ms] of [["inputDelay", a.inputDelay], ["processing", a.processingDuration], ["presentation", a.presentationDelay]]) {
+      if (typeof ms === "number" && Number.isFinite(ms)) meta[key] = Math.round(ms);
+    }
+    const script = scriptSource(a.longestScript?.entry?.sourceURL);
+    if (script) meta.script = script;
+  }
   return meta;
 }
 
@@ -120,10 +177,11 @@ export function initClientHealth(client, { sampleRate = VITALS_SAMPLE_RATE, rand
   });
 
   if (random() < sampleRate) {
-    import("web-vitals")
+    import("web-vitals/attribution")
       .then(({ onLCP, onINP, onCLS, onFCP, onTTFB }) => {
         onLCP(reportVital);
-        onINP(reportVital);
+        // The target is our own label (see interactionLabel), not a CSS path.
+        onINP(reportVital, { generateTarget: interactionLabel });
         onCLS(reportVital);
         onFCP(reportVital);
         onTTFB(reportVital);

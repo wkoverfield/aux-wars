@@ -10,6 +10,8 @@ import {
   dstr,
   readEventsCapped,
   readHourPeaks,
+  type ErrorKind,
+  type SlowInteraction,
   readPageviewDay,
   type DayEvents,
 } from "./dailyMetrics";
@@ -101,8 +103,6 @@ const LIVE_COUNT_TYPES = [
   "quickplay_clicked",
   "quickplay_1v1_offered",
   "quickplay_1v1_accepted",
-  "client_error",
-  "client_error_boundary",
 ] as const;
 
 // Sampled web vitals are the highest-volume detail type; today's partial row
@@ -111,9 +111,75 @@ const SKIP_TODAY_DETAIL = new Set<string>(["web_vital"]);
 
 type VitalDay = {
   webVitals?: Array<{ metric: string; deviceClass: string; p75: number; samples: number }>;
+  slowInteractions?: SlowInteraction[];
   clientErrors?: number;
   clientErrorBoundaries?: number;
+  clientErrorKinds?: ErrorKind[];
 };
+
+/**
+ * Slow-interaction groups merged across days: samples and slow counts add up;
+ * p75, phase means and mobile share are sample-weighted means of the daily
+ * values (an approximation across days, like the vitals p75).
+ */
+export function mergeSlowInteractions(days: VitalDay[], keep = 8) {
+  type Acc = {
+    route: string; target: string; samples: number; slow: number; p75w: number; mobilew: number;
+    phaseSamples: number; inputw: number; procw: number; presw: number; scripts: Map<string, number>;
+  };
+  const acc = new Map<string, Acc>();
+  for (const d of days) {
+    for (const s of d.slowInteractions ?? []) {
+      const key = `${s.route}|${s.target}`;
+      const a = acc.get(key) ?? {
+        route: s.route, target: s.target, samples: 0, slow: 0, p75w: 0, mobilew: 0,
+        phaseSamples: 0, inputw: 0, procw: 0, presw: 0, scripts: new Map<string, number>(),
+      };
+      a.samples += s.samples;
+      a.slow += s.slow;
+      a.p75w += s.p75 * s.samples;
+      a.mobilew += s.mobileShare * s.samples;
+      if (s.inputDelay !== null && s.processing !== null && s.presentation !== null) {
+        a.phaseSamples += s.samples;
+        a.inputw += s.inputDelay * s.samples;
+        a.procw += s.processing * s.samples;
+        a.presw += s.presentation * s.samples;
+      }
+      if (s.script) a.scripts.set(s.script, (a.scripts.get(s.script) ?? 0) + s.samples);
+      acc.set(key, a);
+    }
+  }
+  const per = (w: number, n: number) => (n > 0 ? Math.round(w / n) : null);
+  return [...acc.values()]
+    .map((a) => ({
+      route: a.route,
+      target: a.target,
+      samples: a.samples,
+      slow: a.slow,
+      p75: Math.round(a.p75w / a.samples),
+      inputDelay: per(a.inputw, a.phaseSamples),
+      processing: per(a.procw, a.phaseSamples),
+      presentation: per(a.presw, a.phaseSamples),
+      mobileShare: Math.round((a.mobilew / a.samples) * 100) / 100,
+      script: [...a.scripts.entries()].sort((x, y) => y[1] - x[1])[0]?.[0] ?? null,
+    }))
+    .sort((x, y) => y.slow - x.slow || y.p75 - x.p75)
+    .slice(0, keep);
+}
+
+/** Error kinds summed across days, largest first. */
+export function mergeErrorKinds(days: VitalDay[], keep = 12): ErrorKind[] {
+  const acc = new Map<string, ErrorKind>();
+  for (const d of days) {
+    for (const e of d.clientErrorKinds ?? []) {
+      const key = `${e.kind}|${e.name}|${e.route}`;
+      const cur = acc.get(key) ?? { ...e, count: 0 };
+      cur.count += e.count;
+      acc.set(key, cur);
+    }
+  }
+  return [...acc.values()].sort((a, b) => b.count - a.count).slice(0, keep);
+}
 
 /**
  * Speed card over a set of day rows. Rows keep no raw samples, so a window's
@@ -365,6 +431,8 @@ export const getDashboard = query({
       speed: {
         ...summarizeSpeed(rows),
         errors: summarizeSpeed([...rows, todayRow]).errors,
+        slowInteractions: mergeSlowInteractions(rows),
+        errorKinds: mergeErrorKinds([...rows, todayRow]),
       },
     };
   },

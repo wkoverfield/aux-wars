@@ -416,7 +416,64 @@ export function normalizeSpeed(raw) {
     hasData: rows.some((r) => r.cells.all.samples > 0),
     samples: Object.fromEntries(SPEED_DEVICES.map((d) => [d, Math.max(0, ...rows.map((r) => r.cells[d].samples))])),
     errors: { client: num(errors.client) ?? 0, boundary: num(errors.boundary) ?? 0 },
+    slowInteractions: normalizeSlowInteractions(src.slowInteractions),
+    errorKinds: normalizeErrorKinds(src.errorKinds),
   };
+}
+
+const PHASE_LABELS = {
+  inputDelay: "Page busy before the tap",
+  processing: "Our tap handler",
+  presentation: "Redrawing the screen",
+};
+
+/** The phase that took the most time in an interaction group, or null. */
+export function dominantPhase(row) {
+  const phases = Object.keys(PHASE_LABELS)
+    .map((k) => ({ key: k, ms: num(row?.[k]) }))
+    .filter((x) => x.ms !== null);
+  if (phases.length === 0) return null;
+  const top = phases.reduce((a, b) => (b.ms > a.ms ? b : a));
+  return { label: PHASE_LABELS[top.key], ms: top.ms };
+}
+
+/** "rating>record:button" reads "rating > record (button)"; "unknown" stays. */
+export function fmtInteractionTarget(target) {
+  if (typeof target !== "string" || !target.includes(":")) return target || EMPTY;
+  const [names, tag] = target.split(":");
+  const where = names ? names.split(">").join(" > ") : "unlabeled";
+  return tag ? `${where} (${tag})` : where;
+}
+
+/** Slowest interactions: rows with a usable p75, as sent. */
+export function normalizeSlowInteractions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((r) => r && typeof r.target === "string" && num(r.p75) !== null)
+    .map((r) => ({
+      route: typeof r.route === "string" ? r.route : "other",
+      target: r.target,
+      samples: num(r.samples) ?? 0,
+      slow: num(r.slow) ?? 0,
+      p75: num(r.p75),
+      rating: vitalRating("INP", r.p75),
+      phase: dominantPhase(r),
+      mobileShare: ratio(r.mobileShare),
+      script: typeof r.script === "string" ? r.script : null,
+    }));
+}
+
+/** Error kinds by class name and route, as sent. */
+export function normalizeErrorKinds(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((r) => r && typeof r.name === "string" && num(r.count) !== null)
+    .map((r) => ({
+      kind: r.kind === "boundary" ? "boundary" : "error",
+      name: r.name,
+      route: typeof r.route === "string" ? r.route : "other",
+      count: num(r.count),
+    }));
 }
 
 /** Window totals of empty vs failed searches, with failures by reason. */

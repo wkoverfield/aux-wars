@@ -26,6 +26,13 @@ const eventMetadata = v.optional(v.object({
   route: v.optional(v.string()), // route pattern, never a concrete path
   deviceClass: v.optional(v.string()),
   effectiveType: v.optional(v.string()),
+  // web_vital INP only: what was interacted with and where its time went
+  target: v.optional(v.string()), // screen/control label from the app's own markup, never page text
+  interactionType: v.optional(v.string()), // "pointer" | "keyboard"
+  inputDelay: v.optional(v.number()), // ms: main thread busy before handlers ran
+  processing: v.optional(v.number()), // ms: event handlers
+  presentation: v.optional(v.number()), // ms: render and paint after handlers
+  script: v.optional(v.string()), // source of the longest script: app | youtube | extension | third-party
 }));
 export type EventMetadata = NonNullable<Infer<typeof eventMetadata>>;
 
@@ -47,6 +54,10 @@ export const DEVICE_CLASSES = new Set(["mobile", "chromebook", "desktop"]);
 const EFFECTIVE_TYPES = new Set(["slow-2g", "2g", "3g", "4g"]);
 const ROUTE_RE = /^\/[A-Za-z0-9/:_-]{0,60}$/;
 const ERROR_NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$]{0,40}$/;
+// "screen>control:tag", built from data-vital attributes and a tag name.
+const INP_TARGET_RE = /^([a-z0-9-]{1,24}>){0,2}[a-z0-9-]{0,24}:[a-z]{1,10}$/;
+const INTERACTION_TYPES = new Set(["pointer", "keyboard"]);
+export const INP_SCRIPT_SOURCES = new Set(["app", "youtube", "extension", "third-party"]);
 // Upper bound for a reported vital (ms; CLS is unitless and far below this).
 const MAX_VITAL_VALUE = 120_000;
 
@@ -74,6 +85,17 @@ export function sanitizeWebVital(m: EventMetadata | undefined): EventMetadata | 
   };
   if (typeof m?.effectiveType === "string" && EFFECTIVE_TYPES.has(m.effectiveType)) {
     out.effectiveType = m.effectiveType;
+  }
+  if (name === "INP") {
+    if (typeof m?.target === "string" && INP_TARGET_RE.test(m.target)) out.target = m.target;
+    if (typeof m?.interactionType === "string" && INTERACTION_TYPES.has(m.interactionType)) {
+      out.interactionType = m.interactionType;
+    }
+    for (const k of ["inputDelay", "processing", "presentation"] as const) {
+      const ms = m?.[k];
+      if (typeof ms === "number" && Number.isFinite(ms) && ms >= 0) out[k] = Math.round(Math.min(ms, MAX_VITAL_VALUE));
+    }
+    if (typeof m?.script === "string" && INP_SCRIPT_SOURCES.has(m.script)) out.script = m.script;
   }
   return out;
 }

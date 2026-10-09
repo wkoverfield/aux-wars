@@ -22,6 +22,7 @@ export default function SongItem({ track, selected, onSelect, onSelectSong }) {
 
   return (
     <motion.div
+      data-vital="song"
       initial={{ scale: 1 }}
       whileHover={{ scale: 1.02 }}
       transition={{ type: "spring", stiffness: 300, damping: 15 }}

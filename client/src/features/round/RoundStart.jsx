@@ -11,7 +11,7 @@ import nextIcon from "../../assets/next-icon.svg";
  */
 export default function RoundStart({ currentPrompt, onStartSelection }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-12 max-w-4xl mx-auto px-4">
+    <div data-vital="round-start" className="flex flex-col items-center justify-center gap-12 max-w-4xl mx-auto px-4">
       <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-center text-white">The prompt is:</h1>
 
       <div className="w-full max-w-4xl px-4">
@@ -23,6 +23,7 @@ export default function RoundStart({ currentPrompt, onStartSelection }) {
       </div>
 
       <button
+        data-vital="select"
         onClick={onStartSelection}
         className="flex items-center justify-center gap-2 py-3 px-6 rounded-md text-white font-semibold cursor-pointer bg-[#242424] hover:bg-[#191414] transition-colors text-lg"
       >

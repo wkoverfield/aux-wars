@@ -368,7 +368,7 @@ export default function GameWinner() {
   };
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-transparent">
+    <div data-vital="game-over" className="relative h-full w-full overflow-hidden bg-transparent">
       {isPublic && <PublicGameOverBar rematchAt={publicRematchAt} onLeave={handleLeavePublic} leaving={leaving} />}
 
       {/* ---------- REVEAL (suspense → winner → superlatives) ---------- */}
@@ -477,6 +477,7 @@ export default function GameWinner() {
             {!isPublic && (
             <div className="w-full max-w-md flex gap-3 mt-auto pt-6">
               <button
+                data-vital="back"
                 onClick={handleBackToLobby}
                 disabled={endAction.pending}
                 aria-busy={endAction.pendingKey === 'lobby'}
@@ -485,6 +486,7 @@ export default function GameWinner() {
                 {endAction.pendingKey === 'lobby' ? 'Heading back...' : '🚪 Back to Lobby'}
               </button>
               <button
+                data-vital="again"
                 onClick={handlePlayAgain}
                 disabled={endAction.pending}
                 aria-busy={endAction.pendingKey === 'again'}

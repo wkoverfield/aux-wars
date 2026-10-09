@@ -170,7 +170,7 @@ export default function RoundWinner() {
 
 
   return (
-    <div className="relative flex flex-col h-screen w-full max-w-7xl mx-auto pt-2 pb-6 px-2 md:p-6 bg-transparent items-center overflow-hidden">
+    <div data-vital="results" className="relative flex flex-col h-screen w-full max-w-7xl mx-auto pt-2 pb-6 px-2 md:p-6 bg-transparent items-center overflow-hidden">
       {/* Quick Play: auto-advance timer in the host button's spot */}
       {isPublic && typeof autoAdvanceAt === "number" && (
         <div className="w-full flex flex-row justify-end mb-1 mt-2 md:mb-2 md:mt-4">
@@ -192,6 +192,7 @@ export default function RoundWinner() {
             className={`flex items-center gap-2 py-1 px-3 md:py-2 md:px-4 rounded-md text-white font-semibold cursor-pointer transition-all bg-[#242424] hover:bg-[#191414] text-sm md:text-base ${
               isTransitioning ? "opacity-70 cursor-not-allowed" : ""
             }`}
+            data-vital="next"
             onClick={handleNextRound}
             style={{ minWidth: "100px" }}
           >
