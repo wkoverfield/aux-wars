@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import SearchBar from "../../components/SearchBar";
 import SongList from "../../components/SongList";
 import ScrollFade from "../../components/ScrollFade";
+import { useSongSearch } from "./useSongSearch";
 
 /**
  * SongSelection component provides a search interface for selecting songs
@@ -22,7 +23,7 @@ import ScrollFade from "../../components/ScrollFade";
  * @param {boolean} props.showPromptModal - Whether the prompt modal is visible
  * @returns {JSX.Element} Rendered component
  */
-export default function SongSelection({
+export function SongSelectionView({
   searchTerm,
   onSearchChange,
   searchResults,
@@ -41,19 +42,19 @@ export default function SongSelection({
    * Handles selecting a track from the search results
    * @param {Object} track - The selected track object
    */
-  const handleSelectTrack = (track) => {
+  const handleSelectTrack = useCallback((track) => {
     setSelectedTrack(track);
     // Notify parent of selection change for auto-submit on timer expiry
     onSelectionChange?.(track);
-  };
+  }, [onSelectionChange]);
 
   /**
    * Handles confirming the selected track and submitting it
    * @param {Object} track - The track to submit
    */
-  const handleConfirmTrack = (track) => {
+  const handleConfirmTrack = useCallback((track) => {
     onSelectSong(track);
-  };
+  }, [onSelectSong]);
 
   return (
     <div
@@ -136,3 +137,22 @@ export default function SongSelection({
     </div>
   );
 } 
+/**
+ * The song selection screen with its own search state. Memoized: the round
+ * re-renders every second for its countdown, and with stable props this
+ * screen (and its result list) is left alone; a keystroke re-renders only it.
+ *
+ * @param {Object} props
+ * @param {Function} props.onSelectSong - A song was confirmed (opens the snippet selector)
+ * @param {Function} [props.onSelectionChange] - Selection changed (for auto-submit on timer expiry)
+ * @param {Function} props.onShowPrompt - Show the prompt modal
+ * @param {boolean} props.showPromptModal - Whether the prompt modal is visible
+ * @param {Function} [props.onNoResults] - A 3+ character search came back empty
+ * @param {Function} [props.onSearchFailed] - The search failed, with its reason
+ */
+function SongSelection({ onNoResults, onSearchFailed, ...props }) {
+  const search = useSongSearch({ onNoResults, onFailed: onSearchFailed });
+  return <SongSelectionView {...search} {...props} />;
+}
+
+export default memo(SongSelection);

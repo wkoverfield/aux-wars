@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../../../convex/_generated/api';
 import { useSession } from '../../hooks/useSession';
 import { useHeartbeat } from '../../hooks/useHeartbeat';
+import { usePendingAction } from '../../hooks/usePendingAction';
+import { useToast } from '../../contexts/ToastContext';
 import PlayerResultWithHover from '../../components/PlayerResultWithHover';
 import ScrollFade from '../../components/ScrollFade';
 import AnimatedLogo from '../../components/AnimatedLogo';
@@ -113,7 +115,7 @@ const WINNER_MS = 2600;
 const SUPERLATIVE_MS = 4000;
 
 /** Shared "running it back in 3…2…1" overlay, driven off the room timestamp. */
-function RematchCountdown({ rematchAt, onCancel }) {
+function RematchCountdown({ rematchAt, onCancel, cancelling }) {
   const remaining = useSecondsUntil(rematchAt) ?? 0;
   return (
     <motion.div
@@ -133,9 +135,11 @@ function RematchCountdown({ rematchAt, onCancel }) {
       </AnimatePresence>
       <button
         onClick={onCancel}
-        className="mt-8 py-2 px-5 rounded-full text-white/80 font-semibold bg-white/10 hover:bg-white/20 transition-all"
+        disabled={cancelling}
+        aria-busy={cancelling}
+        className="mt-8 py-2 px-5 rounded-full text-white/80 font-semibold bg-white/10 hover:bg-white/20 transition-colors disabled:opacity-60"
       >
-        Cancel
+        {cancelling ? 'Cancelling...' : 'Cancel'}
       </button>
     </motion.div>
   );
@@ -209,6 +213,10 @@ export default function GameWinner() {
   // Quick Play rooms rematch on their own; no host buttons, no cancel.
   const isPublic = Boolean(room?.isPublic);
   const leaveGameMutation = useMutation(api.game.rooms.leaveGame);
+  // Play Again and Back to Lobby share one action (only one can be in flight).
+  const endAction = usePendingAction();
+  const cancelAction = usePendingAction();
+  const { showToast } = useToast();
   const [leaving, setLeaving] = useState(false);
   const publicRematchAt = isPublic && typeof rematchAt === 'number' ? rematchAt : null;
   const me = playersQuery?.find((p) => p.playerId === session?.playerId);
@@ -320,20 +328,43 @@ export default function GameWinner() {
   const rest = sortedPlayers.slice(1);
   const isFinal = stage === 'final';
 
-  const handlePlayAgain = async () => {
-    if (!session?.playerId || !session?.connectionId) return;
-    captureGameEvent('play_again_clicked', gameProperties({ code: gameCode, players: playersQuery, session }));
-    await startRematchMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
+  const creds = { code: gameCode, playerId: session?.playerId, connectionId: session?.connectionId };
+  const hasCreds = Boolean(session?.playerId && session?.connectionId);
+  const unreachable = () => showToast("Couldn't reach the game. Please try again.", 'error');
+
+  const handlePlayAgain = () => {
+    if (!hasCreds) return;
+    endAction.run(async () => {
+      captureGameEvent('play_again_clicked', gameProperties({ code: gameCode, players: playersQuery, session }));
+      try {
+        await startRematchMutation(creds);
+      } catch {
+        unreachable();
+      }
+    }, 'again');
   };
-  const handleBackToLobby = async () => {
-    if (!session?.playerId || !session?.connectionId) return;
-    await returnToLobbyMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
-    updateSession({ lastPhase: 'lobby' });
-    navigate(`/lobby/${gameCode}`, { replace: true });
+  const handleBackToLobby = () => {
+    if (!hasCreds) return;
+    endAction.run(async () => {
+      try {
+        await returnToLobbyMutation(creds);
+      } catch {
+        unreachable();
+        return;
+      }
+      updateSession({ lastPhase: 'lobby' });
+      navigate(`/lobby/${gameCode}`, { replace: true });
+    }, 'lobby');
   };
-  const handleCancelRematch = async () => {
-    if (!session?.playerId || !session?.connectionId) return;
-    await cancelRematchMutation({ code: gameCode, playerId: session.playerId, connectionId: session.connectionId });
+  const handleCancelRematch = () => {
+    if (!hasCreds) return;
+    cancelAction.run(async () => {
+      try {
+        await cancelRematchMutation(creds);
+      } catch {
+        unreachable();
+      }
+    });
   };
 
   return (
@@ -447,15 +478,19 @@ export default function GameWinner() {
             <div className="w-full max-w-md flex gap-3 mt-auto pt-6">
               <button
                 onClick={handleBackToLobby}
-                className="flex-1 py-3 rounded-full font-semibold text-white bg-[#242424] hover:bg-[#2d2d2d] transition-all"
+                disabled={endAction.pending}
+                aria-busy={endAction.pendingKey === 'lobby'}
+                className="flex-1 py-3 rounded-full font-semibold text-white bg-[#242424] hover:bg-[#2d2d2d] transition-colors disabled:opacity-60"
               >
-                🚪 Back to Lobby
+                {endAction.pendingKey === 'lobby' ? 'Heading back...' : '🚪 Back to Lobby'}
               </button>
               <button
                 onClick={handlePlayAgain}
-                className="flex-1 py-3 rounded-full font-bold text-black bg-[#68d570] hover:bg-[#7de884] transition-all"
+                disabled={endAction.pending}
+                aria-busy={endAction.pendingKey === 'again'}
+                className="flex-1 py-3 rounded-full font-bold text-black bg-[#68d570] hover:bg-[#7de884] transition-colors disabled:opacity-60"
               >
-                🔄 Play Again
+                {endAction.pendingKey === 'again' ? 'Starting...' : '🔄 Play Again'}
               </button>
             </div>
             )}
@@ -468,7 +503,7 @@ export default function GameWinner() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {rematchAt && !isPublic && <RematchCountdown rematchAt={rematchAt} onCancel={handleCancelRematch} />}
+        {rematchAt && !isPublic && <RematchCountdown rematchAt={rematchAt} onCancel={handleCancelRematch} cancelling={cancelAction.pending} />}
       </AnimatePresence>
     </div>
   );

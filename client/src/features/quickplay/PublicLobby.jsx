@@ -3,6 +3,7 @@ import { useMutation } from "convex/react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { api } from "../../../../convex/_generated/api";
+import { usePendingAction } from "../../hooks/usePendingAction";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
@@ -68,7 +69,7 @@ function StatusCard({ count, cap, startsAt, armedAt }) {
   );
 }
 
-function OneVOneCard({ accepted, onAccept, onDecline }) {
+function OneVOneCard({ accepted, busy, onAccept, onDecline }) {
   return (
     <div className="lobby-container rounded-md flex flex-col gap-3 border border-[#68d570]/60">
       <p className="text-2xl">Play 1v1 now?</p>
@@ -81,7 +82,8 @@ function OneVOneCard({ accepted, onAccept, onDecline }) {
         <button
           type="button"
           onClick={onAccept}
-          disabled={accepted}
+          disabled={accepted || busy}
+          aria-pressed={accepted}
           className="green-btn rounded-full py-2 px-4 flex-1 font-semibold text-sm disabled:opacity-70"
         >
           {accepted ? "Accepted" : "Play 1v1"}
@@ -89,7 +91,8 @@ function OneVOneCard({ accepted, onAccept, onDecline }) {
         <button
           type="button"
           onClick={onDecline}
-          className="rounded-full py-2 px-4 flex-1 font-semibold text-sm border border-gray-500 text-white hover:border-white transition-colors"
+          disabled={busy}
+          className="rounded-full py-2 px-4 flex-1 font-semibold text-sm border border-gray-500 text-white hover:border-white transition-colors disabled:opacity-70"
         >
           Keep waiting
         </button>
@@ -115,6 +118,7 @@ function PlayerRow({ player, isMe, startVoted, wants1v1, tally, canKick, kickVot
             type="button"
             onClick={onKick}
             disabled={kickVoted}
+            aria-pressed={kickVoted}
             className={
               kickVoted
                 ? "text-xs text-[#ff2929] border border-[#ff2929]/60 rounded px-2 py-1"
@@ -197,9 +201,15 @@ export default function PublicLobby() {
 
   const startVotes = room?.startVotes ?? [];
   const oneVOneAccepts = room?.oneVOneAccepts ?? [];
-  const iVotedStart = Boolean(me && startVotes.includes(me._id));
+  const startAction = usePendingAction();
+  const oneVOneAction = usePendingAction();
+  const kickAction = usePendingAction();
+  const serverVotedStart = Boolean(me && startVotes.includes(me._id));
+  const iVotedStart = startAction.pending ? startAction.pendingKey : serverVotedStart;
+  // Count my own vote as it is shown, so the label agrees with the button.
+  const startVoteCount = startVotes.length + (iVotedStart === serverVotedStart ? 0 : iVotedStart ? 1 : -1);
   const offerOpen = room?.oneVOneOffered === true && count === 2;
-  const iAccepted1v1 = Boolean(me && oneVOneAccepts.includes(me._id));
+  const iAccepted1v1 = Boolean(me && oneVOneAccepts.includes(me._id)) || oneVOneAction.pendingKey === "accept";
   const canKick = count >= 3;
 
   const creds = { code, playerId, connectionId };
@@ -207,18 +217,38 @@ export default function PublicLobby() {
     if (res && res.success === false) showToast(res.message || "Something went wrong", "error");
   };
 
-  const handleStartNow = async () => failed(await voteStart({ ...creds, vote: !iVotedStart }));
-  const handleAccept = async () => failed(await respondOneVOne({ ...creds, accept: true }));
-  const handleDecline = async () => failed(await respondOneVOne({ ...creds, accept: false }));
-  const handleKick = async (target) => {
-    if (!window.confirm(`Vote to kick ${target.name}?`)) return;
-    const res = await voteKick({ ...creds, targetPlayerDocId: target._id });
-    if (res?.success === false) {
-      showToast(res.message || "Couldn't vote", "error");
-      return;
+  // Each vote shows on the tap and settles to the server's answer (a refused
+  // or failed call reverts, with a toast).
+  const sendAndReport = async (send) => {
+    try {
+      failed(await send());
+    } catch {
+      showToast("Couldn't reach the game. Try again.", "error");
     }
-    setKickVotes((prev) => new Set(prev).add(target._id));
-    if (res?.kicked) showToast(`${target.name} was removed`, "success");
+  };
+  const handleStartNow = () => {
+    const vote = !iVotedStart;
+    startAction.run(() => sendAndReport(() => voteStart({ ...creds, vote })), vote);
+  };
+  const handleAccept = () =>
+    oneVOneAction.run(() => sendAndReport(() => respondOneVOne({ ...creds, accept: true })), "accept");
+  const handleDecline = () =>
+    oneVOneAction.run(() => sendAndReport(() => respondOneVOne({ ...creds, accept: false })), "decline");
+  const handleKick = (target) => {
+    if (!window.confirm(`Vote to kick ${target.name}?`)) return;
+    kickAction.run(async () => {
+      try {
+        const res = await voteKick({ ...creds, targetPlayerDocId: target._id });
+        if (res?.success === false) {
+          showToast(res.message || "Couldn't vote", "error");
+          return;
+        }
+        setKickVotes((prev) => new Set(prev).add(target._id));
+        if (res?.kicked) showToast(`${target.name} was removed`, "success");
+      } catch {
+        showToast("Couldn't reach the game. Try again.", "error");
+      }
+    }, target._id);
   };
 
   const handleLeave = async () => {
@@ -277,7 +307,7 @@ export default function PublicLobby() {
               </div>
 
               {offerOpen ? (
-                <OneVOneCard accepted={iAccepted1v1} onAccept={handleAccept} onDecline={handleDecline} />
+                <OneVOneCard accepted={iAccepted1v1} busy={oneVOneAction.pending} onAccept={handleAccept} onDecline={handleDecline} />
               ) : (
                 <StatusCard count={count} cap={cap} startsAt={room?.startsAt} armedAt={room?.countdownArmedAt} />
               )}
@@ -295,7 +325,7 @@ export default function PublicLobby() {
                     }
                   >
                     <span className="text-sm md:text-base">
-                      {startNowLabel({ votes: startVotes.length, total: count, voted: iVotedStart })}
+                      {startNowLabel({ votes: startVoteCount, total: count, voted: iVotedStart })}
                     </span>
                   </button>
                 </motion.div>
@@ -314,11 +344,11 @@ export default function PublicLobby() {
                     key={p._id}
                     player={p}
                     isMe={p._id === me?._id}
-                    startVoted={startVotes.includes(p._id)}
+                    startVoted={p._id === me?._id ? iVotedStart : startVotes.includes(p._id)}
                     wants1v1={offerOpen && oneVOneAccepts.includes(p._id)}
                     tally={tallyFor(room?.kickTallies, p._id)}
                     canKick={canKick && p._id !== me?._id}
-                    kickVoted={kickVotes.has(p._id)}
+                    kickVoted={kickVotes.has(p._id) || kickAction.pendingKey === p._id}
                     onKick={() => handleKick(p)}
                   />
                 ))}

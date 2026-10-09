@@ -1,10 +1,9 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 // GameContext removed - using Convex queries directly
 // import { useSocket, useSocketConnection, useGameTransition } from "../../services/SocketProvider";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { searchTracks, getCachedResults, SearchError } from "../../services/musicSearch";
 import { captureGameEvent, gameProperties } from "../../services/analytics";
 import { useToast } from "../../contexts/ToastContext";
 import RoundStart from "./RoundStart";
@@ -18,9 +17,6 @@ import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useNow } from "../quickplay/useQuickPlay";
 import { secondsUntil } from "../quickplay/quickPlayModel";
-
-// After this long without an answer, the search shows "Still searching..." and a Retry.
-export const SEARCH_SLOW_MS = 3000;
 
 const SUBMIT_SONG_FALLBACK_MESSAGE = "Couldn't submit that song. Please try again.";
 
@@ -127,14 +123,6 @@ export default function Round() {
 
   // Song Selection State (truly local UI state)
   const [isSongSelectionView, setIsSongSelectionView] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [searchResults, setSearchResults] = useState([]);
-  const [searchError, setSearchError] = useState(null);
-  const [isSearching, setIsSearching] = useState(false);
-  const [isSearchSlow, setIsSearchSlow] = useState(false);
-  // Bumped by Retry to re-run the search effect with a fresh request.
-  const [searchRetry, setSearchRetry] = useState(0);
-  const retryingSearchRef = useRef(false);
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState(null);
   const [showSnippetSelector, setShowSnippetSelector] = useState(false);
@@ -261,89 +249,25 @@ export default function Round() {
 
   // Phase changes handled by GameRouteGuard
 
-  /**
-   * Handles music track search with caching and debouncing via Express server.
-   * The Express proxy queries iTunes + Deezer and returns 30s preview clips.
-   */
-  useEffect(() => {
-    setIsSearchSlow(false);
-    if (!searchTerm.trim()) {
-      setSearchResults([]);
-      setSearchError(null);
-      setIsSearching(false);
-      return;
-    }
-    const isRetry = retryingSearchRef.current;
-    retryingSearchRef.current = false;
-
-    // Instant feedback: show the "Searching…" spinner the moment they type — it
-    // covers the debounce AND the fetch. (Previously setIsSearching(true) was never
-    // called anywhere, so the spinner was dead code and searches felt frozen.)
-    setIsSearching(true);
-
-    // Show cached results immediately if available
-    const cachedResults = getCachedResults(searchTerm);
-    if (cachedResults) {
-      setSearchResults(cachedResults);
-      setSearchError(null);
-    }
-
-    // Guard against overlapping searches: if a newer keystroke supersedes this one
-    // (it resolves after we've moved on), skip its stale results / spinner toggle.
-    let cancelled = false;
-    let slowTimer = null;
-    const delayDebounce = setTimeout(async () => {
-      slowTimer = setTimeout(() => {
-        if (!cancelled) setIsSearchSlow(true);
-      }, SEARCH_SLOW_MS);
-      try {
-        setSearchError(null);
-        const result = await searchTracks(searchTerm, { fresh: isRetry });
-        if (cancelled) return;
-
-        setSearchResults(result);
-        if (result.length === 0) {
-          setSearchError("No songs found. Try different keywords.");
-          // Catalog-gap signal: which searches our sources can't fill. Only a
-          // well-formed empty answer counts; failures are logged below.
-          if (searchTerm.trim().length >= 3) {
-            logEvent({ eventType: "search_no_results", metadata: { label: searchTerm.trim().slice(0, 80) } });
-            captureGameEvent("song_search_no_results", gameProperties({
-              code: gameCode,
-              room,
-              session,
-              extra: { query_length: searchTerm.trim().length },
-            }));
-          }
-        } else {
-          setSearchError(null);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        // The search itself failed (timeout, network, HTTP error, bad payload)
-        // and nothing was cached for this query.
-        setSearchError("Search service temporarily unavailable. Please try again.");
-        setSearchResults([]);
-        if (err instanceof SearchError && !err.fromBackoff) {
-          logEvent({ eventType: "search_failed", metadata: { reason: err.reason } });
-        }
-      } finally {
-        clearTimeout(slowTimer);
-        if (!cancelled) {
-          setIsSearching(false);
-          setIsSearchSlow(false);
-        }
-      }
-    }, isRetry ? 0 : 350);
-
-    return () => { cancelled = true; clearTimeout(delayDebounce); clearTimeout(slowTimer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, searchRetry]);
-
-  const handleRetrySearch = () => {
-    retryingSearchRef.current = true;
-    setSearchRetry((n) => n + 1);
-  };
+  // Search analytics, read through refs so the callbacks stay stable and the
+  // memoized selection screen is not re-rendered by the countdown tick.
+  const analyticsRef = useRef({});
+  analyticsRef.current = { gameCode, room, session, logEvent };
+  const handleNoResults = useCallback((term) => {
+    const { gameCode: code, room: r, session: sess, logEvent: log } = analyticsRef.current;
+    // Catalog-gap signal: which searches our sources can't fill.
+    log({ eventType: "search_no_results", metadata: { label: term.slice(0, 80) } });
+    captureGameEvent("song_search_no_results", gameProperties({
+      code,
+      room: r,
+      session: sess,
+      extra: { query_length: term.length },
+    }));
+  }, []);
+  const handleSearchFailed = useCallback((reason) => {
+    analyticsRef.current.logEvent({ eventType: "search_failed", metadata: { reason } });
+  }, []);
+  const handleShowPrompt = useCallback(() => setShowPromptModal(true), []);
 
   // Player count viability checks (optional) can be rendered from submissionStatus
 
@@ -356,10 +280,10 @@ export default function Round() {
    * Handles initial song selection - shows snippet selector
    * @param {Object} track - The selected track object
    */
-  const handleSelectSong = (track) => {
+  const handleSelectSong = useCallback((track) => {
     setSelectedTrack(track);
     setShowSnippetSelector(true);
-  };
+  }, []);
 
   /**
    * Handles final song submission with snippet times
@@ -520,17 +444,12 @@ export default function Round() {
       } else if (isSongSelectionView) {
         return (
           <SongSelection
-            searchTerm={searchTerm}
-            onSearchChange={(e) => setSearchTerm(e.target.value)}
-            searchResults={searchResults}
-            searchError={searchError}
-            isSearching={isSearching}
-            isSearchSlow={isSearchSlow}
-            onRetrySearch={handleRetrySearch}
             onSelectSong={handleSelectSong}
             onSelectionChange={selectionLocked ? undefined : setPendingTrack}
-            onShowPrompt={() => setShowPromptModal(true)}
+            onShowPrompt={handleShowPrompt}
             showPromptModal={showPromptModal}
+            onNoResults={handleNoResults}
+            onSearchFailed={handleSearchFailed}
           />
         );
       } else {

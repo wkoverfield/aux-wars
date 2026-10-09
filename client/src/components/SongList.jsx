@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import SongItem from './SongItem';
 
 /**
@@ -33,4 +34,5 @@ const SongList = ({ tracks, selectedTrack, onSelectTrack, onConfirmTrack }) => {
   );
 };
 
-export default SongList;
+// Memoized: the search box above it re-renders on every keystroke.
+export default memo(SongList);

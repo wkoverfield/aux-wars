@@ -33,20 +33,12 @@ vi.mock("./RoundStart", () => ({
   default: ({ onStartSelection }) => <button onClick={onStartSelection}>round start</button>,
 }));
 vi.mock("./SongSelection", () => ({
-  default: ({ onSelectSong, onSelectionChange, searchTerm, onSearchChange, isSearchSlow, onRetrySearch }) => (
+  default: ({ onSelectSong, onSelectionChange }) => (
     <>
-      <input aria-label="search" value={searchTerm} onChange={onSearchChange} />
       <button onClick={() => onSelectSong({ id: "t1", name: "Track", artists: [{ name: "A" }] })}>pick track</button>
       {!onSelectionChange && <span>selection locked</span>}
-      {isSearchSlow && <button onClick={onRetrySearch}>still searching retry</button>}
     </>
   ),
-}));
-const searchTracks = vi.fn();
-vi.mock("../../services/musicSearch", () => ({
-  searchTracks: (...args) => searchTracks(...args),
-  getCachedResults: () => null,
-  SearchError: class SearchError extends Error {},
 }));
 vi.mock("../../components/SnippetSelector", () => ({
   default: ({ onConfirm, track }) => (
@@ -202,48 +194,5 @@ describe("Round selection timer", () => {
 
     await act(async () => { vi.advanceTimersByTime(3000); });
     expect(songSubmits()).toHaveLength(1);
-  });
-});
-
-describe("Round slow search", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mutation.mockReset();
-    searchTracks.mockReset();
-  });
-  afterEach(() => {
-    cleanup();
-    vi.useRealTimers();
-  });
-
-  it("offers Retry after 3s without an answer and retries with a fresh request", async () => {
-    let resolveRetry;
-    searchTracks
-      .mockImplementationOnce(() => new Promise(() => {}))
-      .mockImplementationOnce(() => new Promise((r) => { resolveRetry = r; }));
-    setQueries({
-      "game/rooms:getRoomByCode": { phase: "songSelection", currentRound: 1, settings: {} },
-      "game/flow:getCurrentRatingSong": null,
-      "game/flow:getMySubmission": null,
-    });
-    renderRound();
-    fireEvent.click(screen.getByText("round start"));
-    fireEvent.change(screen.getByLabelText("search"), { target: { value: "song" } });
-
-    await act(async () => { vi.advanceTimersByTime(350); });
-    expect(searchTracks).toHaveBeenCalledWith("song", { fresh: false });
-    await act(async () => { vi.advanceTimersByTime(2999); });
-    expect(screen.queryByText("still searching retry")).toBeNull();
-    await act(async () => { vi.advanceTimersByTime(1); });
-
-    fireEvent.click(screen.getByText("still searching retry"));
-    await act(async () => { vi.advanceTimersByTime(0); });
-    expect(searchTracks).toHaveBeenCalledTimes(2);
-    expect(searchTracks).toHaveBeenLastCalledWith("song", { fresh: true });
-    expect(screen.queryByText("still searching retry")).toBeNull();
-
-    await act(async () => { resolveRetry([{ id: "t9" }]); });
-    await act(async () => { vi.advanceTimersByTime(5000); });
-    expect(screen.queryByText("still searching retry")).toBeNull();
   });
 });
