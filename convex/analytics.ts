@@ -137,6 +137,8 @@ export function inviteMethod(reason: unknown): string {
 
 const PUBLIC_EVENT_TYPES = new Set([
   "invite_shared",
+  "result_shared",
+  "result_viewed",
   "client_error",
   "client_error_boundary",
   "web_vital",
@@ -216,6 +218,9 @@ export const logEvent = mutation({
       metadata = { reason: searchFailReason(metadata?.reason) };
     } else if (eventType === "invite_shared") {
       metadata = { reason: inviteMethod(metadata?.reason) };
+    } else if (eventType === "result_shared" || eventType === "result_viewed") {
+      // Counted only: a results link id is never stored with the event.
+      metadata = undefined;
     } else if (eventType === "web_vital") {
       const clean = sanitizeWebVital(metadata);
       if (!clean) return { success: false, message: "Invalid metric" } as const;

@@ -7,6 +7,7 @@ import Lobby from "./features/lobby/Lobby";
 import Round from "./features/round/Round";
 import RoundWinner from "./features/round-winner/RoundWinner";
 import GameWinner from "./features/round-winner/GameWinner";
+import SharedResults from "./features/round-winner/SharedResults";
 import GameRouteGuard from "./components/GameRouteGuard";
 import NavigationBlocker from "./components/NavigationBlocker";
 import ConnectionStatus from "./components/ConnectionStatus";
@@ -70,6 +71,7 @@ export default function App() {
                 <Route path="privacy" element={<PageTransition><PrivacyPolicy /></PageTransition>} />
                 <Route path="pro/success" element={<PageTransition><ProSuccess /></PageTransition>} />
                 <Route path="pro/restore" element={<PageTransition><ProRestore /></PageTransition>} />
+                <Route path="g/:shareId" element={<PageTransition><SharedResults /></PageTransition>} />
                 <Route path="/lobby" element={<Navigate to="/" replace />} />
                 <Route path="/lobby/:gameCode" element={<GameRouteGuard />}>
                   <Route element={<RoomProviderOutlet />}>

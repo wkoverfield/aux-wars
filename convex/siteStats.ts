@@ -123,7 +123,11 @@ function sanitizePath(raw: string): string | null {
   // Collapse the ephemeral lobby game-code segment (a new code per game, forever)
   // so top-pages stay meaningful and pageviewCounters doesn't grow unbounded.
   // "/lobby/ABCD" -> "/lobby/:code", "/lobby/ABCD/round" -> "/lobby/:code/round".
-  p = p.replace(/^\/lobby\/[^/]+/, "/lobby/:code");
+  // The router matches paths without regard to case, so these do too:
+  // "/LOBBY/ABCD" renders the lobby and must not store its code.
+  p = p.replace(/^\/lobby\/[^/]+/i, "/lobby/:code");
+  // Same for shared results links: one id per shared game.
+  p = p.replace(/^\/g\/[^/]+/i, "/g/:id");
   if (p.length > 120) p = p.slice(0, 120);
   return p;
 }

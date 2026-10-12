@@ -24,7 +24,11 @@ export function routePattern(pathname) {
   const path = String(pathname || "/").replace(/\/+$/, "") || "/";
   if (STATIC_ROUTES.has(path)) return path;
   const parts = path.split("/").filter(Boolean);
+  // The router matches paths without regard to case, so the patterns do too.
+  if (parts[0]) parts[0] = parts[0].toLowerCase();
+  if (parts[2]) parts[2] = parts[2].toLowerCase();
   if (parts[0] === "lobby" && parts.length === 2) return "/lobby/:code";
+  if (parts[0] === "g" && parts.length === 2) return "/g/:id";
   if (parts[0] === "lobby" && parts.length === 3 && LOBBY_SUBROUTES.has(parts[2])) {
     return `/lobby/:code/${parts[2]}`;
   }

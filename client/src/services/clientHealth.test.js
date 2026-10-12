@@ -49,6 +49,11 @@ describe("routePattern", () => {
     expect(routePattern("/lobby/ABC123/round")).toBe("/lobby/:code/round");
     expect(routePattern("/lobby/ABC123/gamewinner")).toBe("/lobby/:code/gamewinner");
     expect(routePattern("/lobby/ABC123/other")).toBe("other");
+    expect(routePattern("/g/abcdefgh2345")).toBe("/g/:id");
+    // Same pages in another case never leak the code or id as "other" detail.
+    expect(routePattern("/G/abcdefgh2345")).toBe("/g/:id");
+    expect(routePattern("/LOBBY/ABC123")).toBe("/lobby/:code");
+    expect(routePattern("/Lobby/ABC123/Round")).toBe("/lobby/:code/round");
     expect(routePattern("/some/unknown/path")).toBe("other");
   });
 });

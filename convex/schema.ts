@@ -21,6 +21,9 @@ export const dailyMetricsFields = {
   // and by method. Optional: older rows lack them.
   invitesShared: v.optional(v.number()),
   invitesByMethod: v.optional(v.record(v.string(), v.number())),
+  // Results links: sends from the final screen, and opens of a shared page.
+  resultsShared: v.optional(v.number()),
+  resultsViewed: v.optional(v.number()),
   uniquePlayers: v.number(), // distinct visitorId (playerId for legacy joins)
   joinsWithVisitorId: v.number(),
   playersInStartedGames: v.number(), // distinct players who joined a room that started
@@ -288,6 +291,43 @@ export default defineSchema({
     ),
     calculatedAt: v.number(),
   }).index("by_room_round", ["roomCode", "round"]),
+
+  // A saved copy of a finished game, opened by its link after the room is
+  // gone (see results.ts). Holds no player ids or submission ids, only keys
+  // local to the snapshot. roomCode is kept for the one-per-game lookup and
+  // is never returned by a query.
+  sharedResults: defineTable({
+    shareId: v.string(),
+    roomCode: v.string(),
+    gameEpoch: v.number(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    seed: v.number(), // the final screen's reel seed, so the same awards show
+    players: v.array(v.object({ key: v.string(), name: v.string() })),
+    rounds: v.array(
+      v.object({
+        round: v.number(),
+        prompt: v.optional(v.string()),
+        winnerSongId: v.optional(v.string()),
+        songs: v.array(
+          v.object({
+            songId: v.string(),
+            playerKey: v.string(),
+            name: v.string(),
+            artist: v.string(),
+            albumCover: v.string(),
+            totalRecords: v.number(),
+          })
+        ),
+      })
+    ),
+    voterAwards: v.array(
+      v.object({ voterKey: v.string(), avgGiven: v.number(), count: v.number(), kingmakerHits: v.number() })
+    ),
+  })
+    .index("by_shareId", ["shareId"])
+    .index("by_room_and_epoch", ["roomCode", "gameEpoch"])
+    .index("by_expiresAt", ["expiresAt"]),
 
   customPrompts: defineTable({
     roomCode: v.string(),

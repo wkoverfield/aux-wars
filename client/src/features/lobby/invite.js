@@ -30,9 +30,22 @@ export async function sendInvite(
   nav = typeof navigator === "undefined" ? undefined : navigator,
   touch = isTouchDevice()
 ) {
+  return sendLink({ title: INVITE_TITLE, text: INVITE_TEXT, url }, nav, touch);
+}
+
+/**
+ * Sends any link with a title and a line of text: the share sheet on a touch
+ * device that has one, otherwise the link is copied. Same outcomes as
+ * sendInvite.
+ */
+export async function sendLink(
+  { title, text, url },
+  nav = typeof navigator === "undefined" ? undefined : navigator,
+  touch = isTouchDevice()
+) {
   if (touch && typeof nav?.share === "function") {
     try {
-      await nav.share({ title: INVITE_TITLE, text: INVITE_TEXT, url });
+      await nav.share({ title, text, url });
       return "shared";
     } catch (err) {
       // Dismissing the sheet rejects with AbortError: the user chose not to share.

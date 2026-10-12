@@ -49,6 +49,8 @@ function emptyEvents(): DayEvents {
       quickplay_clicked: 0,
       quickplay_1v1_offered: 0,
       quickplay_1v1_accepted: 0,
+      result_shared: 0,
+      result_viewed: 0,
     },
   };
 }

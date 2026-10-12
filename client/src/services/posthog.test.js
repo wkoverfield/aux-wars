@@ -51,6 +51,7 @@ describe("PostHog event allowlist", () => {
       "lobby_left",
       "play_again_clicked",
       "player_joined",
+      "result_shared",
       "round_completed",
       "session_start",
       "song_search_no_results",
@@ -97,6 +98,12 @@ describe("PostHog event allowlist", () => {
 });
 
 describe("sanitizeEvent", () => {
+  it("masks room codes and results ids whatever the case of the path", () => {
+    const event = sanitizeEvent({ properties: { $pathname: "/LOBBY/ABC123/round", $current_url: "https://aux-wars.com/G/abcdefgh2345" } });
+    expect(event.properties.$pathname).toBe("/lobby/[room]/round");
+    expect(event.properties.$current_url).toBe("https://aux-wars.com/g/[results]");
+  });
+
   it("masks room codes in urls", () => {
     const event = sanitizeEvent({ properties: { $pathname: "/lobby/ABC123/round", $current_url: "https://aux-wars.com/lobby/ABC123" } });
     expect(event.properties.$pathname).toBe("/lobby/[room]/round");
