@@ -21,12 +21,9 @@ export default function SongItem({ track, selected, onSelect, onSelectSong }) {
     null;
 
   return (
-    <motion.div
+    <div
       data-vital="song"
-      initial={{ scale: 1 }}
-      whileHover={{ scale: 1.02 }}
-      transition={{ type: "spring", stiffness: 300, damping: 15 }}
-      className={`song-item flex items-center justify-between p-3 mb-3 rounded-md h-auto ${
+      className={`song-item flex items-center justify-between p-3 mb-3 rounded-md h-auto transition-transform duration-150 hover:scale-[1.02] ${
         selected ? "bg-[#242424]" : "cursor-pointer"
       }`}
       onClick={() => onSelect(track)}
@@ -79,6 +76,6 @@ export default function SongItem({ track, selected, onSelect, onSelectSong }) {
           </motion.button>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }

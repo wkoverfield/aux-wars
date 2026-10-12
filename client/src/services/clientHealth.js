@@ -154,6 +154,35 @@ export function interactionLabel(node) {
   return `${names.join(">")}:${control.tagName.toLowerCase().slice(0, 10)}`;
 }
 
+const INTERACTION_LABEL_RE = /^([a-z0-9-]{1,24}>){0,2}[a-z0-9-]{0,24}:[a-z]{1,10}$/;
+const RECENT_INTERACTIONS = 20;
+// A recorded label counts for an interaction that started within this long of it.
+const INTERACTION_MATCH_MS = 100;
+let recentInteractions = [];
+
+/**
+ * Notes the label of what a pointerdown or keydown hit, at the time it
+ * happens. INP is attributed later, and by then a control that advanced the
+ * screen has usually left the page, so its label can no longer be read.
+ */
+export function noteInteraction(event) {
+  const label = interactionLabel(event?.target);
+  if (!label || typeof event.timeStamp !== "number") return;
+  recentInteractions.push({ time: event.timeStamp, label });
+  if (recentInteractions.length > RECENT_INTERACTIONS) recentInteractions.shift();
+}
+
+/** The label noted closest to `time` (an interaction's start), if any is close enough. */
+export function notedLabelAt(time) {
+  if (typeof time !== "number") return undefined;
+  let best;
+  for (const r of recentInteractions) {
+    const gap = Math.abs(r.time - time);
+    if (gap <= INTERACTION_MATCH_MS && (!best || gap < best.gap)) best = { gap, label: r.label };
+  }
+  return best?.label;
+}
+
 /** Where the longest script in a slow interaction came from. */
 export function scriptSource(url, origin = typeof location === "undefined" ? "" : location.origin) {
   if (typeof url !== "string" || !url) return undefined;
@@ -176,7 +205,14 @@ export function vitalMetadata(metric, nav) {
   if (type) meta.effectiveType = type;
   const a = metric.attribution;
   if (metric.name === "INP" && a) {
-    if (typeof a.interactionTarget === "string" && a.interactionTarget) meta.target = a.interactionTarget;
+    // Prefer the label read at report time; when the element is gone (or the
+    // library fell back to a CSS path), use the one noted when it was hit.
+    const reported = typeof a.interactionTarget === "string" && INTERACTION_LABEL_RE.test(a.interactionTarget)
+      ? a.interactionTarget
+      : undefined;
+    const noted = notedLabelAt(a.interactionTime);
+    const target = reported && !reported.startsWith(":") ? reported : noted || reported;
+    if (target) meta.target = target;
     if (a.interactionType) meta.interactionType = a.interactionType;
     for (const [key, ms] of [["inputDelay", a.inputDelay], ["processing", a.processingDuration], ["presentation", a.presentationDelay]]) {
       if (typeof ms === "number" && Number.isFinite(ms)) meta[key] = Math.round(ms);
@@ -213,6 +249,10 @@ export function initClientHealth(client, { sampleRate = VITALS_SAMPLE_RATE, rand
   });
 
   if (random() < sampleRate) {
+    // Only sampled loads report INP, so only they note interactions.
+    for (const type of ["pointerdown", "keydown"]) {
+      window.addEventListener(type, noteInteraction, { capture: true, passive: true });
+    }
     import("web-vitals/attribution")
       .then(({ onLCP, onINP, onCLS, onFCP, onTTFB }) => {
         onLCP(reportVital);
@@ -231,4 +271,5 @@ export function __resetClientHealthForTests() {
   convexClient = null;
   errorsSent = 0;
   boundarySent = 0;
+  recentInteractions = [];
 }

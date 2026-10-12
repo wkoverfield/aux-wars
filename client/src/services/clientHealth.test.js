@@ -16,6 +16,8 @@ import {
   errorOrigin,
   initClientHealth,
   interactionLabel,
+  noteInteraction,
+  notedLabelAt,
   scriptSource,
   reportBoundaryError,
   reportClientError,
@@ -196,6 +198,47 @@ describe("INP attribution", () => {
     });
     expect(vitalMetadata({ name: "LCP", value: 2000, rating: "good", attribution: { target: "img" } }, { userAgent: "" }))
       .not.toHaveProperty("target");
+  });
+});
+
+describe("noted interaction labels", () => {
+  const attribution = (over) => ({ interactionType: "pointer", inputDelay: 1, processingDuration: 2, presentationDelay: 3, ...over });
+  const inp = (a) => vitalMetadata({ name: "INP", value: 300, rating: "needs-improvement", attribution: attribution(a) }, { userAgent: "" });
+
+  it("uses the label noted at the tap when the element is gone by report time", () => {
+    document.body.innerHTML = `<div data-vital="rating"><button data-vital="submit" id="b">Submit</button></div>`;
+    noteInteraction({ target: document.getElementById("b"), timeStamp: 1000 });
+    document.body.innerHTML = "";
+    expect(inp({ interactionTarget: undefined, interactionTime: 1004 }).target).toBe("rating>submit:button");
+    // A CSS path from the library's own fallback is never sent.
+    expect(inp({ interactionTarget: "html>body>div#root>button.green-btn", interactionTime: 1004 }).target).toBe("rating>submit:button");
+  });
+
+  it("keeps a full label read at report time, and fills in a nameless one", () => {
+    document.body.innerHTML = `<div data-vital="lobby"><button data-vital="ready" id="b">Ready</button></div>`;
+    noteInteraction({ target: document.getElementById("b"), timeStamp: 500 });
+    expect(inp({ interactionTarget: "song-select>search:input", interactionTime: 500 }).target).toBe("song-select>search:input");
+    expect(inp({ interactionTarget: ":button", interactionTime: 500 }).target).toBe("lobby>ready:button");
+    document.body.innerHTML = "";
+  });
+
+  it("matches the nearest note within 100ms and nothing further away", () => {
+    document.body.innerHTML = `<div data-vital="a"><button id="x"></button></div><div data-vital="b"><button id="y"></button></div>`;
+    noteInteraction({ target: document.getElementById("x"), timeStamp: 1000 });
+    noteInteraction({ target: document.getElementById("y"), timeStamp: 1060 });
+    expect(notedLabelAt(1050)).toBe("b:button");
+    expect(notedLabelAt(1010)).toBe("a:button");
+    expect(notedLabelAt(1300)).toBeUndefined();
+    expect(inp({ interactionTarget: undefined, interactionTime: 5000 })).not.toHaveProperty("target");
+    document.body.innerHTML = "";
+  });
+
+  it("keeps only the most recent notes", () => {
+    document.body.innerHTML = `<div data-vital="a"><button id="x"></button></div>`;
+    for (let i = 0; i < 30; i += 1) noteInteraction({ target: document.getElementById("x"), timeStamp: i * 1000 });
+    expect(notedLabelAt(0)).toBeUndefined();
+    expect(notedLabelAt(29000)).toBe("a:button");
+    document.body.innerHTML = "";
   });
 });
 

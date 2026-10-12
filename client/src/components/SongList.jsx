@@ -10,9 +10,16 @@ import SongItem from './SongItem';
  * @param {Object} props.selectedTrack - Currently selected track
  * @param {Function} props.onSelectTrack - Callback when a track is selected
  * @param {Function} props.onConfirmTrack - Callback when a track is confirmed
+ * @param {string|null} [props.emptyText] - Shown when there are no tracks; null shows nothing
  * @returns {JSX.Element} Rendered component
  */
-const SongList = ({ tracks, selectedTrack, onSelectTrack, onConfirmTrack }) => {
+const SongList = ({
+  tracks,
+  selectedTrack,
+  onSelectTrack,
+  onConfirmTrack,
+  emptyText = "No songs found. Try searching for something else.",
+}) => {
   return (
     <div className="song-list px-4">
       {tracks && tracks.length > 0 ? (
@@ -26,9 +33,7 @@ const SongList = ({ tracks, selectedTrack, onSelectTrack, onConfirmTrack }) => {
           />
         ))
       ) : (
-        <div className="text-center text-gray-200 py-4">
-          No songs found. Try searching for something else.
-        </div>
+        emptyText && <div className="text-center text-gray-200 py-4">{emptyText}</div>
       )}
     </div>
   );
