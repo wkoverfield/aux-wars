@@ -48,7 +48,8 @@ let buffer = [];
 
 function sanitizeUrl(value) {
   if (!value || typeof value !== "string") return value;
-  return value.replace(/\/lobby\/[^/?#]+/g, "/lobby/[room]").replace(/\/g\/[^/?#]+/g, "/g/[results]");
+  // Case-insensitive, like the router: "/LOBBY/ABCD" is the same page.
+  return value.replace(/\/lobby\/[^/?#]+/gi, "/lobby/[room]").replace(/\/g\/[^/?#]+/gi, "/g/[results]");
 }
 
 function isStatsPage(path) {

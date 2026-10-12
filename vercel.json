@@ -17,7 +17,7 @@
       ]
     },
     {
-      "source": "/g/(.*)",
+      "source": "/(g|G)/(.*)",
       "headers": [
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
       ]

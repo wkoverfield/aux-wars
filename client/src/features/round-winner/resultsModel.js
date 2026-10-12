@@ -80,3 +80,15 @@ export function recapSummary(playerCount, roundCount) {
   const rounds = `${roundCount} ${roundCount === 1 ? 'round' : 'rounds'}`;
   return `${players}, ${rounds}`;
 }
+
+/** A plain dark square, shown where a shared song has no usable cover. */
+export const BLANK_COVER =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3Crect width='1' height='1' fill='%232a2a2a'/%3E%3C/svg%3E";
+
+/** Round results with a placeholder wherever a song's cover is missing. */
+export function withCovers(rounds) {
+  return (rounds || []).map((round) => ({
+    ...round,
+    songs: (round.songs || []).map((song) => (song.albumCover ? song : { ...song, albumCover: BLANK_COVER })),
+  }));
+}

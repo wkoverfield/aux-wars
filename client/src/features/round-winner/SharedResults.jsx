@@ -7,7 +7,7 @@ import ScrollFade from '../../components/ScrollFade';
 import { useNoIndex } from '../../hooks/useNoIndex';
 import logo from '../../assets/aux-wars-logo.svg';
 import { computeAwards } from './computeAwards';
-import { pickReel, recapSummary, standingsFrom } from './resultsModel';
+import { pickReel, recapSummary, standingsFrom, withCovers } from './resultsModel';
 import SetlistModal from './SetlistModal';
 import Standings from './Standings';
 
@@ -57,16 +57,18 @@ export default function SharedResults() {
   const [setlistPlayer, setSetlistPlayer] = useState(null);
   useNoIndex('Aux Wars results');
 
-  const players = useMemo(() => (data ? standingsFrom(data.rounds) : []), [data]);
+  // A cover the snapshot rejected (not from a music catalog) shows as a plain square.
+  const rounds = useMemo(() => (data ? withCovers(data.rounds) : []), [data]);
+  const players = useMemo(() => standingsFrom(rounds), [rounds]);
   const awards = useMemo(
     () =>
       data
         ? pickReel(
-            computeAwards({ playerStats: players, allRounds: data.rounds, voterAwards: data.voterAwards, players: data.players, seed: data.seed }),
+            computeAwards({ playerStats: players, allRounds: rounds, voterAwards: data.voterAwards, players: data.players, seed: data.seed }),
             data.seed
           )
         : [],
-    [data, players]
+    [data, players, rounds]
   );
 
   // Count one view per page load, once the results are known to exist.
@@ -105,7 +107,7 @@ export default function SharedResults() {
     <Shell>
       <div className="text-center mt-5">
         <h1 className="text-2xl md:text-3xl">{winner.playerName} had the best taste</h1>
-        <p className="text-sm text-white/50 mt-1">{recapSummary(players.length, data.rounds.length)}</p>
+        <p className="text-sm text-white/50 mt-1">{recapSummary(players.length, rounds.length)}</p>
       </div>
 
       <Standings players={players} awards={awards} onPickPlayer={setSetlistPlayer} />

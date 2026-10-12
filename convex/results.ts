@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { readVoterAwards } from "./game/flow";
+import { containsHateSpeech } from "./game/contentFilter";
 
 /**
  * Shared results: a saved copy of a finished game that anyone with its link
@@ -20,9 +21,44 @@ const SHARE_ID_RE = /^[a-z0-9]{12}$/;
 const PRUNE_BATCH = 100;
 
 function makeShareId(): string {
-  const bytes = new Uint8Array(SHARE_ID_LENGTH);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => SHARE_ID_ALPHABET[b % SHARE_ID_ALPHABET.length]).join("");
+  // Rejection sampling: a plain modulo would favor the first letters.
+  const limit = 256 - (256 % SHARE_ID_ALPHABET.length);
+  let id = "";
+  while (id.length < SHARE_ID_LENGTH) {
+    const bytes = new Uint8Array(SHARE_ID_LENGTH * 2);
+    crypto.getRandomValues(bytes);
+    for (const b of bytes) {
+      if (b < limit && id.length < SHARE_ID_LENGTH) id += SHARE_ID_ALPHABET[b % SHARE_ID_ALPHABET.length];
+    }
+  }
+  return id;
+}
+
+/**
+ * Song details reach the server from the submitting player's client and are
+ * not checked there: inside a room only the players see them. A shared page
+ * is public, so they are cleaned on the way into a snapshot.
+ */
+const MAX_SONG_TEXT = 120;
+const MAX_PROMPT_TEXT = 200;
+const REMOVED_TEXT = "[removed]";
+// The image hosts of the music catalogs the search server returns
+// (YouTube thumbnails, iTunes artwork, Deezer covers).
+const COVER_HOST_RE = /^(i\d?\.ytimg\.com|[a-z0-9-]+\.mzstatic\.com|[a-z0-9-]+\.dzcdn\.net)$/;
+
+export function publicText(text: string, max = MAX_SONG_TEXT): string {
+  const clean = text.replace(/\s+/g, " ").trim().slice(0, max);
+  return containsHateSpeech(clean) ? REMOVED_TEXT : clean;
+}
+
+/** The cover URL when it is an https image on a known catalog host, else "". */
+export function publicCover(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && COVER_HOST_RE.test(u.hostname) && !u.username && !u.password ? u.href : "";
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -99,15 +135,15 @@ export const share = mutation({
         return {
           songId: songKey,
           playerKey: keyOf(song.playerId),
-          name: song.name,
-          artist: song.artist,
-          albumCover: song.albumCover,
+          name: publicText(song.name),
+          artist: publicText(song.artist),
+          albumCover: publicCover(song.albumCover),
           totalRecords: song.totalRecords,
         };
       });
       return {
         round: rr.round,
-        ...(rr.prompt ? { prompt: rr.prompt } : {}),
+        ...(rr.prompt ? { prompt: publicText(rr.prompt, MAX_PROMPT_TEXT) } : {}),
         ...(rr.winnerSongId ? { winnerSongId: songKeys.get(rr.winnerSongId) ?? "" } : {}),
         songs,
       };
@@ -120,7 +156,7 @@ export const share = mutation({
     }));
     const snapshotPlayers = [...keys.entries()].map(([id, key]) => ({
       key,
-      name: names.get(id) ?? "Unknown Player",
+      name: publicText(names.get(id) ?? "Unknown Player", 50),
     }));
 
     const createdAt = Date.now();

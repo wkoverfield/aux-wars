@@ -103,6 +103,25 @@ describe("shared results", () => {
     for (const secret of ["qa-maya", "qa-dev", "qa-sam", ...r1, ...r2]) expect(text).not.toContain(secret);
   });
 
+  test("song details a client supplied are cleaned before they go public", async () => {
+    const t = setup();
+    const { code } = await finishedGame(t);
+    await t.run(async (ctx) => {
+      const rr = await ctx.db.query("roundResults").withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", 1)).unique();
+      const results = rr!.results.map((r, i) =>
+        i === 1 ? { ...r, name: "y".repeat(400), artist: "  spaced   out  ", albumCover: "https://evil.example/pixel.gif" } : r
+      );
+      await ctx.db.patch(rr!._id, { results });
+    });
+    const { shareId } = (await t.mutation(api.results.share, as(code, "qa-maya"))) as { shareId: string };
+    const songs = (await t.query(api.results.get, { shareId }))!.rounds[0].songs;
+    expect(songs[1].name).toHaveLength(120);
+    expect(songs[1].artist).toBe("spaced out");
+    expect(songs[1].albumCover).toBe("");
+    // A real catalog cover is kept as is.
+    expect(songs[0].albumCover).toBe("https://i.ytimg.com/vi/alpha/mqdefault.jpg");
+  });
+
   test("one snapshot per game, whoever asks", async () => {
     const t = setup();
     const { code } = await finishedGame(t);

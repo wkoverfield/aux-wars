@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeAwards } from "./computeAwards";
-import { hashStr, pickReel, recapSummary, reelSeedFor, standingsFrom } from "./resultsModel";
+import { BLANK_COVER, hashStr, pickReel, recapSummary, reelSeedFor, standingsFrom, withCovers } from "./resultsModel";
 
 // A 4-player, 3-round game, in the shape getAllRoundResults returns.
 const P = ["id-maya", "id-dev", "id-sam", "id-lee"];
@@ -72,6 +72,15 @@ describe("a shared snapshot shows the awards the players saw", () => {
     const all = computeAwards({ playerStats: standingsFrom(liveRounds), allRounds: liveRounds, voterAwards: voters(), players: P.map((id) => ({ playerId: id, name: NAMES[id] })), seed });
     expect(new Set(all.map((a) => a.playerName)).size).toBeGreaterThan(1);
     expect(all.length).toBeGreaterThan(3);
+  });
+});
+
+describe("withCovers", () => {
+  it("fills in a placeholder only where the cover is missing", () => {
+    const out = withCovers([{ round: 1, songs: [{ songId: "a", albumCover: "" }, { songId: "b", albumCover: "https://i.ytimg.com/vi/x/mqdefault.jpg" }] }]);
+    expect(out[0].songs[0].albumCover).toBe(BLANK_COVER);
+    expect(out[0].songs[1].albumCover).toBe("https://i.ytimg.com/vi/x/mqdefault.jpg");
+    expect(withCovers(undefined)).toEqual([]);
   });
 });
 

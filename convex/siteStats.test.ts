@@ -133,6 +133,17 @@ describe("visitor identity", () => {
     }
   });
 
+  test("room codes and results ids never reach the per-path counters, whatever the case", async () => {
+    const t = setup();
+    for (const path of ["/lobby/QAROOM", "/LOBBY/QAROOM/round", "/g/abcdefgh2345", "/G/abcdefgh2345"]) {
+      await t.mutation(api.siteStats.recordPageview, { path, visitorId: "qa-visitor" });
+    }
+    const keys = await t.run(async (ctx) => (await ctx.db.query("pageviewCounters").collect()).map((r) => r.key));
+    const paths = keys.filter((k) => k.startsWith("path:")).sort();
+    expect([...new Set(paths)]).toEqual(["path:/g/:id", "path:/lobby/:code", "path:/lobby/:code/round"]);
+    expect(keys.join(" ")).not.toMatch(/QAROOM|abcdefgh2345/);
+  });
+
   test("a join records whether it came from an invite link or the code box", async () => {
     vi.useFakeTimers();
     try {
