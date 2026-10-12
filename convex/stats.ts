@@ -379,6 +379,14 @@ export const getDashboard = query({
       started: sum((r) => r.playersInStartedGames),
       completed: sum((r) => r.playersInCompletedGames),
     };
+    // Joins by how the player arrived, including today so far. Quick Play
+    // seats and joins from older clients carry no source.
+    const joinRows = [...rows, todayRow];
+    const joinSources = {
+      total: joinRows.reduce((s, r) => s + r.playerJoins, 0),
+      byLink: joinRows.reduce((s, r) => s + (r.playerJoinsByLink ?? 0), 0),
+      byCode: joinRows.reduce((s, r) => s + (r.playerJoinsByCode ?? 0), 0),
+    };
 
     const searches = new Map<string, number>();
     const phases = new Map<string, number>();
@@ -424,6 +432,7 @@ export const getDashboard = query({
         cohorts: { d1: d1.cohort, d7: d7.cohort, d30: d30.cohort },
       },
       funnel,
+      joinSources,
       topNoResultSearches,
       searches: { noResults: searchNoResults, failed: searchFailed, failedByReason: searchFailedByReason },
       abandonmentByPhase,

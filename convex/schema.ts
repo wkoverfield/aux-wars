@@ -13,6 +13,10 @@ export const dailyMetricsFields = {
   abandonedByPhase: v.record(v.string(), v.number()),
   completionRate: v.union(v.number(), v.null()), // completed / started, 0-1
   playerJoins: v.number(),
+  // Joins by how the player arrived. Optional: older rows lack them, and
+  // joins from clients that predate the field count in neither.
+  playerJoinsByLink: v.optional(v.number()),
+  playerJoinsByCode: v.optional(v.number()),
   uniquePlayers: v.number(), // distinct visitorId (playerId for legacy joins)
   joinsWithVisitorId: v.number(),
   playersInStartedGames: v.number(), // distinct players who joined a room that started

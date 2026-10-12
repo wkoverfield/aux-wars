@@ -89,6 +89,7 @@ export type SlimEvent = {
   processing?: number;
   presentation?: number;
   script?: string;
+  source?: string;
 };
 
 export function slimEvent(metadata: unknown): SlimEvent {
@@ -106,7 +107,7 @@ export function slimEvent(metadata: unknown): SlimEvent {
   if (typeof m.name === "string") out.name = m.name;
   if (typeof m.value === "number") out.value = m.value;
   if (typeof m.deviceClass === "string") out.deviceClass = m.deviceClass;
-  for (const k of ["route", "target", "interactionType", "script"] as const) {
+  for (const k of ["route", "target", "interactionType", "script", "source"] as const) {
     if (typeof m[k] === "string") out[k] = m[k] as string;
   }
   for (const k of ["inputDelay", "processing", "presentation"] as const) {
@@ -414,6 +415,8 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
     abandonedByPhase,
     completionRate,
     playerJoins: joins.length,
+    playerJoinsByLink: joins.filter((e) => e.source === "link").length,
+    playerJoinsByCode: joins.filter((e) => e.source === "code").length,
     uniquePlayers: players.size,
     joinsWithVisitorId,
     playersInStartedGames: inStarted.size,

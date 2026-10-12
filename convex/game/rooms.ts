@@ -79,8 +79,11 @@ export const joinGame = mutation({
     // seat; optional in private rooms, where it is stored when sent so that
     // seat can then only be taken over with it.
     seatKey: v.optional(v.string()),
+    // How the player got here: an invite link (the join screen on a room
+    // URL) or the code box on the home page. Recorded on the join event.
+    source: v.optional(v.union(v.literal("link"), v.literal("code"))),
   },
-  handler: async (ctx, { code, playerId, connectionId, name, visitorId, seatKey }) => {
+  handler: async (ctx, { code, playerId, connectionId, name, visitorId, seatKey, source }) => {
     // Validate player name
     const trimmedName = name.trim();
     if (!trimmedName || trimmedName.length < 1 || trimmedName.length > 50) {
@@ -174,7 +177,12 @@ export const joinGame = mutation({
       const joinVisitorId = cleanVisitorId(visitorId);
       await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
         eventType: "player_joined",
-        metadata: { roomCode: code, playerId, ...(joinVisitorId ? { visitorId: joinVisitorId } : {}) },
+        metadata: {
+          roomCode: code,
+          playerId,
+          ...(joinVisitorId ? { visitorId: joinVisitorId } : {}),
+          ...(source ? { source } : {}),
+        },
       });
       if (joinVisitorId) {
         await recordVisitorPlayed(ctx, joinVisitorId, new Date(now()).toISOString().slice(0, 10));
