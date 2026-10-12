@@ -47,6 +47,7 @@ describe("PostHog event allowlist", () => {
       "game_created",
       "game_started",
       "host_game_clicked",
+      "invite_shared",
       "lobby_left",
       "play_again_clicked",
       "player_joined",

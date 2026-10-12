@@ -386,6 +386,7 @@ export const getDashboard = query({
       total: joinRows.reduce((s, r) => s + r.playerJoins, 0),
       byLink: joinRows.reduce((s, r) => s + (r.playerJoinsByLink ?? 0), 0),
       byCode: joinRows.reduce((s, r) => s + (r.playerJoinsByCode ?? 0), 0),
+      invites: joinRows.reduce((s, r) => s + (r.invitesShared ?? 0), 0),
     };
 
     const searches = new Map<string, number>();

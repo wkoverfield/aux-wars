@@ -36,6 +36,7 @@ function emptyEvents(): DayEvents {
       search_failed: [],
       quickplay_matched: [],
       quickplay_left_waiting: [],
+      invite_shared: [],
       web_vital: [],
       client_error: [],
       client_error_boundary: [],
@@ -127,6 +128,16 @@ describe("web vitals rollup", () => {
         inputDelay: null, processing: null, presentation: null, mobileShare: 1, script: null,
       },
     ]);
+  });
+
+  test("computeDayMetrics counts invites by method", () => {
+    const ev = emptyEvents();
+    ev.detail.invite_shared = [{ reason: "share" }, { reason: "share" }, { reason: "qr" }, { reason: "code" }, { reason: "copy" }, { reason: "carrier pigeon" }, {}];
+    expect(computeDayMetrics(inputs({ events: ev }))).toMatchObject({
+      invitesShared: 7,
+      invitesByMethod: { share: 2, qr: 1, code: 1, copy: 1, unknown: 2 },
+    });
+    expect(computeDayMetrics(inputs())).toMatchObject({ invitesShared: 0, invitesByMethod: {} });
   });
 
   test("computeDayMetrics carries vitals and client error counts", () => {

@@ -11,6 +11,8 @@ import AdSlot from "../../components/AdSlot";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 // GameContext removed - using RoomProvider's Convex queries directly
 import { usePendingAction } from "../../hooks/usePendingAction";
+import { copyInvite, inviteUrl, sendInvite } from "./invite";
+import InviteQrModal from "./InviteQrModal";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
@@ -79,13 +81,35 @@ function PrivateLobby() {
   // the Settings modal (niche/host-only) — this just reflects their state.
   const locked = !!room?.locked;
   const [streamerHide, setStreamerHide] = useState(false);
-  const handleCopyInvite = async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href);
+  const [showQr, setShowQr] = useState(false);
+  const logEvent = useMutation(api.analytics.logEvent);
+  const noteInvite = (method) => {
+    logEvent({ eventType: "invite_shared", metadata: { reason: method } }).catch(() => {});
+    captureGameEvent("invite_shared", gameProperties({ code: gameCode, room, players, session, extra: { method } }));
+  };
+  /** Share sheet where the device has one, otherwise the clipboard. */
+  const handleInvite = async () => {
+    const outcome = await sendInvite(inviteUrl(gameCode));
+    if (outcome === "shared") noteInvite("share");
+    else if (outcome === "copied") {
+      noteInvite("copy");
       showToast("Invite link copied", "success");
-    } catch {
-      showToast("Couldn't copy — grab the URL from the address bar", "warning");
+    } else if (outcome === "failed") {
+      showToast("Couldn't copy the link. Grab the URL from the address bar.", "warning");
     }
+  };
+  /** Tapping the room code copies just the code, to paste into a chat. */
+  const handleCopyCode = async () => {
+    if (await copyInvite(gameCode)) {
+      noteInvite("code");
+      showToast("Code copied", "success");
+    } else {
+      showToast("Couldn't copy the code.", "warning");
+    }
+  };
+  const handleShowQr = () => {
+    setShowQr(true);
+    noteInvite("qr");
   };
 
   // Initialize game code once on mount
@@ -314,15 +338,46 @@ function PrivateLobby() {
               <div className="lobby-code-count flex gap-5">
                 <div className="lobby-container rounded-md lobby-code flex flex-col gap-2">
                   <p className="text-xs font-normal">Code{locked ? ' · 🔒' : ''}</p>
-                  <div className="flex items-center gap-2">
-                    <p className="text-2xl select-none">{streamerHide ? '••••••' : gameCode}</p>
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={handleCopyInvite}
-                      className="text-[11px] text-gray-400 hover:text-white border border-gray-600 rounded px-2 py-1 transition"
+                      data-vital="invite"
+                      onClick={handleCopyCode}
+                      aria-label="Copy room code"
+                      title="Copy room code"
+                      className="text-2xl text-left cursor-pointer hover:text-[#68d570] transition-colors mr-1"
                     >
-                      Copy link
+                      {streamerHide ? '••••••' : gameCode}
                     </button>
+                    {/* Share sheet on a phone; copies the full invite link elsewhere. */}
+                    <button
+                      type="button"
+                      data-vital="invite"
+                      onClick={handleInvite}
+                      aria-label="Share invite link"
+                      title="Share invite link"
+                      className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15" />
+                      </svg>
+                    </button>
+                    {/* A QR code on screen would show the room to a stream. */}
+                    {!streamerHide && (
+                      <button
+                        type="button"
+                        data-vital="invite-qr"
+                        onClick={handleShowQr}
+                        aria-label="Show QR code"
+                        title="Show QR code"
+                        className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="lobby-container rounded-md lobby-count flex flex-col gap-2">
@@ -368,6 +423,17 @@ function PrivateLobby() {
                 currentPlayerId={session?.playerId}
                 onKick={handleKickPlayer}
               />
+              {/* An empty seat, quiet on purpose: it reads as part of the list. */}
+              {players.length === 1 && (
+                <button
+                  type="button"
+                  data-vital="invite"
+                  onClick={handleInvite}
+                  className="mt-4 w-full rounded-md border border-dashed border-gray-600 px-4 py-3 text-left text-sm text-gray-400 hover:border-gray-400 hover:text-white transition-colors"
+                >
+                  Invite a friend to get started
+                </button>
+              )}
               {/* Ad-safe: lobby is a waiting surface; scrolls with the list, ad-free in pro rooms */}
               <AdSlot slot="lobby" />
             </ScrollFade>
@@ -395,6 +461,7 @@ function PrivateLobby() {
         streamerHide={streamerHide}
         onToggleStreamerHide={() => setStreamerHide((v) => !v)}
       />
+      {showQr && <InviteQrModal url={inviteUrl(gameCode)} onClose={() => setShowQr(false)} />}
       <SessionTakenOverModal
         show={showTakenOverModal}
         gameCode={gameCode}

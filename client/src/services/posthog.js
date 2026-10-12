@@ -271,6 +271,7 @@ export const POSTHOG_EVENTS = Object.freeze([
   "round_completed",
   "game_completed_viewed",
   "play_again_clicked",
+  "invite_shared",
   "song_search_no_results",
   "lobby_left",
 ]);
