@@ -43,12 +43,13 @@ export default function ScrollFade({
     if (!el) return undefined;
     update();
     el.addEventListener('scroll', update, { passive: true });
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    if (contentRef.current) ro.observe(contentRef.current);
+    // Browsers without ResizeObserver still get the fades on scroll.
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
+    ro?.observe(el);
+    if (contentRef.current) ro?.observe(contentRef.current);
     return () => {
       el.removeEventListener('scroll', update);
-      ro.disconnect();
+      ro?.disconnect();
     };
   }, [update]);
 

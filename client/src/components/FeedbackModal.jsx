@@ -3,16 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { groupFeedback } from './feedbackGroups';
-
-// Get or create a persistent visitor ID for upvoting
-function getVisitorId() {
-  let id = localStorage.getItem('aux-wars-visitor-id');
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem('aux-wars-visitor-id', id);
-  }
-  return id;
-}
+// Guarded: this modal is mounted on the home page even while closed, so a
+// storage read that throws (storage blocked) would take the whole page down.
+import { getVoterId } from '../utils/visitorId';
 
 const FEEDBACK_TYPES = [
   { value: 'feature', label: 'Feature Request', color: 'bg-blue-500' },
@@ -55,7 +48,7 @@ export default function FeedbackModal({ showModal, onClose }) {
   const [authorName, setAuthorName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const visitorId = getVisitorId();
+  const visitorId = getVoterId();
   const feedback = useQuery(api.feedback.getFeedback, { visitorId });
   const submitFeedback = useMutation(api.feedback.submitFeedback);
   const upvoteFeedback = useMutation(api.feedback.upvoteFeedback);

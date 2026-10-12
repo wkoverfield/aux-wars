@@ -332,15 +332,20 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
       return;
     }
 
-    // Save settings to localStorage for future games
-    localStorage.setItem('aux-wars-settings', JSON.stringify({
-      numberOfRounds: rounds,
-      roundLength,
-      snippetDuration,
-      selectedPrompts,
-      enablePromptVoting,
-      anonymousMode
-    }));
+    // Save settings to localStorage for future games. Best effort: with
+    // storage blocked the settings must still reach the room.
+    try {
+      localStorage.setItem('aux-wars-settings', JSON.stringify({
+        numberOfRounds: rounds,
+        roundLength,
+        snippetDuration,
+        selectedPrompts,
+        enablePromptVoting,
+        anonymousMode
+      }));
+    } catch {
+      // Storage not available: the settings just won't be remembered.
+    }
 
     // Update settings in Convex and wait for completion (host only)
     try {
