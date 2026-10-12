@@ -20,6 +20,7 @@ const eventMetadata = v.optional(v.object({
   reason: v.optional(v.string()), // search_failed: see searchFailReason
   waitedMs: v.optional(v.number()), // quickplay_matched / quickplay_left_waiting
   playersAtStart: v.optional(v.number()), // quickplay_matched
+  source: v.optional(v.string()), // player_joined: "link" | "code" (absent on older clients)
   // web_vital / client_error / client_error_boundary (see sanitizers below)
   name: v.optional(v.string()), // metric name, or error class name
   rating: v.optional(v.string()),

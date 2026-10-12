@@ -206,7 +206,7 @@ function Retention({ retention }) {
   );
 }
 
-function Funnel({ funnel, windowDays }) {
+function Funnel({ funnel, joinSources, windowDays }) {
   const rows = funnel.map((step, i) => ({
     key: step.key,
     label: step.label,
@@ -216,6 +216,12 @@ function Funnel({ funnel, windowDays }) {
   return (
     <Card title="Funnel" aside={`last ${windowDays} days`}>
       <RankedBars rows={rows} format={fmtInt} emptyText="No visits recorded in this window yet." />
+      {joinSources.known > 0 && (
+        <p className="text-xs text-gray-500 mt-4">
+          Room joins: {fmtInt(joinSources.byLink)} by invite link, {fmtInt(joinSources.byCode)} by typed code
+          {joinSources.linkShare !== null ? ` (${fmtPct(joinSources.linkShare)} by link)` : ""}. Includes today.
+        </p>
+      )}
     </Card>
   );
 }
@@ -495,7 +501,7 @@ export default function Dashboard({ adminKey }) {
           <QuickPlay qp={dashboard.quickPlay} windowDays={windowDays} />
           <Speed speed={dashboard.speed} windowDays={windowDays} />
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <Funnel funnel={dashboard.funnel} windowDays={windowDays} />
+            <Funnel funnel={dashboard.funnel} joinSources={dashboard.joinSources} windowDays={windowDays} />
             <Retention retention={dashboard.retention} />
             <Abandonment rows={dashboard.abandonment} />
             <Searches searches={dashboard.searches} noResultRows={dashboard.noResultSearches} windowDays={windowDays} />

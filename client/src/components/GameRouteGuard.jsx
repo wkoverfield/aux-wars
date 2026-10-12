@@ -1,10 +1,12 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation, useParams, Outlet } from 'react-router-dom';
 // import { useSocket, useSocketConnection } from '../services/SocketProvider';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { useSession } from '../hooks/useSession';
 import { useLeaveOnClose } from '../features/quickplay/useQuickPlay';
+import { useToast } from '../contexts/ToastContext';
+import JoinGate from '../features/lobby/JoinGate';
 // GameContext removed - using RoomProvider's Convex queries directly
 
 /**
@@ -18,8 +20,21 @@ export default function GameRouteGuard() {
   // const socket = useSocket();
   // const isConnected = useSocketConnection();
   const { session, updateSession } = useSession();
+  const { showToast } = useToast();
   const [isValidating, setIsValidating] = useState(true);
   const hasInitialized = useRef(false);
+  const toldMissing = useRef(false);
+  // A room that is gone sends the visitor home with a reason, once.
+  const leaveMissingRoom = useCallback(() => {
+    if (!toldMissing.current) {
+      toldMissing.current = true;
+      showToast(
+        hasInitialized.current ? "This game has ended." : "That game doesn't exist anymore. Check the link or ask for a new one.",
+        "warning"
+      );
+    }
+    navigate('/', { replace: true });
+  }, [navigate, showToast]);
   const roomData = useQuery(api.game.rooms.getRoomByCode, gameCode ? { code: gameCode } : 'skip');
 
   // Closing the tab gives the seat up a few seconds later unless the page
@@ -42,25 +57,25 @@ export default function GameRouteGuard() {
   useEffect(() => {
     if (hasInitialized.current) return;
     if (roomData === null) {
-      navigate('/', { replace: true });
+      leaveMissingRoom();
       return;
     }
     if (roomData !== undefined) {
       hasInitialized.current = true;
       setIsValidating(false);
     }
-  }, [roomData, navigate]);
+  }, [roomData, leaveMissingRoom]);
 
   // Update session with current phase (for rejoin logic)
   useEffect(() => {
     if (roomData === null) {
-      navigate('/', { replace: true });
+      leaveMissingRoom();
       return;
     }
     if (!roomData) return;
     const room = roomData.room || roomData;
     if (room?.phase) updateSession({ lastPhase: room.phase });
-  }, [roomData, updateSession, navigate]);
+  }, [roomData, updateSession, leaveMissingRoom]);
 
   // Handle phase-based routing (using Convex query data directly)
   useEffect(() => {
@@ -121,6 +136,12 @@ export default function GameRouteGuard() {
         </div>
       </div>
     );
+  }
+
+  // Someone who is not in this room (an invite link, or a session for another
+  // room) gets the join screen instead of a room they cannot act in.
+  if (guardedRoom && session?.gameCode !== gameCode) {
+    return <JoinGate code={gameCode} room={guardedRoom} players={roomData?.players || []} />;
   }
 
   // Render child routes

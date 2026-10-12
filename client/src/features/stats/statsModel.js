@@ -357,6 +357,7 @@ export function normalizeDashboard(raw, windowDays, nowMs = Date.now()) {
     hourly: normalizeHourly(src.hourlyPeaks ?? src.hourly),
     retention: normalizeRetention(src.retention),
     funnel: normalizeFunnel(src.funnel),
+    joinSources: normalizeJoinSources(src.joinSources),
     noResultSearches: normalizeCounts(
       src.topNoResultSearches ?? src.noResultSearches ?? src.searchNoResults,
       ["term", "label", "query"],
@@ -377,6 +378,18 @@ export const VITAL_THRESHOLDS = {
   FCP: { good: 1800, poor: 3000 },
 };
 export const SPEED_METRICS = ["LCP", "INP", "CLS", "FCP"];
+/**
+ * Joins by how the player arrived. `known` is link + code: joins from older
+ * clients and Quick Play seats carry no source and are left out of the share.
+ */
+export function normalizeJoinSources(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const byLink = num(src.byLink) ?? 0;
+  const byCode = num(src.byCode) ?? 0;
+  const known = byLink + byCode;
+  return { byLink, byCode, known, linkShare: known > 0 ? byLink / known : null };
+}
+
 export const SPEED_DEVICES = ["all", "mobile", "chromebook", "desktop"];
 
 export function vitalRating(metric, value) {

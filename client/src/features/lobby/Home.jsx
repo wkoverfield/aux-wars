@@ -133,11 +133,12 @@ export default function Home() {
     const tempName = `Player ${Math.floor(Math.random() * 100) + 1}`;
 
     try {
-      const resp = await joinGame({ code, name: tempName, playerId, connectionId, visitorId: joinVisitorId() });
+      const resp = await joinGame({ code, name: tempName, playerId, connectionId, visitorId: joinVisitorId(), source: "code" });
       if (resp?.success) {
         captureGameEvent("player_joined", {
           room_code_hash: hashRoomCode(code),
           took_over_connection: Boolean(resp.tookOver),
+          join_source: "code",
         });
         createSession({ gameCode: code, playerId, playerName: tempName, lastPhase: "lobby" });
         navigate(`/lobby/${code}`);

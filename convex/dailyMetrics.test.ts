@@ -238,11 +238,11 @@ describe("computeDayMetrics", () => {
       ...(visitorId ? { visitorId } : {}),
     });
     ev.detail.player_joined = [
-      join("AAAA", "p1", "v1"),
-      join("AAAA", "p2", "v2"),
+      { ...join("AAAA", "p1", "v1"), source: "code" },
+      { ...join("AAAA", "p2", "v2"), source: "link" },
       join("AAAA", "p3"), // legacy client, no visitor id
       join("BBBB", "p4", "v1"), // v1 plays a second game: still one player
-      join("CCCC", "p5", "v3"),
+      { ...join("CCCC", "p5", "v3"), source: "link" },
       join("DDDD", "p6", "v4"), // joined a room that never started
     ];
     ev.detail.search_no_results = [
@@ -261,6 +261,8 @@ describe("computeDayMetrics", () => {
       abandonedByPhase: { rating: 2, lobby: 1, unknown: 1 },
       completionRate: 0.6667,
       playerJoins: 6,
+      playerJoinsByLink: 2,
+      playerJoinsByCode: 1, // the other three carry no source (older clients, Quick Play)
       uniquePlayers: 5, // v1, v2, p3, v3, v4
       joinsWithVisitorId: 5,
       playersInStartedGames: 4, // v1, v2, p3, v3

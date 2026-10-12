@@ -14,6 +14,7 @@ import {
   normalizeHourly,
   normalizeLive,
   normalizeRetention,
+  normalizeJoinSources,
   normalizeSpeed,
   fmtVital,
   vitalRating,
@@ -322,5 +323,12 @@ describe("speed", () => {
     expect(s.hasData).toBe(false);
     expect(s.errors).toEqual({ client: 0, boundary: 0 });
     expect(normalizeDashboard({}, 7, NOW).speed.hasData).toBe(false);
+  });
+});
+
+describe("normalizeJoinSources", () => {
+  it("shares joins between link and code, ignoring unsourced ones", () => {
+    expect(normalizeJoinSources({ total: 20, byLink: 3, byCode: 9 })).toEqual({ byLink: 3, byCode: 9, known: 12, linkShare: 0.25 });
+    expect(normalizeJoinSources(undefined)).toEqual({ byLink: 0, byCode: 0, known: 0, linkShare: null });
   });
 });

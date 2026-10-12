@@ -132,4 +132,34 @@ describe("visitor identity", () => {
       vi.useRealTimers();
     }
   });
+
+  test("a join records whether it came from an invite link or the code box", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup();
+      const { code } = await t.mutation(api.game.rooms.hostGame, {});
+      const join = (playerId: string, extra: Record<string, unknown> = {}) =>
+        t.mutation(api.game.rooms.joinGame, { code, playerId, connectionId: `c-${playerId}`, name: `QA-${playerId}`, ...extra });
+      expect((await join("qa-host")).success).toBe(true);
+      expect((await join("qa-link", { source: "link" })).success).toBe(true);
+      expect((await join("qa-code", { source: "code" })).success).toBe(true);
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+      const joins = await t.run(async (ctx) =>
+        ctx.db
+          .query("analyticsEvents")
+          .withIndex("by_type", (q) => q.eq("eventType", "player_joined"))
+          .collect()
+      );
+      expect(joins.map((j) => [j.metadata.playerId, j.metadata.source])).toEqual([
+        ["qa-host", undefined],
+        ["qa-link", "link"],
+        ["qa-code", "code"],
+      ]);
+      // Anything else is rejected by the argument validator.
+      await expect(join("qa-bad", { source: "telepathy" })).rejects.toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
