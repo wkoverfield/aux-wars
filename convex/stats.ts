@@ -103,6 +103,8 @@ const LIVE_COUNT_TYPES = [
   "quickplay_clicked",
   "quickplay_1v1_offered",
   "quickplay_1v1_accepted",
+  "result_shared",
+  "result_viewed",
 ] as const;
 
 // Sampled web vitals are the highest-volume detail type; today's partial row
@@ -387,6 +389,8 @@ export const getDashboard = query({
       byLink: joinRows.reduce((s, r) => s + (r.playerJoinsByLink ?? 0), 0),
       byCode: joinRows.reduce((s, r) => s + (r.playerJoinsByCode ?? 0), 0),
       invites: joinRows.reduce((s, r) => s + (r.invitesShared ?? 0), 0),
+      resultsShared: joinRows.reduce((s, r) => s + (r.resultsShared ?? 0), 0),
+      resultsViewed: joinRows.reduce((s, r) => s + (r.resultsViewed ?? 0), 0),
     };
 
     const searches = new Map<string, number>();

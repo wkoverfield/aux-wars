@@ -58,6 +58,12 @@ crons.daily(
   internal.metricsRollup.snapshotDailyMetrics
 );
 
+crons.daily(
+  "prune-expired-shared-results",
+  { hourUTC: 5, minuteUTC: 15 },
+  internal.results.pruneExpired
+);
+
 export default crons;
 
 

@@ -65,6 +65,8 @@ export const COUNT_EVENT_TYPES = [
   "quickplay_clicked",
   "quickplay_1v1_offered",
   "quickplay_1v1_accepted",
+  "result_shared",
+  "result_viewed",
 ] as const;
 type DetailType = (typeof DETAIL_EVENT_TYPES)[number];
 type CountType = (typeof COUNT_EVENT_TYPES)[number];
@@ -426,6 +428,8 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
     playerJoinsByCode: joins.filter((e) => e.source === "code").length,
     invitesShared: (detail.invite_shared ?? []).length,
     invitesByMethod,
+    resultsShared: counts.result_shared ?? 0,
+    resultsViewed: counts.result_viewed ?? 0,
     uniquePlayers: players.size,
     joinsWithVisitorId,
     playersInStartedGames: inStarted.size,

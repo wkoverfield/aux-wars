@@ -25,6 +25,7 @@ export function routePattern(pathname) {
   if (STATIC_ROUTES.has(path)) return path;
   const parts = path.split("/").filter(Boolean);
   if (parts[0] === "lobby" && parts.length === 2) return "/lobby/:code";
+  if (parts[0] === "g" && parts.length === 2) return "/g/:id";
   if (parts[0] === "lobby" && parts.length === 3 && LOBBY_SUBROUTES.has(parts[2])) {
     return `/lobby/:code/${parts[2]}`;
   }

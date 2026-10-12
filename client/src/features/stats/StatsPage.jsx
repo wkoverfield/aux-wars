@@ -4,28 +4,7 @@ import { useConvex } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import Dashboard from "./Dashboard";
 import { clearStoredKey, readStoredKey, writeStoredKey } from "./statsModel";
-
-/** Keep /stats out of search indexes (the host also sends X-Robots-Tag). */
-function useNoIndex() {
-  useEffect(() => {
-    let meta = document.head.querySelector('meta[name="robots"]');
-    const created = !meta;
-    const previous = meta?.getAttribute("content") ?? null;
-    if (!meta) {
-      meta = document.createElement("meta");
-      meta.setAttribute("name", "robots");
-      document.head.appendChild(meta);
-    }
-    meta.setAttribute("content", "noindex, nofollow");
-    const previousTitle = document.title;
-    document.title = "Stats | Aux Wars";
-    return () => {
-      document.title = previousTitle;
-      if (created) meta.remove();
-      else if (previous !== null) meta.setAttribute("content", previous);
-    };
-  }, []);
-}
+import { useNoIndex } from "../../hooks/useNoIndex";
 
 /**
  * Catches a stats query that throws after the key was accepted (the key was
@@ -121,7 +100,7 @@ function KeyPrompt({ onSubmit, checking, checkingSaved, message }) {
  * `checkKey` before any throwing query is subscribed.
  */
 export default function StatsPage() {
-  useNoIndex();
+  useNoIndex("Stats | Aux Wars");
   const convex = useConvex();
   const [initialKey] = useState(() => readStoredKey());
   // status: checking | prompt | ready | failed

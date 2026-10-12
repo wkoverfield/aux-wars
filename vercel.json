@@ -17,6 +17,12 @@
       ]
     },
     {
+      "source": "/g/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    },
+    {
       "source": "/stats",
       "headers": [
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" }

@@ -11,9 +11,12 @@ import PlayerResultWithHover from '../../components/PlayerResultWithHover';
 import ScrollFade from '../../components/ScrollFade';
 import AnimatedLogo from '../../components/AnimatedLogo';
 import AdSlot from '../../components/AdSlot';
-import recordLogo from '../../components/record-logo.svg';
 import { captureGameEvent, gameProperties } from '../../services/analytics';
 import { computeAwards } from './computeAwards';
+import { pickReel, reelSeedFor, standingsFrom } from './resultsModel';
+import SetlistModal from './SetlistModal';
+import Standings from './Standings';
+import { sendLink } from '../lobby/invite';
 import { SecondsLeft, useSecondsUntil } from '../quickplay/useQuickPlay';
 
 /**
@@ -58,58 +61,6 @@ function NextGameWait({ rematchAt }) {
   );
 }
 
-function buildPlayerStatsFromRounds(results) {
-  const stats = {};
-  const rounds = Array.isArray(results) ? results : Object.values(results || {});
-  rounds.forEach((round, roundIdx) => {
-    if (!round.songs) return;
-    const winnerSongId = round.winnerSongId;
-    round.songs.forEach((song) => {
-      const playerId = song.player?.id;
-      if (!playerId) return;
-      if (!stats[playerId]) {
-        stats[playerId] = { playerId, playerName: song.player.name, wins: 0, totalRecords: 0, songs: [] };
-      }
-      stats[playerId].songs.push({ ...song, round: roundIdx + 1, isRoundWinner: song.songId === winnerSongId, prompt: round.prompt });
-      stats[playerId].totalRecords += song.totalRecords || 0;
-      if (song.songId === winnerSongId) stats[playerId].wins += 1;
-    });
-  });
-  return Object.values(stats);
-}
-
-/** Tiny deterministic PRNG (mulberry32) + string hash. Seeding the shuffle from a
- *  per-game value makes the superlative reel STABLE across re-renders, remounts,
- *  StrictMode double-mounts and reactive query pushes, while still varying
- *  game-to-game. (Math.random would reshuffle on every reactive re-render.) */
-function hashStr(str) {
-  let h = 1779033703 ^ str.length;
-  for (let i = 0; i < str.length; i += 1) {
-    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
-  }
-  return (h ^ (h >>> 16)) >>> 0;
-}
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Fisher–Yates pick of up to n items using a provided RNG (deterministic when seeded). */
-function pickN(arr, n, rng = Math.random) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rng() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a.slice(0, n);
-}
-
 const SUSPENSE_MS = 1300;
 const WINNER_MS = 2600;
 const SUPERLATIVE_MS = 4000;
@@ -145,51 +96,6 @@ function RematchCountdown({ rematchAt, onCancel, cancelling }) {
   );
 }
 
-/** Per-player setlist modal — their picks across the game with scores. */
-function SetlistModal({ player, onClose }) {
-  if (!player) return null;
-  const songs = [...(player.songs || [])].sort((a, b) => a.round - b.round);
-  return (
-    <motion.div
-      className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
-    >
-      <motion.div
-        className="bg-[#181818] rounded-lg w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden shadow-2xl"
-        initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="shrink-0 px-5 pt-5 pb-3 flex items-center justify-between">
-          <div>
-            <p className="text-xs text-gray-400">Setlist</p>
-            <h3 className="text-xl font-bold text-[#68d570]">{player.playerName}</h3>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl leading-none px-2">×</button>
-        </div>
-        <ScrollFade className="flex-1 min-h-0" contentClassName="px-5 pb-5 space-y-2" fadeColor="#181818" showTop={false}>
-          {songs.map((s) => (
-            <div key={`${s.round}-${s.songId}`} className="flex items-center gap-2.5 p-2 rounded-md bg-[#242424]">
-              <span className="text-[11px] text-gray-500 w-5 shrink-0 text-center">R{s.round}</span>
-              <img src={s.albumCover} alt="" className="w-11 h-11 rounded object-cover shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm text-white truncate">{s.name}{s.isRoundWinner ? ' 🏆' : ''}</p>
-                <p className="text-xs text-gray-400 truncate">{s.artist}</p>
-                {s.prompt && (
-                  <p className="text-[11px] text-gray-500 truncate italic mt-0.5">“{s.prompt}”</p>
-                )}
-              </div>
-              <span className="flex items-center gap-1 text-sm font-semibold text-gray-200 shrink-0">
-                <img src={recordLogo} alt="records" className="w-4 h-4" />
-                {s.totalRecords}
-              </span>
-            </div>
-          ))}
-        </ScrollFade>
-      </motion.div>
-    </motion.div>
-  );
-}
-
 export default function GameWinner() {
   const { gameCode } = useParams();
   const navigate = useNavigate();
@@ -216,6 +122,9 @@ export default function GameWinner() {
   // Play Again and Back to Lobby share one action (only one can be in flight).
   const endAction = usePendingAction();
   const cancelAction = usePendingAction();
+  const shareAction = usePendingAction();
+  const shareResultsMutation = useMutation(api.results.share);
+  const logEvent = useMutation(api.analytics.logEvent);
   const { showToast } = useToast();
   const [leaving, setLeaving] = useState(false);
   const publicRematchAt = isPublic && typeof rematchAt === 'number' ? rematchAt : null;
@@ -232,9 +141,7 @@ export default function GameWinner() {
   };
 
   const sortedPlayers = useMemo(
-    () => (allRoundResultsQuery
-      ? buildPlayerStatsFromRounds(allRoundResultsQuery).sort((a, b) => b.wins - a.wins || b.totalRecords - a.totalRecords)
-      : []),
+    () => (allRoundResultsQuery ? standingsFrom(allRoundResultsQuery) : []),
     [allRoundResultsQuery]
   );
 
@@ -243,10 +150,7 @@ export default function GameWinner() {
   // looks identical across renders/remounts (the heartbeat re-pushes the players
   // query, StrictMode double-mounts, Fast Refresh remounts — all churn refs; a
   // Math.random pick leaks and reshuffles), while still varying game-to-game.
-  const reelSeed = useMemo(() => {
-    const sig = (allRoundResultsQuery || []).map((r) => r.winnerSongId || r.round).join('|');
-    return hashStr(`${gameCode || ''}|${sig}`);
-  }, [allRoundResultsQuery, gameCode]);
+  const reelSeed = useMemo(() => reelSeedFor(gameCode, allRoundResultsQuery), [allRoundResultsQuery, gameCode]);
 
   const awards = useMemo(
     () => (allRoundResultsQuery && playersQuery
@@ -255,7 +159,7 @@ export default function GameWinner() {
     [allRoundResultsQuery, playersQuery, voterAwardsQuery, sortedPlayers, reelSeed]
   );
 
-  const reel = useMemo(() => pickN(awards, 3, mulberry32(reelSeed)), [awards, reelSeed]);
+  const reel = useMemo(() => pickReel(awards, reelSeed), [awards, reelSeed]);
 
   // Reveal flow: suspense → winner → superlatives (1 by 1) → final leaderboard.
   const [stage, setStage] = useState('suspense'); // 'suspense' | 'winner' | 'superlatives' | 'final'
@@ -325,7 +229,6 @@ export default function GameWinner() {
   }
 
   const winner = sortedPlayers[0];
-  const rest = sortedPlayers.slice(1);
   const isFinal = stage === 'final';
 
   const creds = { code: gameCode, playerId: session?.playerId, connectionId: session?.connectionId };
@@ -355,6 +258,37 @@ export default function GameWinner() {
       updateSession({ lastPhase: 'lobby' });
       navigate(`/lobby/${gameCode}`, { replace: true });
     }, 'lobby');
+  };
+  /**
+   * Saves this game's results as a page anyone with the link can open, then
+   * sends the link: the share sheet on a phone, the clipboard elsewhere.
+   */
+  const handleShareResults = () => {
+    if (!hasCreds) return;
+    shareAction.run(async () => {
+      let res;
+      try {
+        res = await shareResultsMutation(creds);
+      } catch {
+        unreachable();
+        return;
+      }
+      if (!res?.success) {
+        showToast(res?.message || "Couldn't share these results.", 'warning');
+        return;
+      }
+      const url = `${window.location.origin}/g/${res.shareId}`;
+      const text = winner ? `${winner.playerName} won our Aux Wars game. Here's how it went:` : 'Our Aux Wars game. Here is how it went:';
+      const outcome = await sendLink({ title: 'Aux Wars results', text, url });
+      if (outcome === 'cancelled') return;
+      if (outcome === 'failed') {
+        showToast("Couldn't copy the link. Try again.", 'warning');
+        return;
+      }
+      if (outcome === 'copied') showToast('Results link copied', 'success');
+      logEvent({ eventType: 'result_shared' }).catch(() => {});
+      captureGameEvent('result_shared', gameProperties({ code: gameCode, players: playersQuery, session, extra: { method: outcome === 'shared' ? 'share' : 'copy' } }));
+    });
   };
   const handleCancelRematch = () => {
     if (!hasCreds) return;
@@ -437,39 +371,24 @@ export default function GameWinner() {
           <ScrollFade className="h-full w-full" contentClassName={`min-h-full flex flex-col items-center w-full max-w-2xl mx-auto px-2 ${isPublic ? 'pt-16 md:pt-20 pb-4' : 'py-4'}`}>
             <AnimatedLogo />
 
-            {winner && (
-              <button
-                type="button"
-                aria-label={`View ${winner.playerName}'s setlist`}
-                className="w-full flex flex-col items-center cursor-pointer mt-2 bg-transparent border-0 p-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#68d570]/60"
-                onClick={() => setSetlistPlayer(winner)}
-              >
-                <div className="text-3xl mb-1">👑</div>
-                <PlayerResultWithHover
-                  playerName={winner.playerName} songs={winner.songs}
-                  wins={winner.wins} totalRecords={winner.totalRecords} isWinner
-                />
-              </button>
-            )}
+            <Standings players={sortedPlayers} awards={reel} onPickPlayer={setSetlistPlayer} />
 
-            <div className="w-full flex flex-col items-center gap-2 mt-2">
-              {rest.map((player) => (
-                <button
-                  type="button"
-                  key={player.playerId}
-                  aria-label={`View ${player.playerName}'s setlist`}
-                  className="w-full flex justify-center cursor-pointer bg-transparent border-0 p-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#68d570]/60"
-                  onClick={() => setSetlistPlayer(player)}
-                >
-                  <PlayerResultWithHover
-                    playerName={player.playerName} songs={player.songs}
-                    wins={player.wins} totalRecords={player.totalRecords} isWinner={false}
-                  />
-                </button>
-              ))}
-            </div>
+            <p className="text-xs text-white/40 mt-3">tap anyone to see their setlist</p>
 
-            <p className="text-xs text-white/40 mt-2">tap anyone to see their setlist</p>
+            {/* Quiet on purpose: one muted action, no prompt. */}
+            <button
+              type="button"
+              data-vital="share-results"
+              onClick={handleShareResults}
+              disabled={shareAction.pending}
+              aria-busy={shareAction.pending}
+              className="mt-3 flex items-center gap-1.5 text-xs text-white/50 hover:text-white transition-colors disabled:opacity-60"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15" />
+              </svg>
+              {shareAction.pending ? 'Getting the link...' : 'Share these results'}
+            </button>
 
             <AdSlot slot="gameover" className="max-w-2xl mx-auto mt-4" />
 

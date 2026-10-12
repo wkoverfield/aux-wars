@@ -387,7 +387,15 @@ export function normalizeJoinSources(raw) {
   const byLink = num(src.byLink) ?? 0;
   const byCode = num(src.byCode) ?? 0;
   const known = byLink + byCode;
-  return { byLink, byCode, known, linkShare: known > 0 ? byLink / known : null, invites: num(src.invites) ?? 0 };
+  return {
+    byLink,
+    byCode,
+    known,
+    linkShare: known > 0 ? byLink / known : null,
+    invites: num(src.invites) ?? 0,
+    resultsShared: num(src.resultsShared) ?? 0,
+    resultsViewed: num(src.resultsViewed) ?? 0,
+  };
 }
 
 export const SPEED_DEVICES = ["all", "mobile", "chromebook", "desktop"];

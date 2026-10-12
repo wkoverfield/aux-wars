@@ -48,7 +48,7 @@ let buffer = [];
 
 function sanitizeUrl(value) {
   if (!value || typeof value !== "string") return value;
-  return value.replace(/\/lobby\/[^/?#]+/g, "/lobby/[room]");
+  return value.replace(/\/lobby\/[^/?#]+/g, "/lobby/[room]").replace(/\/g\/[^/?#]+/g, "/g/[results]");
 }
 
 function isStatsPage(path) {
@@ -272,6 +272,7 @@ export const POSTHOG_EVENTS = Object.freeze([
   "game_completed_viewed",
   "play_again_clicked",
   "invite_shared",
+  "result_shared",
   "song_search_no_results",
   "lobby_left",
 ]);

@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
-import { internalMutation, mutation, query, type MutationCtx } from "../_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
 import {
   PROMPT_VOTING_MS,
@@ -391,7 +391,12 @@ async function scheduleAutoAdvance(ctx: any, code: string, patch: { autoAdvanceA
  */
 export const getVoterAwards = query({
   args: { code: v.string() },
-  handler: async (ctx, { code }) => {
+  handler: async (ctx, { code }) => readVoterAwards(ctx, code),
+});
+
+/** Per-voter judging stats for a room's current game (see getVoterAwards). */
+export async function readVoterAwards(ctx: QueryCtx | MutationCtx, code: string) {
+  {
     const ratings = await ctx.db
       .query("ratings")
       .withIndex("by_room_round", (q) => q.eq("roomCode", code))
@@ -447,8 +452,8 @@ export const getVoterAwards = query({
       count: s.count,
       kingmakerHits: s.kingmakerHits,
     }));
-  },
-});
+  }
+}
 
 // ==================== PROMPT VOTING ====================
 

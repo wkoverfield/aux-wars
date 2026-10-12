@@ -124,6 +124,8 @@ function sanitizePath(raw: string): string | null {
   // so top-pages stay meaningful and pageviewCounters doesn't grow unbounded.
   // "/lobby/ABCD" -> "/lobby/:code", "/lobby/ABCD/round" -> "/lobby/:code/round".
   p = p.replace(/^\/lobby\/[^/]+/, "/lobby/:code");
+  // Same for shared results links: one id per shared game.
+  p = p.replace(/^\/g\/[^/]+/, "/g/:id");
   if (p.length > 120) p = p.slice(0, 120);
   return p;
 }
