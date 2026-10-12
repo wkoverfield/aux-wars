@@ -76,6 +76,8 @@ describe("JoinGate", () => {
     expect(joinGame).toHaveBeenCalledTimes(1);
     expect(joinGame.mock.calls[0][0]).toMatchObject({ code: "ABC123", name: "Sam", source: "link" });
     expect(joinGame.mock.calls[0][0].playerId).toBeTruthy();
+    // The seat is created with a key, so its player id alone cannot take it over.
+    expect(joinGame.mock.calls[0][0].seatKey).toMatch(/^[0-9a-f]{48}$/);
     expect(captureGameEvent).toHaveBeenCalledWith("player_joined", expect.objectContaining({ join_source: "link" }));
   });
 

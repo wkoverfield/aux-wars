@@ -162,4 +162,24 @@ describe("visitor identity", () => {
       vi.useRealTimers();
     }
   });
+  test("a private seat joined with a seat key cannot be taken over by its player id alone", async () => {
+    const t = setup();
+    const { code } = await t.mutation(api.game.rooms.hostGame, {});
+    const key = "qa-seat-key-0123456789abcdef0123456789abcdef";
+    const join = (extra: Record<string, unknown>) =>
+      t.mutation(api.game.rooms.joinGame, { code, playerId: "qa-victim", name: "QA-victim", connectionId: "c-own", ...extra });
+    expect(await join({ seatKey: key })).toMatchObject({ success: true, tookOver: false });
+
+    // Another player in the room can read "qa-victim" from the player list.
+    expect(await join({ connectionId: "c-attacker" })).toMatchObject({ success: false });
+    expect(await join({ connectionId: "c-attacker", seatKey: "qa-wrong-key-0123456789abcdef0123456789" })).toMatchObject({ success: false });
+    const seat = await t.run(async (ctx) =>
+      ctx.db.query("players").withIndex("by_player", (q) => q.eq("playerId", "qa-victim").eq("roomCode", code)).unique()
+    );
+    expect(seat?.connectionId).toBe("c-own");
+
+    // The key holder still can.
+    expect(await join({ connectionId: "c-own-2", seatKey: key })).toMatchObject({ success: true, tookOver: true });
+  });
 });
+

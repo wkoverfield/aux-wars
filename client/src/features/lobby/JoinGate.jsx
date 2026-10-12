@@ -7,6 +7,7 @@ import { usePendingAction } from "../../hooks/usePendingAction";
 import { useToast } from "../../contexts/ToastContext";
 import { captureGameEvent, hashRoomCode } from "../../services/analytics";
 import { getVisitorId } from "../../utils/visitorId";
+import { makeSeatKey } from "../quickplay/quickPlayModel";
 import logo from "../../assets/aux-wars-logo.svg";
 import { isPlaceholderName, joinGateCopy } from "./joinGateCopy";
 
@@ -52,6 +53,10 @@ export default function JoinGate({ code, room, players }) {
           name: trimmed,
           playerId,
           connectionId,
+          // Player ids are visible to the whole room. A seat created with a
+          // key can only be pointed at another connection by presenting it,
+          // and nothing in a private room does, so the key is not kept.
+          seatKey: makeSeatKey(),
           source: "link",
           ...(visitorId && visitorId !== "anon" ? { visitorId } : {}),
         });

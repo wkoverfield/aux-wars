@@ -16,6 +16,7 @@ import { adsConfigured } from "../../services/ads";
 import { capture } from "../../services/posthog";
 import { captureGameEvent, hashRoomCode } from "../../services/analytics";
 import { getVisitorId } from "../../utils/visitorId";
+import { makeSeatKey } from "../quickplay/quickPlayModel";
 import QuickPlayLine from "../quickplay/QuickPlayLine";
 
 // Opaque visitor id sent on host/join so retention can link a visit to a play.
@@ -81,7 +82,8 @@ export default function Home() {
       const { code } = await hostGame({ proToken: getProToken() || undefined, visitorId });
       const playerId = crypto.randomUUID();
       const tempName = "Host";
-      const joinResp = await joinGame({ code, name: tempName, playerId, connectionId, visitorId });
+      // A keyed seat cannot be taken over by replaying its (room-visible) player id.
+      const joinResp = await joinGame({ code, name: tempName, playerId, connectionId, visitorId, seatKey: makeSeatKey() });
       if (joinResp?.success) {
         captureGameEvent("game_created", {
           room_code_hash: hashRoomCode(code),
@@ -133,7 +135,15 @@ export default function Home() {
     const tempName = `Player ${Math.floor(Math.random() * 100) + 1}`;
 
     try {
-      const resp = await joinGame({ code, name: tempName, playerId, connectionId, visitorId: joinVisitorId(), source: "code" });
+      const resp = await joinGame({
+        code,
+        name: tempName,
+        playerId,
+        connectionId,
+        visitorId: joinVisitorId(),
+        seatKey: makeSeatKey(),
+        source: "code",
+      });
       if (resp?.success) {
         captureGameEvent("player_joined", {
           room_code_hash: hashRoomCode(code),
