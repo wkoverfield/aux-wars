@@ -5,7 +5,7 @@ import { api } from '../../../convex/_generated/api';
 import { groupFeedback } from './feedbackGroups';
 // Guarded: this modal is mounted on the home page even while closed, so a
 // storage read that throws (storage blocked) would take the whole page down.
-import { getVisitorId } from '../utils/visitorId';
+import { getVoterId } from '../utils/visitorId';
 
 const FEEDBACK_TYPES = [
   { value: 'feature', label: 'Feature Request', color: 'bg-blue-500' },
@@ -48,7 +48,7 @@ export default function FeedbackModal({ showModal, onClose }) {
   const [authorName, setAuthorName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const visitorId = getVisitorId();
+  const visitorId = getVoterId();
   const feedback = useQuery(api.feedback.getFeedback, { visitorId });
   const submitFeedback = useMutation(api.feedback.submitFeedback);
   const upvoteFeedback = useMutation(api.feedback.upvoteFeedback);
