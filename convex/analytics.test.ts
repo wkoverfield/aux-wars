@@ -198,6 +198,11 @@ describe("web_vital and client errors", () => {
       .toEqual({ name: "Error", route: "/", script: "extension" });
     expect(sanitizeClientError({ name: "Error", route: "/", script: "app", label: "Cannot read 'name' of Velvet Bassline" }))
       .toEqual({ name: "Error", route: "/", script: "app" });
+    // A room code from a page path is not a built file name.
+    for (const label of ["ABC123:5:10", "round:5:10", "lobby-ABC123:5:10"]) {
+      expect(sanitizeClientError({ name: "Error", route: "/lobby/:code", script: "app", label }))
+        .toEqual({ name: "Error", route: "/lobby/:code", script: "app" });
+    }
     expect(sanitizeClientError({ name: "Error", route: "/", reason: "because", script: "https://evil.example/x.js", label: "index:1:2" }))
       .toEqual({ name: "Error", route: "/" });
   });

@@ -86,8 +86,21 @@ describe("errorOrigin", () => {
     expect(
       errorOrigin(err("ReferenceError: x is not defined\n    at onClick (https://aux-wars.com/assets/index-D9bxC1pi.js:42:13337)\n    at a (https://aux-wars.com/assets/index-D9bxC1pi.js:1:5)"), undefined, origin)
     ).toEqual({ script: "app", label: "index-D9bxC1pi:42:13337" });
-    expect(errorOrigin(err("onClick@https://aux-wars.com/assets/Round-AbC_12-x.js?v=1:7:99\n@https://aux-wars.com/x.js:1:1"), undefined, origin))
+    expect(errorOrigin(err("onClick@https://aux-wars.com/assets/Round-AbC_12-x.js:7:99\n@https://aux-wars.com/x.js:1:1"), undefined, origin))
       .toEqual({ script: "app", label: "Round-AbC_12-x:7:99" });
+  });
+
+  it("never turns a page URL into a position (a lobby path ends in the room code)", () => {
+    for (const url of [
+      "https://aux-wars.com/lobby/ABC123",
+      "https://aux-wars.com/lobby/ABC123/round",
+      "https://aux-wars.com/stats",
+      "https://aux-wars.com/",
+      "https://aux-wars.com/assets/ABC123.js",
+      "https://aux-wars.com/other/index-D9bxC1pi.js",
+    ]) {
+      expect(errorOrigin(err(`at f (${url}:5:10)`), undefined, origin)).toEqual({ script: "app" });
+    }
   });
 
   it("buckets other sources without a position", () => {

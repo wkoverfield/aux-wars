@@ -101,8 +101,10 @@ export function sanitizeWebVital(m: EventMetadata | undefined): EventMetadata | 
 }
 
 const ERROR_REASONS = new Set(["uncaught", "rejection"]);
-// Position in a built file: "<file>:<line>:<column>", e.g. "index-D9bxC1pi:42:13337".
-const ERROR_POSITION_RE = /^[A-Za-z0-9_.-]{1,48}:\d{1,7}:\d{1,8}$/;
+// Position in a built file: "<name>-<8 char hash>:<line>:<column>", e.g.
+// "index-D9bxC1pi:42:13337". The name-hash shape is required so a page path
+// segment (a room code) can never be stored as a position.
+const ERROR_POSITION_RE = /^[A-Za-z0-9_.]{1,32}-[A-Za-z0-9_-]{8}:\d{1,7}:\d{1,8}$/;
 
 /**
  * client_error / client_error_boundary: error class name and route pattern,

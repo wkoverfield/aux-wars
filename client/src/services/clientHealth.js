@@ -81,13 +81,15 @@ export function errorName(error, fallback = "Error") {
   return typeof name === "string" && /^[A-Za-z_$][A-Za-z0-9_$]{0,40}$/.test(name) ? name : fallback;
 }
 
+const BUILT_FILE_RE = /\/assets\/([A-Za-z0-9_.]{1,32}-[A-Za-z0-9_-]{8})\.js$/;
 const FRAME_RE = /((?:https?|chrome-extension|moz-extension|safari-web-extension):\/\/[^\s)]+?):(\d+):(\d+)/;
 
 /**
  * Where an error was thrown, from the first URL in its stack (or a script
  * URL from an error event): the source bucket, and for the app's own code
  * the position in the built file, e.g. "index-D9bxC1pi:42:13337". That is a
- * code location (the hash names the build), not page or user data.
+ * code location (the hash names the build), not page or user data: page URLs
+ * never contribute to it.
  */
 export function errorOrigin(error, fileUrl, origin) {
   const stack = error && typeof error === "object" && typeof error.stack === "string" ? error.stack : "";
@@ -97,8 +99,11 @@ export function errorOrigin(error, fileUrl, origin) {
   if (!script) return {};
   const out = { script };
   if (script === "app" && frame) {
-    const file = url.split(/[?#]/)[0].split("/").pop().replace(/\.[a-z]+$/, "");
-    if (/^[A-Za-z0-9_.-]{1,48}$/.test(file)) out.label = `${file}:${frame[2]}:${frame[3]}`;
+    // Only a built file under /assets/ ("name-hash.js") gets a position. A
+    // frame that points at the page itself (inline or injected script) would
+    // otherwise report the last path segment, which on a lobby is the room code.
+    const built = BUILT_FILE_RE.exec(url.split(/[?#]/)[0]);
+    if (built) out.label = `${built[1]}:${frame[2]}:${frame[3]}`;
   }
   return out;
 }

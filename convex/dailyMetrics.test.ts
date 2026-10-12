@@ -135,7 +135,7 @@ describe("web vitals rollup", () => {
     ev.detail.client_error = [
       { name: "ScriptError", route: "/" },
       { name: "ScriptError", route: "/" },
-      { name: "TypeError", route: "/lobby/:code/round", script: "app", label: "index-AbC:4:2", reason: "rejection" },
+      { name: "TypeError", route: "/lobby/:code/round", script: "app", label: "index-AbCd1234:4:2", reason: "rejection" },
       { name: "ScriptError", route: "/" },
     ];
     ev.detail.client_error_boundary = [{ name: "TypeError", route: "/lobby/:code/round" }];
@@ -148,7 +148,7 @@ describe("web vitals rollup", () => {
       clientErrorBoundaries: 1,
       clientErrorKinds: [
         { kind: "error", name: "ScriptError", route: "/", count: 3 },
-        { kind: "error", name: "TypeError", route: "/lobby/:code/round", count: 1, script: "app", at: "index-AbC:4:2", reason: "rejection" },
+        { kind: "error", name: "TypeError", route: "/lobby/:code/round", count: 1, script: "app", at: "index-AbCd1234:4:2", reason: "rejection" },
         { kind: "boundary", name: "TypeError", route: "/lobby/:code/round", count: 1 },
       ],
     });
