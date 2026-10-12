@@ -189,6 +189,22 @@ describe("search_failed", () => {
 });
 
 describe("web_vital and client errors", () => {
+  test("logEvent stores an invite with only its method", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = convexTest(schema, modules);
+      await t.mutation(api.analytics.logEvent, { eventType: "invite_shared", metadata: { reason: "share", label: "ROOM12", playerId: "p1" } });
+      await t.mutation(api.analytics.logEvent, { eventType: "invite_shared", metadata: { reason: "sms to 555-0100" } });
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+      const rows = await t.run(async (ctx) =>
+        ctx.db.query("analyticsEvents").withIndex("by_type", (q) => q.eq("eventType", "invite_shared")).collect()
+      );
+      expect(rows.map((r) => r.metadata)).toEqual([{ reason: "share" }, { reason: "unknown" }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("sanitizeClientError keeps origin fields only in their known shapes", () => {
     expect(
       sanitizeClientError({ name: "ReferenceError", route: "/lobby/:code", reason: "rejection", script: "app", label: "index-D9bxC1pi:42:13337" })

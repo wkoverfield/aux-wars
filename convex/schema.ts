@@ -17,6 +17,10 @@ export const dailyMetricsFields = {
   // joins from clients that predate the field count in neither.
   playerJoinsByLink: v.optional(v.number()),
   playerJoinsByCode: v.optional(v.number()),
+  // Invite sends from the lobby (share sheet, copied link, QR shown), total
+  // and by method. Optional: older rows lack them.
+  invitesShared: v.optional(v.number()),
+  invitesByMethod: v.optional(v.record(v.string(), v.number())),
   uniquePlayers: v.number(), // distinct visitorId (playerId for legacy joins)
   joinsWithVisitorId: v.number(),
   playersInStartedGames: v.number(), // distinct players who joined a room that started

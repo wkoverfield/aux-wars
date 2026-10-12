@@ -125,7 +125,15 @@ export function sanitizeClientError(m: EventMetadata | undefined): EventMetadata
   return out;
 }
 
+const INVITE_METHODS = new Set(["share", "copy", "qr"]);
+
+/** How an invite was sent: "share" (system share sheet), "copy" or "qr". Anything else reads "unknown". */
+export function inviteMethod(reason: unknown): string {
+  return typeof reason === "string" && INVITE_METHODS.has(reason) ? reason : "unknown";
+}
+
 const PUBLIC_EVENT_TYPES = new Set([
+  "invite_shared",
   "client_error",
   "client_error_boundary",
   "web_vital",
@@ -203,6 +211,8 @@ export const logEvent = mutation({
     if (eventType === "search_failed") {
       // Only the failure class is kept: never query text or other fields.
       metadata = { reason: searchFailReason(metadata?.reason) };
+    } else if (eventType === "invite_shared") {
+      metadata = { reason: inviteMethod(metadata?.reason) };
     } else if (eventType === "web_vital") {
       const clean = sanitizeWebVital(metadata);
       if (!clean) return { success: false, message: "Invalid metric" } as const;

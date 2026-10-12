@@ -216,9 +216,10 @@ function Funnel({ funnel, joinSources, windowDays }) {
   return (
     <Card title="Funnel" aside={`last ${windowDays} days`}>
       <RankedBars rows={rows} format={fmtInt} emptyText="No visits recorded in this window yet." />
-      {joinSources.known > 0 && (
+      {(joinSources.known > 0 || joinSources.invites > 0) && (
         <p className="text-xs text-gray-500 mt-4">
-          Room joins: {fmtInt(joinSources.byLink)} by invite link, {fmtInt(joinSources.byCode)} by typed code
+          Invites sent from lobbies: {fmtInt(joinSources.invites)}. Room joins: {fmtInt(joinSources.byLink)} by invite
+          link, {fmtInt(joinSources.byCode)} by typed code
           {joinSources.linkShare !== null ? ` (${fmtPct(joinSources.linkShare)} by link)` : ""}. Includes today.
         </p>
       )}

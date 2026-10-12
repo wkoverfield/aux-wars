@@ -9,7 +9,7 @@ import {
 import { internal } from "./_generated/api";
 import { dailyMetricsFields } from "./schema";
 import { readCounter } from "./siteStats";
-import { searchFailReason } from "./analytics";
+import { inviteMethod, searchFailReason } from "./analytics";
 
 /**
  * Permanent daily rollups.
@@ -52,6 +52,7 @@ export const DETAIL_EVENT_TYPES = [
   "search_failed",
   "quickplay_matched",
   "quickplay_left_waiting",
+  "invite_shared",
   "web_vital",
   "client_error",
   "client_error_boundary",
@@ -365,6 +366,12 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
     .slice(0, TOP_SEARCHES_PER_DAY)
     .map(([query, count]) => ({ query, count }));
 
+  const invitesByMethod: Record<string, number> = {};
+  for (const e of detail.invite_shared ?? []) {
+    const k = inviteMethod(e.reason);
+    invitesByMethod[k] = (invitesByMethod[k] ?? 0) + 1;
+  }
+
   const searchFailedByReason: Record<string, number> = {};
   for (const e of detail.search_failed) {
     const k = searchFailReason(e.reason);
@@ -417,6 +424,8 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
     playerJoins: joins.length,
     playerJoinsByLink: joins.filter((e) => e.source === "link").length,
     playerJoinsByCode: joins.filter((e) => e.source === "code").length,
+    invitesShared: (detail.invite_shared ?? []).length,
+    invitesByMethod,
     uniquePlayers: players.size,
     joinsWithVisitorId,
     playersInStartedGames: inStarted.size,

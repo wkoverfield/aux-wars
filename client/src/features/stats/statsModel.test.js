@@ -328,7 +328,7 @@ describe("speed", () => {
 
 describe("normalizeJoinSources", () => {
   it("shares joins between link and code, ignoring unsourced ones", () => {
-    expect(normalizeJoinSources({ total: 20, byLink: 3, byCode: 9 })).toEqual({ byLink: 3, byCode: 9, known: 12, linkShare: 0.25 });
-    expect(normalizeJoinSources(undefined)).toEqual({ byLink: 0, byCode: 0, known: 0, linkShare: null });
+    expect(normalizeJoinSources({ total: 20, byLink: 3, byCode: 9 })).toEqual({ byLink: 3, byCode: 9, known: 12, linkShare: 0.25, invites: 0 });
+    expect(normalizeJoinSources(undefined)).toEqual({ byLink: 0, byCode: 0, known: 0, linkShare: null, invites: 0 });
   });
 });
