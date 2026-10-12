@@ -74,7 +74,8 @@ export function SongSelectionView({
     >
       <div className="w-full">
         <div className="max-w-[100vw] sm:max-w-xl lg:max-w-2xl mx-auto px-4">
-          <div className="flex justify-center mt-8 sm:mt-16 lg:mt-32 mb-4">
+          {/* Top margin clears the fixed round timer pill (it ends 60px from the top). */}
+          <div className="flex justify-center mt-16 lg:mt-32 mb-4">
             <SearchBar
               value={searchTerm}
               onChange={onSearchChange}
