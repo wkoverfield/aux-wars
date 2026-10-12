@@ -1,5 +1,4 @@
-import { memo, useCallback, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { memo, useCallback, useDeferredValue, useState } from "react";
 import SearchBar from "../../components/SearchBar";
 import SongList from "../../components/SongList";
 import ScrollFade from "../../components/ScrollFade";
@@ -37,6 +36,16 @@ export function SongSelectionView({
   showPromptModal
 }) {
   const [selectedTrack, setSelectedTrack] = useState(null);
+  // New results render at low priority: mounting a page of rows must never
+  // hold up the next keystroke.
+  const shownResults = useDeferredValue(searchResults);
+  // Nothing typed yet: a hint. Still searching, or the error box already
+  // says why there are no songs: nothing.
+  const emptyText = !searchTerm?.trim()
+    ? "Search for a song to play."
+    : isSearching || searchError
+      ? null
+      : undefined;
 
   /**
    * Handles selecting a track from the search results
@@ -70,6 +79,8 @@ export function SongSelectionView({
               value={searchTerm}
               onChange={onSearchChange}
               placeholder="What do you want to play?"
+              busy={Boolean(isSearching && searchTerm && !isSearchSlow)}
+              busyLabel="Searching for songs..."
             />
           </div>
         </div>
@@ -82,42 +93,25 @@ export function SongSelectionView({
               <p className="font-medium">{searchError}</p>
             </div>
           )}
-          <AnimatePresence>
-            {isSearching && searchTerm && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.3 }}
-                className="mb-4 p-4 text-center"
-              >
-                <div className="flex items-center justify-center gap-3 text-gray-300">
-                  <motion.div 
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                    className="rounded-full h-6 w-6 border-2 border-green-500 border-t-transparent"
-                  />
-                  <motion.span
-                    animate={{ opacity: [0.7, 1, 0.7] }}
-                    transition={{ duration: 1.5, repeat: Infinity }}
-                  >
-                    {isSearchSlow ? "Still searching..." : "Searching for songs..."}
-                  </motion.span>
-                </div>
-                {isSearchSlow && onRetrySearch && (
-                  <button
-                    type="button"
-                    onClick={onRetrySearch}
-                    className="mt-3 rounded-full border border-white/20 px-4 py-1.5 text-sm text-white hover:bg-white/10 active:scale-95 transition-colors"
-                  >
-                    Retry
-                  </button>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-          <SongList 
-            tracks={searchResults} 
+          {/* Only a search that is taking a while gets its own row (with Retry);
+              a young one shows its spinner inside the search bar. */}
+          {isSearching && searchTerm && isSearchSlow && (
+            <div role="status" className="mb-4 p-4 text-center text-gray-300">
+              <p>Still searching...</p>
+              {onRetrySearch && (
+                <button
+                  type="button"
+                  onClick={onRetrySearch}
+                  className="mt-3 rounded-full border border-white/20 px-4 py-1.5 text-sm text-white hover:bg-white/10 active:scale-95 transition-colors"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+          <SongList
+            tracks={shownResults}
+            emptyText={emptyText}
             selectedTrack={selectedTrack}
             onSelectTrack={handleSelectTrack}
             onConfirmTrack={handleConfirmTrack} 

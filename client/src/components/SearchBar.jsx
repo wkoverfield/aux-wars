@@ -10,6 +10,8 @@ import searchIcon from "../assets/search-icon.svg";
  * @param {Function} props.onChange - Change handler for input
  * @param {string} [props.placeholder=""] - Placeholder text for input
  * @param {boolean} [props.readOnly=false] - Whether the input is read-only
+ * @param {boolean} [props.busy=false] - Shows a small spinner inside the bar (a search is running)
+ * @param {string} [props.busyLabel] - Screen reader text for the spinner
  * @returns {JSX.Element} Rendered component
  */
 export default function SearchBar({
@@ -17,6 +19,8 @@ export default function SearchBar({
   onChange,
   placeholder = "",
   readOnly = false,
+  busy = false,
+  busyLabel = "Searching...",
 }) {
   // Readonly mode: Clean text display without icon
   if (readOnly) {
@@ -42,7 +46,15 @@ export default function SearchBar({
           value={value}
           onChange={onChange}
           placeholder={placeholder}
+          aria-busy={busy}
         />
+        {/* Inside the bar, so starting a search never moves the results below. */}
+        {busy && (
+          <span role="status" className="flex-shrink-0 flex items-center">
+            <span className="h-5 w-5 rounded-full border-2 border-[#68d570] border-t-transparent animate-spin" aria-hidden="true" />
+            <span className="sr-only">{busyLabel}</span>
+          </span>
+        )}
       </div>
     </div>
   );
