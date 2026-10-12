@@ -12,6 +12,7 @@ import {
   fmtPct,
   fmtShortDate,
   fmtWait,
+  fmtErrorOrigin,
   fmtInteractionTarget,
   fmtVital,
   normalizeDashboard,
@@ -416,10 +417,11 @@ function Speed({ speed, windowDays }) {
       {speed.errorKinds.length > 0 && (
         <ul className="mt-4 text-sm space-y-1" aria-label="Errors by type">
           {speed.errorKinds.map((e) => (
-            <li key={`${e.kind}|${e.name}|${e.route}`} className="flex justify-between gap-3 tabular-nums">
+            <li key={`${e.kind}|${e.name}|${e.route}|${e.script}|${e.at}|${e.reason}`} className="flex justify-between gap-3 tabular-nums">
               <span className="text-gray-300">
                 {e.name}
                 <span className="text-gray-500"> on {e.route}{e.kind === "boundary" ? ", error screen" : ""}</span>
+                {fmtErrorOrigin(e) && <span className="block text-xs text-gray-500">{fmtErrorOrigin(e)}</span>}
               </span>
               <span className="text-white font-semibold">{fmtInt(e.count)}</span>
             </li>

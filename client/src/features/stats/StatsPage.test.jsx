@@ -197,7 +197,11 @@ describe("Speed card", () => {
                   inputDelay: 20, processing: 260, presentation: 60, mobileShare: 0.9, script: "app",
                 },
               ],
-              errorKinds: [{ kind: "error", name: "ChunkLoadError", route: "/lobby/:code", count: 4 }],
+              errorKinds: [
+                { kind: "error", name: "ChunkLoadError", route: "/lobby/:code", count: 4 },
+                { kind: "error", name: "ReferenceError", route: "/lobby/:code", count: 2, script: "app", at: "index-AbC123:42:1337", reason: "rejection" },
+                { kind: "error", name: "ScriptError", route: "/", count: 7, script: "extension", reason: "uncaught" },
+              ],
             },
           }
         : {},
@@ -215,6 +219,9 @@ describe("Speed card", () => {
     expect(screen.getByText("340ms").className).toContain("text-amber-300");
     expect(screen.getByText("7/12")).toBeTruthy();
     expect(screen.getByText("Our tap handler (260ms)")).toBeTruthy();
-    expect(screen.getByRole("list", { name: "Errors by type" }).textContent).toContain("ChunkLoadError on /lobby/:code4");
+    const errors = screen.getByRole("list", { name: "Errors by type" }).textContent;
+    expect(errors).toContain("ChunkLoadError on /lobby/:code4");
+    expect(errors).toContain("our code at index-AbC123:42:1337, failed promise");
+    expect(errors).toContain("browser extension");
   });
 });

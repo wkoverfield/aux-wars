@@ -100,12 +100,26 @@ export function sanitizeWebVital(m: EventMetadata | undefined): EventMetadata | 
   return out;
 }
 
-/** client_error / client_error_boundary: error class name and route pattern only. */
+const ERROR_REASONS = new Set(["uncaught", "rejection"]);
+// Position in a built file: "<file>:<line>:<column>", e.g. "index-D9bxC1pi:42:13337".
+const ERROR_POSITION_RE = /^[A-Za-z0-9_.-]{1,48}:\d{1,7}:\d{1,8}$/;
+
+/**
+ * client_error / client_error_boundary: error class name and route pattern,
+ * plus where the code came from (script source bucket, and for the app's
+ * own bundle the stack position) and how it surfaced. Never a message.
+ */
 export function sanitizeClientError(m: EventMetadata | undefined): EventMetadata {
-  return {
+  const out: EventMetadata = {
     name: typeof m?.name === "string" && ERROR_NAME_RE.test(m.name) ? m.name : "Error",
     route: sanitizeRoute(m?.route),
   };
+  if (typeof m?.reason === "string" && ERROR_REASONS.has(m.reason)) out.reason = m.reason;
+  if (typeof m?.script === "string" && INP_SCRIPT_SOURCES.has(m.script)) {
+    out.script = m.script;
+    if (m.script === "app" && typeof m?.label === "string" && ERROR_POSITION_RE.test(m.label)) out.label = m.label;
+  }
+  return out;
 }
 
 const PUBLIC_EVENT_TYPES = new Set([

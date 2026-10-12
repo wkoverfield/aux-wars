@@ -189,6 +189,19 @@ describe("search_failed", () => {
 });
 
 describe("web_vital and client errors", () => {
+  test("sanitizeClientError keeps origin fields only in their known shapes", () => {
+    expect(
+      sanitizeClientError({ name: "ReferenceError", route: "/lobby/:code", reason: "rejection", script: "app", label: "index-D9bxC1pi:42:13337" })
+    ).toEqual({ name: "ReferenceError", route: "/lobby/:code", reason: "rejection", script: "app", label: "index-D9bxC1pi:42:13337" });
+    // A position is only kept for the app's own code, and only in position shape.
+    expect(sanitizeClientError({ name: "Error", route: "/", script: "extension", label: "content:1:2" }))
+      .toEqual({ name: "Error", route: "/", script: "extension" });
+    expect(sanitizeClientError({ name: "Error", route: "/", script: "app", label: "Cannot read 'name' of Velvet Bassline" }))
+      .toEqual({ name: "Error", route: "/", script: "app" });
+    expect(sanitizeClientError({ name: "Error", route: "/", reason: "because", script: "https://evil.example/x.js", label: "index:1:2" }))
+      .toEqual({ name: "Error", route: "/" });
+  });
+
   test("sanitizeWebVital keeps INP attribution only in its known shapes", () => {
     expect(
       sanitizeWebVital({

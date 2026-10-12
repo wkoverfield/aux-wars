@@ -81,18 +81,46 @@ export function errorName(error, fallback = "Error") {
   return typeof name === "string" && /^[A-Za-z_$][A-Za-z0-9_$]{0,40}$/.test(name) ? name : fallback;
 }
 
-/** Reports an uncaught error, at most MAX_ERRORS_PER_LOAD per page load. */
-export function reportClientError(error, fallback = "Error") {
+const FRAME_RE = /((?:https?|chrome-extension|moz-extension|safari-web-extension):\/\/[^\s)]+?):(\d+):(\d+)/;
+
+/**
+ * Where an error was thrown, from the first URL in its stack (or a script
+ * URL from an error event): the source bucket, and for the app's own code
+ * the position in the built file, e.g. "index-D9bxC1pi:42:13337". That is a
+ * code location (the hash names the build), not page or user data.
+ */
+export function errorOrigin(error, fileUrl, origin) {
+  const stack = error && typeof error === "object" && typeof error.stack === "string" ? error.stack : "";
+  const frame = FRAME_RE.exec(stack);
+  const url = frame ? frame[1] : fileUrl;
+  const script = scriptSource(url, origin);
+  if (!script) return {};
+  const out = { script };
+  if (script === "app" && frame) {
+    const file = url.split(/[?#]/)[0].split("/").pop().replace(/\.[a-z]+$/, "");
+    if (/^[A-Za-z0-9_.-]{1,48}$/.test(file)) out.label = `${file}:${frame[2]}:${frame[3]}`;
+  }
+  return out;
+}
+
+/**
+ * Reports an uncaught error, at most MAX_ERRORS_PER_LOAD per page load.
+ * `reason` is how it surfaced ("uncaught" or "rejection"); `fileUrl` is the
+ * script URL of an error event that carried no error object.
+ */
+export function reportClientError(error, fallback = "Error", { reason, fileUrl } = {}) {
   if (errorsSent >= MAX_ERRORS_PER_LOAD) return;
   errorsSent += 1;
-  send("client_error", { name: errorName(error, fallback), route: currentRoute() });
+  const meta = { name: errorName(error, fallback), route: currentRoute(), ...errorOrigin(error, fileUrl) };
+  if (reason) meta.reason = reason;
+  send("client_error", meta);
 }
 
 /** Called from ErrorBoundary.componentDidCatch. Same per-load cap. */
 export function reportBoundaryError(error) {
   if (boundarySent >= MAX_ERRORS_PER_LOAD) return;
   boundarySent += 1;
-  send("client_error_boundary", { name: errorName(error), route: currentRoute() });
+  send("client_error_boundary", { name: errorName(error), route: currentRoute(), ...errorOrigin(error) });
 }
 
 /** Rounds a vital for transport: whole ms for timings, 3 places for CLS. */
@@ -170,10 +198,13 @@ export function initClientHealth(client, { sampleRate = VITALS_SAMPLE_RATE, rand
   window.addEventListener("error", (event) => {
     // Resource load failures (img/script 404s) bubble here without an error.
     if (!event || (!event.error && !event.message)) return;
-    reportClientError(event.error, event.error ? "Error" : "ScriptError");
+    reportClientError(event.error, event.error ? "Error" : "ScriptError", {
+      reason: "uncaught",
+      fileUrl: event.filename,
+    });
   });
   window.addEventListener("unhandledrejection", (event) => {
-    reportClientError(event?.reason, "UnhandledRejection");
+    reportClientError(event?.reason, "UnhandledRejection", { reason: "rejection" });
   });
 
   if (random() < sampleRate) {
