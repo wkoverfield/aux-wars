@@ -265,16 +265,35 @@ export function summarizeSlowInteractions(events: SlimEvent[]): SlowInteraction[
     .slice(0, SLOW_INTERACTIONS_KEPT);
 }
 
-export type ErrorKind = { kind: "error" | "boundary"; name: string; route: string; count: number };
+export type ErrorKind = {
+  kind: "error" | "boundary";
+  name: string;
+  route: string;
+  count: number;
+  script?: string; // source of the throwing code: app | youtube | extension | third-party
+  at?: string; // app code only: position in the built file
+  reason?: string; // "uncaught" | "rejection"
+};
 
-/** Uncaught errors and boundary catches counted by class name and route. */
+/**
+ * Uncaught errors and boundary catches counted by class name, route and,
+ * when reported, where the code came from and how the error surfaced.
+ */
 export function summarizeErrorKinds(errors: SlimEvent[], boundary: SlimEvent[]): ErrorKind[] {
   const counts = new Map<string, ErrorKind>();
   const add = (kind: ErrorKind["kind"], e: SlimEvent) => {
     const name = e.name ?? "Error";
     const route = e.route ?? "other";
-    const key = `${kind}|${name}|${route}`;
-    const cur = counts.get(key) ?? { kind, name, route, count: 0 };
+    const key = [kind, name, route, e.script ?? "", e.label ?? "", e.reason ?? ""].join("|");
+    const cur = counts.get(key) ?? {
+      kind,
+      name,
+      route,
+      count: 0,
+      ...(e.script ? { script: e.script } : {}),
+      ...(e.label ? { at: e.label } : {}),
+      ...(e.reason ? { reason: e.reason } : {}),
+    };
     cur.count += 1;
     counts.set(key, cur);
   };

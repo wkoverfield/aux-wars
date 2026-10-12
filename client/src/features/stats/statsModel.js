@@ -473,7 +473,25 @@ export function normalizeErrorKinds(raw) {
       name: r.name,
       route: typeof r.route === "string" ? r.route : "other",
       count: num(r.count),
+      script: typeof r.script === "string" ? r.script : null,
+      at: typeof r.at === "string" ? r.at : null,
+      reason: typeof r.reason === "string" ? r.reason : null,
     }));
+}
+
+const ERROR_SOURCE_LABELS = {
+  app: "our code",
+  youtube: "YouTube player",
+  extension: "browser extension",
+  "third-party": "third-party script",
+};
+
+/** "our code at index-AbC:42:1337, failed promise", or null when nothing was reported. */
+export function fmtErrorOrigin(e) {
+  const parts = [];
+  if (e?.script) parts.push(`${ERROR_SOURCE_LABELS[e.script] ?? e.script}${e.at ? ` at ${e.at}` : ""}`);
+  if (e?.reason === "rejection") parts.push("failed promise");
+  return parts.length > 0 ? parts.join(", ") : null;
 }
 
 /** Window totals of empty vs failed searches, with failures by reason. */

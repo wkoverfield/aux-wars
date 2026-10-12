@@ -90,6 +90,9 @@ export const dailyMetricsFields = {
         name: v.string(),
         route: v.string(),
         count: v.number(),
+        script: v.optional(v.string()),
+        at: v.optional(v.string()),
+        reason: v.optional(v.string()),
       })
     )
   ),

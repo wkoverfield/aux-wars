@@ -172,7 +172,7 @@ export function mergeErrorKinds(days: VitalDay[], keep = 12): ErrorKind[] {
   const acc = new Map<string, ErrorKind>();
   for (const d of days) {
     for (const e of d.clientErrorKinds ?? []) {
-      const key = `${e.kind}|${e.name}|${e.route}`;
+      const key = [e.kind, e.name, e.route, e.script ?? "", e.at ?? "", e.reason ?? ""].join("|");
       const cur = acc.get(key) ?? { ...e, count: 0 };
       cur.count += e.count;
       acc.set(key, cur);
