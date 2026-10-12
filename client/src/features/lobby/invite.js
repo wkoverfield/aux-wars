@@ -43,7 +43,7 @@ export async function sendInvite(
   return (await copyInvite(url, nav)) ? "copied" : "failed";
 }
 
-/** Copies the invite link. Resolves to whether it worked. */
+/** Copies the invite link, or any other text such as the room code. Resolves to whether it worked. */
 export async function copyInvite(url, nav = typeof navigator === "undefined" ? undefined : navigator) {
   try {
     await nav.clipboard.writeText(url);

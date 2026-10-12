@@ -11,7 +11,7 @@ import AdSlot from "../../components/AdSlot";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 // GameContext removed - using RoomProvider's Convex queries directly
 import { usePendingAction } from "../../hooks/usePendingAction";
-import { copyInvite, inviteUrl, isTouchDevice, sendInvite } from "./invite";
+import { copyInvite, inviteUrl, sendInvite } from "./invite";
 import InviteQrModal from "./InviteQrModal";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
@@ -98,17 +98,15 @@ function PrivateLobby() {
       showToast("Couldn't copy the link. Grab the URL from the address bar.", "warning");
     }
   };
-  /** Tapping the room code copies the invite link, ready to paste into a chat. */
-  const handleCopyLink = async () => {
-    if (await copyInvite(inviteUrl(gameCode))) {
-      noteInvite("copy");
-      showToast("Invite link copied", "success");
+  /** Tapping the room code copies just the code, to paste into a chat. */
+  const handleCopyCode = async () => {
+    if (await copyInvite(gameCode)) {
+      noteInvite("code");
+      showToast("Code copied", "success");
     } else {
-      showToast("Couldn't copy the link. Grab the URL from the address bar.", "warning");
+      showToast("Couldn't copy the code.", "warning");
     }
   };
-  // The share sheet is a phone thing; on desktop tapping the code covers it.
-  const [canShareSheet] = useState(() => isTouchDevice() && typeof navigator.share === "function");
   const handleShowQr = () => {
     setShowQr(true);
     noteInvite("qr");
@@ -344,27 +342,26 @@ function PrivateLobby() {
                     <button
                       type="button"
                       data-vital="invite"
-                      onClick={handleCopyLink}
-                      aria-label="Copy invite link"
-                      title="Copy invite link"
+                      onClick={handleCopyCode}
+                      aria-label="Copy room code"
+                      title="Copy room code"
                       className="text-2xl text-left cursor-pointer hover:text-[#68d570] transition-colors mr-1"
                     >
                       {streamerHide ? '••••••' : gameCode}
                     </button>
-                    {canShareSheet && (
-                      <button
-                        type="button"
-                        data-vital="invite"
-                        onClick={handleInvite}
-                        aria-label="Share invite"
-                        title="Share invite"
-                        className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15" />
-                        </svg>
-                      </button>
-                    )}
+                    {/* Share sheet on a phone; copies the full invite link elsewhere. */}
+                    <button
+                      type="button"
+                      data-vital="invite"
+                      onClick={handleInvite}
+                      aria-label="Share invite link"
+                      title="Share invite link"
+                      className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15" />
+                      </svg>
+                    </button>
                     {/* A QR code on screen would show the room to a stream. */}
                     {!streamerHide && (
                       <button

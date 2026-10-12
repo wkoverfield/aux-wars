@@ -132,10 +132,10 @@ describe("web vitals rollup", () => {
 
   test("computeDayMetrics counts invites by method", () => {
     const ev = emptyEvents();
-    ev.detail.invite_shared = [{ reason: "share" }, { reason: "share" }, { reason: "qr" }, { reason: "carrier pigeon" }, {}];
+    ev.detail.invite_shared = [{ reason: "share" }, { reason: "share" }, { reason: "qr" }, { reason: "code" }, { reason: "copy" }, { reason: "carrier pigeon" }, {}];
     expect(computeDayMetrics(inputs({ events: ev }))).toMatchObject({
-      invitesShared: 5,
-      invitesByMethod: { share: 2, qr: 1, unknown: 2 },
+      invitesShared: 7,
+      invitesByMethod: { share: 2, qr: 1, code: 1, copy: 1, unknown: 2 },
     });
     expect(computeDayMetrics(inputs())).toMatchObject({ invitesShared: 0, invitesByMethod: {} });
   });

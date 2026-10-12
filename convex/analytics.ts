@@ -125,9 +125,12 @@ export function sanitizeClientError(m: EventMetadata | undefined): EventMetadata
   return out;
 }
 
-const INVITE_METHODS = new Set(["share", "copy", "qr"]);
+const INVITE_METHODS = new Set(["share", "copy", "code", "qr"]);
 
-/** How an invite was sent: "share" (system share sheet), "copy" or "qr". Anything else reads "unknown". */
+/**
+ * How an invite was sent: "share" (system share sheet), "copy" (the link),
+ * "code" (the room code alone) or "qr". Anything else reads "unknown".
+ */
 export function inviteMethod(reason: unknown): string {
   return typeof reason === "string" && INVITE_METHODS.has(reason) ? reason : "unknown";
 }
