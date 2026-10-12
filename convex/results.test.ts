@@ -20,6 +20,9 @@ afterEach(() => vi.useRealTimers());
 const conn = (id: string) => `conn-${id}`;
 const as = (code: string, id: string) => ({ code, playerId: id, connectionId: conn(id) });
 
+/** A thumbnail URL with a YouTube-shaped (11 character) video id. */
+const cover = (name: string) => `https://i.ytimg.com/vi/${name.padEnd(11, "0")}/mqdefault.jpg`;
+
 /** A hosted room with three players and two finished rounds, in gameOver. */
 async function finishedGame(t: T) {
   const { code } = await t.mutation(api.game.rooms.hostGame, {});
@@ -33,7 +36,7 @@ async function finishedGame(t: T) {
     const song = (round: number, playerId: string, name: string) =>
       ctx.db.insert("submissions", {
         roomCode: code, round, playerId, trackId: `yt:${name}`,
-        trackDetails: { name, artist: "QA Artist", albumCover: `https://i.ytimg.com/vi/${name}/mqdefault.jpg`, videoId: name },
+        trackDetails: { name, artist: "QA Artist", albumCover: cover(name), videoId: name },
         submittedAt: Date.now(),
       } as never);
     const r1 = [await song(1, "qa-maya", "alpha"), await song(1, "qa-dev", "bravo"), await song(1, "qa-sam", "charlie")];
@@ -42,7 +45,7 @@ async function finishedGame(t: T) {
     const results = (songs: typeof r1, names: string[], scores: number[]) =>
       songs.map((songId, i) => ({
         songId, playerId: players[i], name: names[i], artist: "QA Artist",
-        albumCover: `https://i.ytimg.com/vi/${names[i]}/mqdefault.jpg`, totalRecords: scores[i], isWinner: i === 0,
+        albumCover: cover(names[i]), totalRecords: scores[i], isWinner: i === 0,
       }));
     await ctx.db.insert("roundResults", {
       roomCode: code, round: 1, prompt: "A song for a late-night drive.", winnerSongId: r1[0],
@@ -119,7 +122,7 @@ describe("shared results", () => {
     expect(songs[1].artist).toBe("spaced out");
     expect(songs[1].albumCover).toBe("");
     // A real catalog cover is kept as is.
-    expect(songs[0].albumCover).toBe("https://i.ytimg.com/vi/alpha/mqdefault.jpg");
+    expect(songs[0].albumCover).toBe(cover("alpha"));
   });
 
   test("one snapshot per game, whoever asks", async () => {

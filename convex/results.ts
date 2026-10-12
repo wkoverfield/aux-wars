@@ -19,6 +19,8 @@ const SHARE_ID_LENGTH = 12;
 const SHARE_ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"; // no look-alikes
 const SHARE_ID_RE = /^[a-z0-9]{12}$/;
 const PRUNE_BATCH = 100;
+const MAX_ROUNDS = 40;
+const MAX_SONGS_PER_ROUND = 60;
 
 function makeShareId(): string {
   // Rejection sampling: a plain modulo would favor the first letters.
@@ -42,20 +44,44 @@ function makeShareId(): string {
 const MAX_SONG_TEXT = 120;
 const MAX_PROMPT_TEXT = 200;
 const REMOVED_TEXT = "[removed]";
-// The image hosts of the music catalogs the search server returns
-// (YouTube thumbnails, iTunes artwork, Deezer covers).
-const COVER_HOST_RE = /^(i\d?\.ytimg\.com|[a-z0-9-]+\.mzstatic\.com|[a-z0-9-]+\.dzcdn\.net)$/;
+// Cover images are accepted only in the URL shapes the music catalogs serve
+// thumbnails in. This cannot prove an image is a song cover (anyone can
+// upload a video, and its thumbnail lives on the same host), but it limits a
+// public page to images those catalogs host and moderate, with no query
+// string or other extras riding along.
+const COVER_SHAPES: Array<{ host: RegExp; path: RegExp }> = [
+  // YouTube thumbnails: /vi/<11 char id>/<name>.jpg
+  { host: /^i\d?\.ytimg\.com$/, path: /^\/vi(_webp)?\/[A-Za-z0-9_-]{11}\/[a-z0-9_]{1,24}\.(jpg|webp)$/ },
+  // iTunes artwork
+  { host: /^[a-z0-9-]{1,40}\.mzstatic\.com$/, path: /^\/image\/thumb\/[A-Za-z0-9/._-]{1,300}\.(jpg|jpeg|png|webp)$/ },
+  // Deezer covers
+  { host: /^[a-z0-9-]{1,40}\.dzcdn\.net$/, path: /^\/images\/(cover|artist)\/[A-Za-z0-9/._-]{1,200}\.(jpg|jpeg|png)$/ },
+];
+const MAX_COVER_URL = 500;
 
+// A high or low surrogate without its partner, and control characters.
+const BROKEN_TEXT_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\u0000-\u001F\u007F]/g;
+
+/**
+ * Text fit for a public page: bounded before any work is done on it, cut on
+ * whole characters (never through an emoji), whitespace collapsed, and
+ * replaced outright when the name filter rejects it.
+ */
 export function publicText(text: string, max = MAX_SONG_TEXT): string {
-  const clean = text.replace(/\s+/g, " ").trim().slice(0, max);
+  // A code point is at most 2 UTF-16 units; the slack covers runs of spaces.
+  const head = text.slice(0, max * 8).replace(/\s+/g, " ").replace(BROKEN_TEXT_RE, "").trim();
+  const clean = Array.from(head).slice(0, max).join("").trim();
   return containsHateSpeech(clean) ? REMOVED_TEXT : clean;
 }
 
-/** The cover URL when it is an https image on a known catalog host, else "". */
+/** The cover URL when it has a catalog thumbnail's exact shape over https, else "". */
 export function publicCover(url: string): string {
+  if (typeof url !== "string" || url.length > MAX_COVER_URL) return "";
   try {
     const u = new URL(url);
-    return u.protocol === "https:" && COVER_HOST_RE.test(u.hostname) && !u.username && !u.password ? u.href : "";
+    if (u.protocol !== "https:" || u.username || u.password || u.port || u.search || u.hash) return "";
+    const ok = COVER_SHAPES.some((shape) => shape.host.test(u.hostname) && shape.path.test(u.pathname));
+    return ok ? `https://${u.hostname}${u.pathname}` : "";
   } catch {
     return "";
   }
@@ -113,6 +139,11 @@ export const share = mutation({
       .collect();
     if (roundRows.length === 0) {
       return { success: false, message: "This game has no results to share." } as const;
+    }
+    // Far above any real game (rounds are capped by the settings, players by
+    // the room). Keeps a snapshot comfortably inside one document.
+    if (roundRows.length > MAX_ROUNDS || roundRows.some((rr) => rr.results.length > MAX_SONGS_PER_ROUND)) {
+      return { success: false, message: "This game is too large to share." } as const;
     }
 
     // Stable keys in place of player ids. Players who left mid-game still
