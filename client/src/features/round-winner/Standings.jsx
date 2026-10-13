@@ -52,8 +52,9 @@ export default function Standings({ players, awards = [], onPickPlayer }) {
         <ul aria-label="Awards" className="w-full max-w-md mt-4 px-3 space-y-1.5">
           {awards.map((award) => (
             <li key={award.id} className="flex items-baseline justify-between gap-3 text-sm">
-              <span className="text-white/50 truncate">
-                <span aria-hidden="true">{award.emoji}</span> {award.title}
+              <span className="flex items-baseline gap-2 min-w-0 text-white/50">
+                <span aria-hidden="true" className="shrink-0">{award.emoji}</span>
+                <span className="truncate">{award.title}</span>
               </span>
               <span className="text-white/80 truncate">{award.playerName}</span>
             </li>

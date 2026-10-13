@@ -55,6 +55,20 @@ describe("SharedResults", () => {
     expect(screen.getByText("home page")).toBeTruthy();
   });
 
+  it("lists a player who rated but never submitted a song, after the ranked players", () => {
+    result = {
+      ...snapshot,
+      players: [...snapshot.players, { playerId: "p3", name: "Sam" }],
+      voterAwards: [{ voterId: "p3", avgGiven: 2, count: 4, kingmakerHits: 0 }],
+    };
+    renderPage();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Maya had the best taste");
+    expect(screen.getByText("3 players, 2 rounds")).toBeTruthy();
+    const seats = screen.getAllByRole("button", { name: /setlist$/ }).map((b) => b.getAttribute("aria-label"));
+    expect(seats).toEqual(["View Maya's setlist", "View Dev's setlist", "View Sam's setlist"]);
+    expect(screen.getByText("Sam: 0")).toBeTruthy();
+  });
+
   it("is kept out of search indexes and counts one view", () => {
     result = snapshot;
     renderPage();

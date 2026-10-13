@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeAwards } from "./computeAwards";
-import { BLANK_COVER, hashStr, pickReel, recapSummary, reelSeedFor, standingsFrom, withCovers } from "./resultsModel";
+import { BLANK_COVER, hashStr, pickReel, recapSummary, reelSeedFor, standingsFrom, withCovers, withNonSubmitters } from "./resultsModel";
 
 // A 4-player, 3-round game, in the shape getAllRoundResults returns.
 const P = ["id-maya", "id-dev", "id-sam", "id-lee"];
@@ -45,6 +45,24 @@ describe("standingsFrom", () => {
       ["Sam", 1, 19],
       ["Lee", 0, 11],
     ]);
+  });
+});
+
+describe("withNonSubmitters", () => {
+  const standings = [{ playerId: "a", playerName: "Ann", wins: 1, totalRecords: 5, songs: [{}] }];
+
+  it("adds players who only rated, once each, after the ranked players", () => {
+    const voters = [{ voterId: "a" }, { voterId: "b" }, { voterId: "b" }, { voterId: "c" }];
+    const all = withNonSubmitters(standings, voters, [{ playerId: "b", name: "Bo" }]);
+    expect(all.map((p) => [p.playerId, p.playerName, p.wins, p.totalRecords, p.songs.length])).toEqual([
+      ["a", "Ann", 1, 5, 1],
+      ["b", "Bo", 0, 0, 0],
+      ["c", "Unknown Player", 0, 0, 0],
+    ]);
+  });
+
+  it("returns the same list when every voter also submitted", () => {
+    expect(withNonSubmitters(standings, [{ voterId: "a" }], [])).toBe(standings);
   });
 });
 
