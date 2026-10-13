@@ -69,6 +69,26 @@ export function standingsFrom(rounds) {
   return buildPlayerStatsFromRounds(rounds).sort((a, b) => b.wins - a.wins || b.totalRecords - a.totalRecords);
 }
 
+/**
+ * Standings with everyone who took part: players who rated songs but never
+ * submitted one follow the ranked players, with no wins and no songs.
+ *
+ * @param {Array} standings - Ranked players (see standingsFrom)
+ * @param {Array} voterAwards - Per-voter stats, one entry per player who rated
+ * @param {Array} players - [{ playerId, name }], for the names
+ */
+export function withNonSubmitters(standings, voterAwards = [], players = []) {
+  const listed = new Set(standings.map((p) => p.playerId));
+  const names = new Map(players.map((p) => [p.playerId, p.name]));
+  const extra = [];
+  for (const { voterId } of voterAwards) {
+    if (!voterId || listed.has(voterId)) continue;
+    listed.add(voterId);
+    extra.push({ playerId: voterId, playerName: names.get(voterId) ?? 'Unknown Player', wins: 0, totalRecords: 0, songs: [] });
+  }
+  return extra.length ? [...standings, ...extra] : standings;
+}
+
 /** The awards shown for a game: up to three, picked deterministically from its seed. */
 export function pickReel(awards, seed) {
   return pickN(awards, 3, mulberry32(seed));

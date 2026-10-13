@@ -13,7 +13,7 @@ import AnimatedLogo from '../../components/AnimatedLogo';
 import AdSlot from '../../components/AdSlot';
 import { captureGameEvent, gameProperties } from '../../services/analytics';
 import { computeAwards } from './computeAwards';
-import { pickReel, reelSeedFor, standingsFrom } from './resultsModel';
+import { pickReel, reelSeedFor, standingsFrom, withNonSubmitters } from './resultsModel';
 import SetlistModal from './SetlistModal';
 import Standings from './Standings';
 import { sendLink } from '../lobby/invite';
@@ -143,6 +143,12 @@ export default function GameWinner() {
   const sortedPlayers = useMemo(
     () => (allRoundResultsQuery ? standingsFrom(allRoundResultsQuery) : []),
     [allRoundResultsQuery]
+  );
+
+  // The final list also names players who rated but never submitted a song.
+  const everyone = useMemo(
+    () => withNonSubmitters(sortedPlayers, voterAwardsQuery || [], playersQuery || []),
+    [sortedPlayers, voterAwardsQuery, playersQuery]
   );
 
   // DETERMINISTIC per-game seed (from this game's round winners). Drives BOTH the
@@ -371,7 +377,7 @@ export default function GameWinner() {
           <ScrollFade className="h-full w-full" contentClassName={`min-h-full flex flex-col items-center w-full max-w-2xl mx-auto px-2 ${isPublic ? 'pt-16 md:pt-20 pb-4' : 'py-4'}`}>
             <AnimatedLogo />
 
-            <Standings players={sortedPlayers} awards={reel} onPickPlayer={setSetlistPlayer} />
+            <Standings players={everyone} awards={reel} onPickPlayer={setSetlistPlayer} />
 
             <p className="text-xs text-white/40 mt-3">tap anyone to see their setlist</p>
 

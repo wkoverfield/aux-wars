@@ -24,6 +24,7 @@ export default function SetlistModal({ player, onClose }) {
           <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl leading-none px-2">×</button>
         </div>
         <ScrollFade className="flex-1 min-h-0" contentClassName="px-5 pb-5 space-y-2" fadeColor="#181818" showTop={false}>
+          {songs.length === 0 && <p className="text-sm text-gray-400 py-2">No songs submitted this game.</p>}
           {songs.map((s) => (
             <div key={`${s.round}-${s.songId}`} className="flex items-center gap-2.5 p-2 rounded-md bg-[#242424]">
               <span className="text-[11px] text-gray-500 w-5 shrink-0 text-center">R{s.round}</span>
