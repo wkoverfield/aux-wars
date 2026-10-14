@@ -47,6 +47,10 @@
       "destination": "https://aux-wars-production.up.railway.app/api/:path*"
     },
     {
+      "source": "/faq",
+      "destination": "/faq.html"
+    },
+    {
       "source": "/((?!assets/|api/).*)",
       "destination": "/index.html"
     }
