@@ -66,5 +66,6 @@ test('log-only: nothing is blocked, and the minute summary counts what would hav
   assert.equal(lines.length, 1);
   assert.match(lines[0], /mode=log-only requests=65 clients=1 max_per_client=65 over_client=5 over_global=0/);
   assert.match(lines[0], /key_source=\{"xff":65\} xff_hops=\{"2":65\}/);
-  assert.doesNotMatch(lines[0], /1\.1\.1\.1/);
+  assert.match(lines[0], /candidates=\{"xff_first":\[65,1,65\],"xff_last":\[65,1,65\]\}/);
+  assert.doesNotMatch(lines[0], /1\.1\.1\.1|5\.5\.5\.5/);
 });
