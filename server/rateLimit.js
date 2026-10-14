@@ -52,6 +52,30 @@ export function clientKey(req) {
   return { key: req.socket?.remoteAddress || 'unknown', source: 'socket', hops: 0 };
 }
 
+/**
+ * Headers that may carry the visitor's address once a request has passed
+ * through Vercel and Railway. The summary log reports, for each, how many
+ * requests had it, how many distinct values it took and the most requests
+ * sharing one value (never the values), to show which one is per-visitor.
+ */
+const KEY_CANDIDATES = {
+  xff_first: (h) => firstOf(h['x-forwarded-for']),
+  xff_last: (h) => lastOf(h['x-forwarded-for']),
+  x_real_ip: (h) => firstOf(h['x-real-ip']),
+  x_vercel_forwarded_for: (h) => firstOf(h['x-vercel-forwarded-for']),
+  x_vercel_proxied_for: (h) => firstOf(h['x-vercel-proxied-for']),
+  true_client_ip: (h) => firstOf(h['true-client-ip']),
+  cf_connecting_ip: (h) => firstOf(h['cf-connecting-ip']),
+};
+
+function firstOf(value) {
+  return typeof value === 'string' ? value.split(',')[0].trim() : '';
+}
+
+function lastOf(value) {
+  return typeof value === 'string' ? value.split(',').pop().trim() : '';
+}
+
 export function createSearchRateLimiter({
   enforce = process.env.SEARCH_RATE_LIMIT === 'enforce',
   clock = () => Date.now(),
@@ -63,7 +87,7 @@ export function createSearchRateLimiter({
   let stats = freshStats();
 
   function freshStats() {
-    return { requests: 0, keys: new Map(), sources: {}, hops: {}, overClient: 0, overGlobal: 0, startedAt: clock() };
+    return { requests: 0, keys: new Map(), sources: {}, hops: {}, candidates: {}, overClient: 0, overGlobal: 0, startedAt: clock() };
   }
 
   function summarize(now) {
@@ -74,7 +98,8 @@ export function createSearchRateLimiter({
         `[search-rate] mode=${enforce ? 'enforce' : 'log-only'} requests=${stats.requests} ` +
           `clients=${stats.keys.size} max_per_client=${maxPerKey} ` +
           `over_client=${stats.overClient} over_global=${stats.overGlobal} ` +
-          `key_source=${JSON.stringify(stats.sources)} xff_hops=${JSON.stringify(stats.hops)}`
+          `key_source=${JSON.stringify(stats.sources)} xff_hops=${JSON.stringify(stats.hops)} ` +
+          `candidates=${JSON.stringify(candidateSummary(stats.candidates))}`
       );
     }
     for (const [key, bucket] of clients) {
@@ -91,6 +116,12 @@ export function createSearchRateLimiter({
     stats.keys.set(key, (stats.keys.get(key) || 0) + 1);
     stats.sources[source] = (stats.sources[source] || 0) + 1;
     stats.hops[hops] = (stats.hops[hops] || 0) + 1;
+    for (const [name, read] of Object.entries(KEY_CANDIDATES)) {
+      const value = read(req.headers);
+      if (!value) continue;
+      const seen = stats.candidates[name] || (stats.candidates[name] = new Map());
+      seen.set(value, (seen.get(value) || 0) + 1);
+    }
 
     let bucket = clients.get(key);
     if (!bucket) {
@@ -109,4 +140,19 @@ export function createSearchRateLimiter({
     res.set('Retry-After', String(verdict.retryAfterSec));
     return res.status(429).json({ error: 'Too many searches. Try again in a moment.' });
   };
+}
+
+/** Per header: [requests that had it, distinct values, most requests sharing one value]. */
+function candidateSummary(candidates) {
+  const out = {};
+  for (const [name, seen] of Object.entries(candidates)) {
+    let present = 0;
+    let max = 0;
+    for (const count of seen.values()) {
+      present += count;
+      max = Math.max(max, count);
+    }
+    out[name] = [present, seen.size, max];
+  }
+  return out;
 }
