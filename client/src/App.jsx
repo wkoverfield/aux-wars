@@ -14,6 +14,8 @@ import ConnectionStatus from "./components/ConnectionStatus";
 import PageviewTracker from "./components/PageviewTracker";
 import CookieConsent from "./components/CookieConsent";
 import PrivacyPolicy from "./features/legal/PrivacyPolicy";
+import NotFound from "./features/legal/NotFound";
+import Faq from "./features/legal/Faq";
 import ProSuccess from "./features/legal/ProSuccess";
 import ProRestore from "./features/legal/ProRestore";
 import { ToastProvider } from "./contexts/ToastContext";
@@ -69,6 +71,7 @@ export default function App() {
               <Route path="/" element={<AppDisplay />}>
                 <Route index element={<PageTransition><Home /></PageTransition>} />
                 <Route path="privacy" element={<PageTransition><PrivacyPolicy /></PageTransition>} />
+                <Route path="faq" element={<PageTransition><Faq /></PageTransition>} />
                 <Route path="pro/success" element={<PageTransition><ProSuccess /></PageTransition>} />
                 <Route path="pro/restore" element={<PageTransition><ProRestore /></PageTransition>} />
                 <Route path="g/:shareId" element={<PageTransition><SharedResults /></PageTransition>} />
@@ -81,6 +84,7 @@ export default function App() {
                     <Route path="gamewinner" element={<PageTransition><GameWinner /></PageTransition>} />
                   </Route>
                 </Route>
+                <Route path="*" element={<PageTransition><NotFound /></PageTransition>} />
               </Route>
           </Routes>
         </ToastProvider>

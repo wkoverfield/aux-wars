@@ -23,6 +23,18 @@
       ]
     },
     {
+      "source": "/(lobby|LOBBY|Lobby)/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    },
+    {
+      "source": "/pro/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    },
+    {
       "source": "/stats",
       "headers": [
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
@@ -33,6 +45,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://aux-wars-production.up.railway.app/api/:path*"
+    },
+    {
+      "source": "/faq",
+      "destination": "/faq.html"
     },
     {
       "source": "/((?!assets/|api/).*)",

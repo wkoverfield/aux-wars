@@ -6,7 +6,7 @@ import GitHubStarButton from "../../components/GitHubStarButton";
 import AdSlot from "../../components/AdSlot";
 import NewsSection from "../../components/NewsSection";
 import LiveStats from "../../components/LiveStats";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useSession } from "../../hooks/useSession";
@@ -259,6 +259,9 @@ export default function Home() {
               </li>
             ))}
           </ol>
+          <Link to="/faq" className="inline-block mt-4 text-xs text-gray-400 hover:text-white underline underline-offset-2">
+            More questions? Read the FAQ
+          </Link>
         </div>
       </section>
 
