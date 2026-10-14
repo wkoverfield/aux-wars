@@ -25,6 +25,7 @@ import http from "http";
 import cors from "cors";
 import youtubesearchapi from "youtube-search-api";
 import { PostHog } from "posthog-node";
+import { createSearchRateLimiter } from "./rateLimit.js";
 
 // Only init PostHog when a token is configured (Railway env). Without it —
 // e.g. local dev or before the env var is set — fall back to a no-op stub so
@@ -197,9 +198,10 @@ async function handleSearch(req, res) {
   }
 }
 
-app.post('/api/music/search', handleSearch);
+const searchRateLimit = createSearchRateLimiter();
+app.post('/api/music/search', searchRateLimit, handleSearch);
 // Backwards-compatible alias so already-deployed clients keep working during rollout.
-app.post('/api/youtube/search', handleSearch);
+app.post('/api/youtube/search', searchRateLimit, handleSearch);
 
 /**
  * Fetch JSON with a timeout so a slow upstream can't hang the request.
