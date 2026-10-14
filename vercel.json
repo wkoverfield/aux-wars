@@ -23,6 +23,18 @@
       ]
     },
     {
+      "source": "/(lobby|LOBBY|Lobby)/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    },
+    {
+      "source": "/pro/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    },
+    {
       "source": "/stats",
       "headers": [
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" }

@@ -7,6 +7,7 @@ import { useSession } from '../hooks/useSession';
 import { useLeaveOnClose } from '../features/quickplay/useQuickPlay';
 import { useToast } from '../contexts/ToastContext';
 import JoinGate from '../features/lobby/JoinGate';
+import { useNoIndex } from '../hooks/useNoIndex';
 // GameContext removed - using RoomProvider's Convex queries directly
 
 /**
@@ -17,6 +18,8 @@ export default function GameRouteGuard() {
   const navigate = useNavigate();
   const location = useLocation();
   const { gameCode } = useParams();
+  // Room URLs are private and short-lived; keep them out of search.
+  useNoIndex();
   // const socket = useSocket();
   // const isConnected = useSocketConnection();
   const { session, updateSession } = useSession();
