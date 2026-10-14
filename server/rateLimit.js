@@ -12,10 +12,8 @@
  * - anything else (default): requests always pass; the limiter only counts
  *   what it would have blocked, in the once-a-minute summary log.
  *
- * Client key: requests reach this server through the site's /api rewrite on
- * Vercel (which sets x-forwarded-for to the visitor's address) and Railway's
- * proxy. The summary log reports how the key was found (never the addresses
- * themselves) so the key can be confirmed before enforcing.
+ * The summary log reports how each client key was found (see clientKey),
+ * never the addresses themselves.
  */
 
 export const CLIENT_LIMIT = { capacity: 60, refillPerSec: 2 };
@@ -40,40 +38,21 @@ export function take(bucket, now) {
 }
 
 /**
- * The caller's address and where it came from: the first x-forwarded-for
- * entry, else x-real-ip, else the socket.
+ * The caller's address and where it came from. Through the site's /api
+ * rewrite, x-vercel-forwarded-for is the visitor's address; x-forwarded-for
+ * and x-real-ip hold Vercel's outbound proxy addresses there, which many
+ * visitors share. A request sent straight to the Railway domain has no
+ * Vercel header, so x-real-ip (set by Railway's proxy) is the caller. A
+ * direct caller can forge x-vercel-forwarded-for to get a fresh per-client
+ * bucket; the global bucket still applies to it.
  */
 export function clientKey(req) {
-  const xff = req.headers['x-forwarded-for'];
-  const first = typeof xff === 'string' ? xff.split(',')[0].trim() : '';
-  if (first) return { key: first, source: 'xff', hops: xff.split(',').length };
+  const vercel = req.headers['x-vercel-forwarded-for'];
+  const viaVercel = typeof vercel === 'string' ? vercel.split(',')[0].trim() : '';
+  if (viaVercel) return { key: viaVercel, source: 'x-vercel-forwarded-for' };
   const realIp = req.headers['x-real-ip'];
-  if (typeof realIp === 'string' && realIp.trim()) return { key: realIp.trim(), source: 'x-real-ip', hops: 0 };
-  return { key: req.socket?.remoteAddress || 'unknown', source: 'socket', hops: 0 };
-}
-
-/**
- * Headers that may carry the visitor's address once a request has passed
- * through Vercel and Railway. The summary log reports, for each, how many
- * requests had it, how many distinct values it took and the most requests
- * sharing one value (never the values), to show which one is per-visitor.
- */
-const KEY_CANDIDATES = {
-  xff_first: (h) => firstOf(h['x-forwarded-for']),
-  xff_last: (h) => lastOf(h['x-forwarded-for']),
-  x_real_ip: (h) => firstOf(h['x-real-ip']),
-  x_vercel_forwarded_for: (h) => firstOf(h['x-vercel-forwarded-for']),
-  x_vercel_proxied_for: (h) => firstOf(h['x-vercel-proxied-for']),
-  true_client_ip: (h) => firstOf(h['true-client-ip']),
-  cf_connecting_ip: (h) => firstOf(h['cf-connecting-ip']),
-};
-
-function firstOf(value) {
-  return typeof value === 'string' ? value.split(',')[0].trim() : '';
-}
-
-function lastOf(value) {
-  return typeof value === 'string' ? value.split(',').pop().trim() : '';
+  if (typeof realIp === 'string' && realIp.trim()) return { key: realIp.trim(), source: 'x-real-ip' };
+  return { key: req.socket?.remoteAddress || 'unknown', source: 'socket' };
 }
 
 export function createSearchRateLimiter({
@@ -87,7 +66,7 @@ export function createSearchRateLimiter({
   let stats = freshStats();
 
   function freshStats() {
-    return { requests: 0, keys: new Map(), sources: {}, hops: {}, candidates: {}, overClient: 0, overGlobal: 0, startedAt: clock() };
+    return { requests: 0, keys: new Map(), sources: {}, overClient: 0, overGlobal: 0, startedAt: clock() };
   }
 
   function summarize(now) {
@@ -98,8 +77,7 @@ export function createSearchRateLimiter({
         `[search-rate] mode=${enforce ? 'enforce' : 'log-only'} requests=${stats.requests} ` +
           `clients=${stats.keys.size} max_per_client=${maxPerKey} ` +
           `over_client=${stats.overClient} over_global=${stats.overGlobal} ` +
-          `key_source=${JSON.stringify(stats.sources)} xff_hops=${JSON.stringify(stats.hops)} ` +
-          `candidates=${JSON.stringify(candidateSummary(stats.candidates))}`
+          `key_source=${JSON.stringify(stats.sources)}`
       );
     }
     for (const [key, bucket] of clients) {
@@ -111,17 +89,10 @@ export function createSearchRateLimiter({
   return function searchRateLimit(req, res, next) {
     const now = clock();
     summarize(now);
-    const { key, source, hops } = clientKey(req);
+    const { key, source } = clientKey(req);
     stats.requests += 1;
     stats.keys.set(key, (stats.keys.get(key) || 0) + 1);
     stats.sources[source] = (stats.sources[source] || 0) + 1;
-    stats.hops[hops] = (stats.hops[hops] || 0) + 1;
-    for (const [name, read] of Object.entries(KEY_CANDIDATES)) {
-      const value = read(req.headers);
-      if (!value) continue;
-      const seen = stats.candidates[name] || (stats.candidates[name] = new Map());
-      seen.set(value, (seen.get(value) || 0) + 1);
-    }
 
     let bucket = clients.get(key);
     if (!bucket) {
@@ -140,19 +111,4 @@ export function createSearchRateLimiter({
     res.set('Retry-After', String(verdict.retryAfterSec));
     return res.status(429).json({ error: 'Too many searches. Try again in a moment.' });
   };
-}
-
-/** Per header: [requests that had it, distinct values, most requests sharing one value]. */
-function candidateSummary(candidates) {
-  const out = {};
-  for (const [name, seen] of Object.entries(candidates)) {
-    let present = 0;
-    let max = 0;
-    for (const count of seen.values()) {
-      present += count;
-      max = Math.max(max, count);
-    }
-    out[name] = [present, seen.size, max];
-  }
-  return out;
 }
