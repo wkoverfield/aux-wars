@@ -4,7 +4,7 @@ import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import presenceComponent from "@convex-dev/presence/test";
 import { presence } from "./presence";
-import { MAX_SCREENS_PER_ROOM, SCREEN_HEARTBEAT_INTERVAL_MS, screenRoomKey } from "./screens";
+import { MAX_KNOWN_SCREENS_PER_ROOM, MAX_SCREENS_PER_ROOM, SCREEN_HEARTBEAT_INTERVAL_MS, screenRoomKey } from "./screens";
 import { RATING_TIMEOUT_MS, SCREEN_HOLD_GRACE_MS, clipLengthMs } from "./game/flow";
 
 const modules = import.meta.glob(["./**/*.ts", "./**/*.js", "!./**/*.test.ts", "!./**/*.d.ts"]);
@@ -210,6 +210,23 @@ describe("screen presence", () => {
     await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN });
     const after = await t.run(async (ctx) => presence.listRoom(ctx, screenRoomKey(code), false));
     expect(after).toEqual(before);
+  });
+
+  test("a room knows a bounded number of screens across attach/leave cycles", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h"]);
+    for (let i = 0; i < MAX_KNOWN_SCREENS_PER_ROOM; i++) {
+      const screenId = `screen-cycle-${i}`;
+      expect(await t.mutation(api.screens.heartbeat, { code, screenId })).toEqual({ ok: true });
+      await t.mutation(api.screens.leave, { code, screenId });
+    }
+    expect(await t.mutation(api.screens.heartbeat, { code, screenId: "screen-cycle-new" })).toEqual({ ok: false });
+    expect(await t.mutation(api.screens.heartbeat, { code, screenId: "screen-cycle-3" })).toEqual({ ok: true });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const opened = await t.run(async (ctx) =>
+      ctx.db.query("analyticsEvents").withIndex("by_type", (q) => q.eq("eventType", "screen_opened")).collect()
+    );
+    expect(opened).toHaveLength(MAX_KNOWN_SCREENS_PER_ROOM);
   });
 
   test("a room holds a bounded number of online screens", async () => {

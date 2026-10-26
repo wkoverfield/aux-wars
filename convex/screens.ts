@@ -31,6 +31,11 @@ export const SCREEN_HEARTBEAT_INTERVAL_MS = 20_000;
 // bounds the component writes an anonymous caller can cause per room.
 export const MAX_SCREENS_PER_ROOM = 4;
 
+// Screens a room may ever know (online or offline rows). leave keeps a row
+// offline, so without this an attach/leave loop with fresh ids would grow
+// rows and screen_opened events without bound. Known screens keep working.
+export const MAX_KNOWN_SCREENS_PER_ROOM = 12;
+
 /** Presence-component room key for a room's screens. */
 export function screenRoomKey(code: string): string {
   return `screen:${code}`;
@@ -65,7 +70,8 @@ async function screenKnown(ctx: MutationCtx, key: string, screenId: string): Pro
 /**
  * Keeps a screen marked online for a room. Safe to call anonymously: bad
  * shapes, unknown and public rooms, a full screen roster, and a new screen in
- * a locked room are silent no-ops (`{ ok: false }`). A screen already known
+ * a locked room or a room that has already seen MAX_KNOWN_SCREENS_PER_ROOM
+ * screens are silent no-ops (`{ ok: false }`). A screen already known
  * to a room keeps working after the room is locked. Never creates a player
  * and never writes a game document. Logs screen_opened when a screen first
  * attaches to a room.
@@ -86,6 +92,10 @@ export const heartbeat = mutation({
     const known = await screenKnown(ctx, key, screenId);
     // A locked room is sealed against a leaked code: no new screens.
     if (!known && room.locked) return { ok: false } as const;
+    if (!known) {
+      const all = await presence.listRoom(ctx, key, false, MAX_KNOWN_SCREENS_PER_ROOM + 1);
+      if (all.length >= MAX_KNOWN_SCREENS_PER_ROOM) return { ok: false } as const;
+    }
     const online = await presence.listRoom(ctx, key, true, MAX_SCREENS_PER_ROOM + 1);
     if (online.length >= MAX_SCREENS_PER_ROOM && !online.some((p) => p.userId === screenId)) {
       return { ok: false } as const;
