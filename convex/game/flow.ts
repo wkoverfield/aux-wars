@@ -1052,12 +1052,14 @@ export const advanceRating = internalMutation({
 /**
  * How long the clip for a submission plays, in ms: its YouTube window when it
  * has one, the whole rating window for a full-song YouTube track, else a
- * 30 s preview. Never more than the rating timeout.
+ * 30 s preview, or 0 when the track has nothing playable. Never more than
+ * the rating timeout.
  */
 export function clipLengthMs(
   trackDetails: Doc<"submissions">["trackDetails"],
   snippetDuration: number | undefined
 ): number {
+  if (!trackDetails.previewUrl && !trackDetails.videoId) return 0; // nothing to play
   const w = trackDetails.snippet;
   let ms = DEFAULT_CLIP_MS;
   if (w && Number.isFinite(w.startTime) && Number.isFinite(w.endTime) && w.endTime > w.startTime) {
@@ -1071,7 +1073,8 @@ export function clipLengthMs(
 /**
  * When a room with a shared screen may leave the current song: the clip's
  * length after the song became current, plus load slack, capped at the
- * rating timeout. Null when no hold applies (a public room, no screen, or a song
+ * rating timeout. Null when no hold applies (a public room, an unplayable
+ * track, no screen, or a song
  * that became current before ratingSongStartedAt existed).
  */
 async function screenHoldUntil(
@@ -1081,11 +1084,10 @@ async function screenHoldUntil(
 ): Promise<number | null> {
   const startedAt = room.ratingSongStartedAt;
   if (startedAt === undefined || room.isPublic) return null; // screens are private-room only
+  const clip = clipLengthMs(current.trackDetails, room.settings?.snippetDuration);
+  if (clip === 0) return null;
   if (!(await isScreenAttached(ctx, room.code))) return null;
-  const hold = Math.min(
-    clipLengthMs(current.trackDetails, room.settings?.snippetDuration) + SCREEN_HOLD_GRACE_MS,
-    RATING_TIMEOUT_MS
-  );
+  const hold = Math.min(clip + SCREEN_HOLD_GRACE_MS, RATING_TIMEOUT_MS);
   return startedAt + hold;
 }
 

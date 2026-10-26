@@ -174,6 +174,44 @@ describe("screen presence", () => {
     expect(rows).toEqual([]);
   });
 
+  test("a locked room rejects a new screen but keeps one it already knows", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h"]);
+    await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN });
+    await t.mutation(api.screens.leave, { code, screenId: SCREEN }); // tab hidden before the lock
+    await t.run(async (ctx) => {
+      const r = await ctx.db.query("rooms").withIndex("by_code", (q) => q.eq("code", code)).unique();
+      await ctx.db.patch(r!._id, { locked: true });
+    });
+    expect(await t.mutation(api.screens.heartbeat, { code, screenId: "screen-after-lock" })).toEqual({ ok: false });
+    const rows = await t.run(async (ctx) => presence.listRoom(ctx, screenRoomKey(code), false));
+    expect(rows.map((r) => r.userId)).toEqual([SCREEN]);
+    expect(await t.query(api.screens.screenAttached, { code })).toBe(false);
+    expect(await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN })).toEqual({ ok: true });
+    expect(await t.query(api.screens.screenAttached, { code })).toBe(true);
+  });
+
+  test("leave marks the screen offline without forgetting it", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h"]);
+    await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN });
+    await t.mutation(api.screens.leave, { code, screenId: SCREEN });
+    await t.mutation(api.screens.leave, { code, screenId: SCREEN }); // already offline: no-op
+    const rows = await t.run(async (ctx) => presence.listRoom(ctx, screenRoomKey(code), false));
+    expect(rows.map((r) => [r.userId, r.online])).toEqual([[SCREEN, false]]);
+  });
+
+  test("a steady heartbeat does not rewrite the presence row", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h"]);
+    await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN });
+    const before = await t.run(async (ctx) => presence.listRoom(ctx, screenRoomKey(code), false));
+    await advance(t, SCREEN_HEARTBEAT_INTERVAL_MS);
+    await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN });
+    const after = await t.run(async (ctx) => presence.listRoom(ctx, screenRoomKey(code), false));
+    expect(after).toEqual(before);
+  });
+
   test("a room holds a bounded number of online screens", async () => {
     const t = setup();
     const code = await hostedRoom(t, ["h"]);
@@ -250,6 +288,15 @@ describe("song hold with a shared screen", () => {
     expect(await index(t, code)).toBe(1);
   });
 
+  test("an unplayable song is not held", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ids);
+    await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN });
+    await startRating(t, code, ids, {});
+    await everyoneRates(t, code, ids);
+    expect(await index(t, code)).toBe(1);
+  });
+
   test("a vote after the clip has played advances at once", async () => {
     const t = setup();
     const code = await hostedRoom(t, ids);
@@ -309,6 +356,7 @@ describe("song hold with a shared screen", () => {
     expect(clipLengthMs({ ...base, videoId: "v", snippet: { startTime: 0, endTime: 300 } }, 0)).toBe(RATING_TIMEOUT_MS);
     expect(clipLengthMs({ ...base, previewUrl: "https://example.test/p.m4a" }, 30)).toBe(30_000);
     expect(clipLengthMs({ ...base, videoId: "v" }, 30)).toBe(30_000);
+    expect(clipLengthMs({ ...base, snippet: { startTime: 0, endTime: 20 } }, 30)).toBe(0);
   });
 });
 
@@ -325,14 +373,31 @@ describe("screen attribution", () => {
     expect(joins.map((j) => j.metadata?.source)).toEqual(["screen", undefined]);
   });
 
-  test("logEvent keeps only a well-formed room code on screen_opened", async () => {
-    const t = setup();
-    await t.mutation(api.analytics.logEvent, { eventType: "screen_opened", metadata: { roomCode: "abc123", playerId: "p1", label: "x" } });
-    await t.mutation(api.analytics.logEvent, { eventType: "screen_opened", metadata: { roomCode: "<script>" } });
+  async function screenOpenedRows(t: T) {
     await t.finishAllScheduledFunctions(vi.runAllTimers);
-    const rows = await t.run(async (ctx) =>
+    return await t.run(async (ctx) =>
       ctx.db.query("analyticsEvents").withIndex("by_type", (q) => q.eq("eventType", "screen_opened")).collect()
     );
-    expect(rows.map((r) => r.metadata)).toEqual([{ roomCode: "ABC123" }, {}]);
+  }
+
+  test("a client-sent screen_opened is accepted and not recorded", async () => {
+    const t = setup();
+    expect(
+      await t.mutation(api.analytics.logEvent, { eventType: "screen_opened", metadata: { roomCode: "ABC123" } })
+    ).toEqual({ success: true });
+    expect(await screenOpenedRows(t)).toEqual([]);
+  });
+
+  test("screen_opened is logged once per screen, on its first attach", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h"]);
+    await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN });
+    await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN });
+    await t.mutation(api.screens.leave, { code, screenId: SCREEN });
+    await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN });
+    await t.mutation(api.screens.heartbeat, { code, screenId: "screen-second-one" });
+    await t.mutation(api.screens.heartbeat, { code: "QAZZZZ", screenId: "screen-unknown-room" });
+    const rows = await screenOpenedRows(t);
+    expect(rows.map((r) => r.metadata)).toEqual([{ roomCode: code }, { roomCode: code }]);
   });
 });

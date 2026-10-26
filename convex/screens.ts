@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { presence } from "./presence";
 
 // Shared screens (a TV or laptop showing /screen/:code) are display-only and
@@ -20,9 +21,11 @@ const ROOM_CODE_RE = /^[A-Z0-9]{6}$/;
 const SCREEN_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
 // Fixed server-side: the client does not choose it. The component marks a
-// screen offline after 2.5x this without a heartbeat (~112 s), which covers a
-// client heartbeating every 30-60 s with room for a missed beat.
-export const SCREEN_HEARTBEAT_INTERVAL_MS = 45_000;
+// screen offline after 2.5x this without a heartbeat (50 s), so phones get
+// their audio back soon after a screen drops off. The client heartbeats at
+// this interval. A steady heartbeat rewrites only the component's session
+// timeout row, never the presence row screenAttached reads.
+export const SCREEN_HEARTBEAT_INTERVAL_MS = 20_000;
 
 // Online screens one room may hold. A new screen past this is ignored, which
 // bounds the component writes an anonymous caller can cause per room.
@@ -53,10 +56,19 @@ export async function removeScreenPresence(ctx: MutationCtx, code: string): Prom
   await presence.removeRoom(ctx, screenRoomKey(code));
 }
 
+/** Whether this screen has a presence row (online or offline) for the room. */
+async function screenKnown(ctx: MutationCtx, key: string, screenId: string): Promise<boolean> {
+  const rows = await presence.listUser(ctx, screenId, false, 50);
+  return rows.some((r) => r.roomId === key);
+}
+
 /**
  * Keeps a screen marked online for a room. Safe to call anonymously: bad
- * shapes, unknown rooms and a full screen roster are silent no-ops
- * (`{ ok: false }`). Never creates a player and never writes a game document.
+ * shapes, unknown and public rooms, a full screen roster, and a new screen in
+ * a locked room are silent no-ops (`{ ok: false }`). A screen already known
+ * to a room keeps working after the room is locked. Never creates a player
+ * and never writes a game document. Logs screen_opened when a screen first
+ * attaches to a room.
  */
 export const heartbeat = mutation({
   args: { code: v.string(), screenId: v.string() },
@@ -71,6 +83,9 @@ export const heartbeat = mutation({
     if (!room || room.isPublic) return { ok: false } as const;
 
     const key = screenRoomKey(roomCode);
+    const known = await screenKnown(ctx, key, screenId);
+    // A locked room is sealed against a leaked code: no new screens.
+    if (!known && room.locked) return { ok: false } as const;
     const online = await presence.listRoom(ctx, key, true, MAX_SCREENS_PER_ROOM + 1);
     if (online.length >= MAX_SCREENS_PER_ROOM && !online.some((p) => p.userId === screenId)) {
       return { ok: false } as const;
@@ -78,21 +93,45 @@ export const heartbeat = mutation({
 
     // One session per screen per room; the sessionId is unique per
     // (room, screen) pair as the component requires.
-    await presence.heartbeat(ctx, key, screenId, `${roomCode}:${screenId}`, SCREEN_HEARTBEAT_INTERVAL_MS);
+    await presence.heartbeat(ctx, key, screenId, sessionIdFor(roomCode, screenId), SCREEN_HEARTBEAT_INTERVAL_MS);
+    if (!known) {
+      await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+        eventType: "screen_opened",
+        metadata: { roomCode },
+      });
+    }
     return { ok: true } as const;
   },
 });
 
-/** Best-effort removal when the screen page is hidden or closed. */
+function sessionIdFor(roomCode: string, screenId: string): string {
+  return `${roomCode}:${screenId}`;
+}
+
+/**
+ * Best-effort offline mark when the screen page is hidden or closed. The
+ * presence row is kept (offline), so the screen stays known to the room: it
+ * may come back after the room is locked, and its return is not a new
+ * screen_opened.
+ */
 export const leave = mutation({
   args: { code: v.string(), screenId: v.string() },
   handler: async (ctx, { code, screenId }) => {
     const roomCode = normalizeCode(code);
     if (!roomCode || !SCREEN_ID_RE.test(screenId)) return null;
     const key = screenRoomKey(roomCode);
-    const entries = await presence.listRoom(ctx, key, false, MAX_SCREENS_PER_ROOM + 1);
-    if (!entries.some((p) => p.userId === screenId)) return null;
-    await presence.removeRoomUser(ctx, key, screenId);
+    const online = await presence.listRoom(ctx, key, true, MAX_SCREENS_PER_ROOM + 1);
+    if (!online.some((p) => p.userId === screenId)) return null;
+    // The component disconnects by session token, which heartbeat hands back
+    // for the screen's existing (online) session.
+    const { sessionToken } = await presence.heartbeat(
+      ctx,
+      key,
+      screenId,
+      sessionIdFor(roomCode, screenId),
+      SCREEN_HEARTBEAT_INTERVAL_MS
+    );
+    await presence.disconnect(ctx, sessionToken);
     return null;
   },
 });

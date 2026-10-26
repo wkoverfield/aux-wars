@@ -135,17 +135,6 @@ export function inviteMethod(reason: unknown): string {
   return typeof reason === "string" && INVITE_METHODS.has(reason) ? reason : "unknown";
 }
 
-const ROOM_CODE_RE = /^[A-Z0-9]{6}$/;
-
-/**
- * screen_opened: only the room code, and only when it is a well-formed code,
- * so the rollup can count distinct rooms that had a shared screen.
- */
-export function sanitizeScreenOpened(m: EventMetadata | undefined): EventMetadata {
-  const code = typeof m?.roomCode === "string" ? m.roomCode.trim().toUpperCase() : "";
-  return ROOM_CODE_RE.test(code) ? { roomCode: code } : {};
-}
-
 const PUBLIC_EVENT_TYPES = new Set([
   "invite_shared",
   "screen_opened",
@@ -231,7 +220,9 @@ export const logEvent = mutation({
     } else if (eventType === "invite_shared") {
       metadata = { reason: inviteMethod(metadata?.reason) };
     } else if (eventType === "screen_opened") {
-      metadata = sanitizeScreenOpened(metadata);
+      // Recorded server-side by screens.heartbeat on a screen's first attach.
+      // Accepted from clients that still send it, and dropped.
+      return { success: true } as const;
     } else if (eventType === "result_shared" || eventType === "result_viewed") {
       // Counted only: a results link id is never stored with the event.
       metadata = undefined;
