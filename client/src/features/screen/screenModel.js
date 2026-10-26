@@ -133,17 +133,6 @@ export function screenIdFor(storage = globalThis.sessionStorage, makeId = () => 
   return id;
 }
 
-/**
- * True the first time a screen opens a room in this tab, then false: the
- * screen_opened event is logged once per screen per room.
- */
-export function claimScreenOpened(code, storage = globalThis.sessionStorage) {
-  const key = `auxwars:screenOpened:${code}`;
-  if (readSession(key, storage)) return false;
-  writeSession(key, "1", storage);
-  return true;
-}
-
 /** sessionStorage key for a phone's "Play on this phone" choice in a room. */
 export function phoneAudioKey(code) {
   return `auxwars:playOnPhone:${code}`;

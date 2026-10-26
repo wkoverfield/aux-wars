@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { screenUrl, screenUrlLabel } from "../screen/screenModel";
+import { screenUrlLabel } from "../screen/screenModel";
 
 /**
  * The room's big-screen address, large enough to read off a phone and type
@@ -37,17 +37,17 @@ export default function ScreenLinkModal({ code, onCopy, onClose }) {
         <p className="text-sm text-gray-300 text-center">
           Open this on a TV or laptop. The songs play from there, and everyone keeps playing on their phone.
         </p>
-        <a
-          href={screenUrl(code)}
-          target="_blank"
-          rel="noopener"
-          className="w-full rounded-md bg-[#121212] px-4 py-5 text-center text-xl font-semibold hover:text-[#68d570] transition-colors"
+        {/* Plain text, not a link: opening it on this phone would attach a
+            hidden screen and mute everyone's phones. */}
+        <p
+          data-testid="screen-url"
+          className="w-full rounded-md bg-[#121212] px-4 py-5 text-center text-xl font-semibold select-all"
         >
           {/* Wraps only before the path, never inside the code. */}
           {label.slice(0, label.indexOf("/screen/"))}
           <wbr />
           <span className="whitespace-nowrap">{label.slice(label.indexOf("/screen/"))}</span>
-        </a>
+        </p>
         <div className="w-full flex gap-3">
           <button
             type="button"

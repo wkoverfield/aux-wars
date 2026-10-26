@@ -110,7 +110,9 @@ export default function BigScreen() {
   // Quick Play rooms get no screen: nothing attaches, nothing plays.
   const exists = Boolean(room) && view !== "unavailable";
 
-  useScreenPresence(code, exists);
+  // Attached only once it can play sound: until the start tap, phones keep
+  // their audio and songs are not held for the screen.
+  useScreenPresence(code, exists && started);
   useWakeLock(started && exists);
 
   let content = null;

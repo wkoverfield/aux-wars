@@ -1,25 +1,27 @@
 import { useEffect, useRef } from "react";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { captureGameEvent, hashRoomCode } from "../../services/analytics";
-import { claimScreenOpened, screenIdFor, screenLeaveBeaconBody } from "./screenModel";
+import { screenIdFor, screenLeaveBeaconBody } from "./screenModel";
 
-/** Heartbeat interval. Presence is swept server-side well after this lapses. */
-export const SCREEN_HEARTBEAT_MS = 45_000;
+/** Heartbeat interval; the server times a screen out after a few missed beats. */
+export const SCREEN_HEARTBEAT_MS = 20_000;
 
 /**
- * Marks this tab as a big screen attached to `code` while it is open: a
- * heartbeat on mount and every SCREEN_HEARTBEAT_MS, a best-effort leave when
- * the page goes away, and one screen_opened event per screen per room.
- * Never joins the room or takes a seat.
+ * Marks this tab as a big screen attached to `code` while `enabled`: a
+ * heartbeat right away, every SCREEN_HEARTBEAT_MS, and again whenever the
+ * page comes back (back/forward cache restore, tab visible again); a leave
+ * when it is disabled or unmounted, and a best-effort leave beacon when the
+ * page goes away. Never joins the room or takes a seat.
+ *
+ * Only enable it once the screen can play sound (after the start tap):
+ * while a screen is attached, phones stay quiet and songs are held for it.
  *
  * @param {string} code - Room code
- * @param {boolean} enabled - Only once the room is known to exist
+ * @param {boolean} enabled - The room exists and the screen has been started
  */
 export function useScreenPresence(code, enabled) {
   const heartbeat = useMutation(api.screens.heartbeat);
   const leave = useMutation(api.screens.leave);
-  const logEvent = useMutation(api.analytics.logEvent);
   const screenIdRef = useRef(null);
   if (!screenIdRef.current) {
     try {
@@ -38,6 +40,9 @@ export function useScreenPresence(code, enabled) {
     beat();
     const id = setInterval(beat, SCREEN_HEARTBEAT_MS);
 
+    const onVisible = () => {
+      if (document.visibilityState === "visible") beat();
+    };
     // A reload fires pagehide too; the next mount's heartbeat re-attaches.
     const onPageHide = () => {
       const convexUrl = import.meta.env.VITE_CONVEX_URL;
@@ -47,17 +52,15 @@ export function useScreenPresence(code, enabled) {
         : false;
       if (!sent) leave({ code, screenId }).catch(() => {});
     };
+    window.addEventListener("pageshow", beat);
     window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(id);
+      window.removeEventListener("pageshow", beat);
       window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisible);
+      leave({ code, screenId }).catch(() => {});
     };
   }, [code, enabled, heartbeat, leave]);
-
-  useEffect(() => {
-    if (!enabled || !code) return;
-    if (!claimScreenOpened(code)) return;
-    logEvent({ eventType: "screen_opened", metadata: { roomCode: code } }).catch(() => {});
-    captureGameEvent("screen_opened", { room_code_hash: hashRoomCode(code) });
-  }, [code, enabled, logEvent]);
 }

@@ -171,6 +171,7 @@ export function ScreenPrompt({ code, room }) {
 /** Song selection: the prompt and who has picked. Never which songs. */
 export function ScreenSelection({ room, players }) {
   const { picked, waiting } = pickStatus(players, room?.currentRound);
+  const anonymous = Boolean(room?.settings?.anonymousMode);
   const total = picked.length + waiting.length;
   const roundLength = room?.settings?.roundLength || 0;
   const deadline = room?.selectionStartedAt && roundLength > 0 ? room.selectionStartedAt + roundLength * 1000 : undefined;
@@ -186,7 +187,10 @@ export function ScreenSelection({ room, players }) {
           <p className="text-3xl tabular-nums">{picked.length} of {total} picked</p>
           <ProgressDots done={picked.length} total={total} />
         </div>
-        <div className="flex flex-wrap gap-3 text-2xl">
+        {/* Songs are rated in the order they were picked, so live names would
+            tell an anonymous room who picked which song. */}
+        {!anonymous && (
+          <div className="flex flex-wrap gap-3 text-2xl">
           {picked.map((p) => (
             <span key={p.playerId} className="rounded-full bg-[#242424] px-5 py-2 text-white">
               <span className="text-[#68d570] mr-2" aria-hidden="true">✓</span>{p.name}
@@ -197,15 +201,17 @@ export function ScreenSelection({ room, players }) {
               {p.name}
             </span>
           ))}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 /**
- * The song being rated: plays out loud here, with its art or video and a
- * progress bar. Give it a `key` per song (and per audio state) to reset it.
+ * The song being rated: plays out loud here, once (no loop: the server
+ * moves on shortly after the clip ends), with its art or video and a
+ * progress bar. Give it a `key` per song to reset it.
  */
 const ScreenClip = memo(function ScreenClip({ song, audioOn }) {
   const playerRef = useRef(null);
@@ -213,19 +219,28 @@ const ScreenClip = memo(function ScreenClip({ song, audioOn }) {
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const [started, setStarted] = useState(false); // has played at least once
   const videoId = song?.videoId;
   const startTime = song?.snippet?.startTime ?? 0;
   const endTime = song?.snippet?.endTime ?? 0;
 
-  // If the browser still refused to start the song, offer a tap.
+  // The start tap came while this song was already loaded: play it now.
   useEffect(() => {
-    if (!audioOn || duration <= 0 || playing) {
+    if (audioOn && duration > 0 && !started) playerRef.current?.play?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioOn, duration > 0]);
+
+  // If the browser still refused to start the song, offer a tap. Not after
+  // it has played: then it stopped because the clip ended.
+  useEffect(() => {
+    if (playing) setStarted(true);
+    if (!audioOn || duration <= 0 || playing || started) {
       setBlocked(false);
       return undefined;
     }
     const t = setTimeout(() => setBlocked(true), 3000);
     return () => clearTimeout(t);
-  }, [audioOn, duration, playing]);
+  }, [audioOn, duration, playing, started]);
 
   const progress = duration > 0 ? Math.min(1, time / duration) : 0;
   return (
@@ -247,7 +262,6 @@ const ScreenClip = memo(function ScreenClip({ song, audioOn }) {
             startTime={startTime}
             endTime={endTime}
             autoPlay={audioOn}
-            loop
             showControls={false}
             onReady={(d) => setDuration(d)}
             onTimeUpdate={setTime}
@@ -284,7 +298,7 @@ export function ScreenRating({ code, room, song, audioOn }) {
   return (
     <div data-vital="screen-rating" className="h-full w-full flex items-center gap-14 px-16 pt-16 pb-12 text-white">
       <div className={`${song?.videoId ? "w-[620px]" : "w-[440px]"} shrink-0`}>
-        <ScreenClip key={`${song?.songId}:${audioOn}`} song={song} audioOn={audioOn} />
+        <ScreenClip key={song?.songId} song={song} audioOn={audioOn} />
       </div>
       <div className="flex-1 min-w-0 flex flex-col gap-8">
         <ScreenPromptCard prompt={room?.currentPrompt || ""} size="sm" />

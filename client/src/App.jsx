@@ -31,10 +31,18 @@ function isStatsPath(pathname) {
   return pathname === "/stats" || pathname.startsWith("/stats/");
 }
 
-/** Site pageview counting, skipped on /stats so admin visits are not counted as players. */
+function isScreenPath(pathname) {
+  return pathname.startsWith("/screen/");
+}
+
+/**
+ * Site pageview counting, skipped on /stats so admin visits are not counted
+ * as players, and on /screen so a TV showing a room is not counted as a
+ * visitor who never plays.
+ */
 function SitePageviews() {
   const { pathname } = useLocation();
-  return isStatsPath(pathname) ? null : <PageviewTracker />;
+  return isStatsPath(pathname) || isScreenPath(pathname) ? null : <PageviewTracker />;
 }
 
 function StatsRoute() {

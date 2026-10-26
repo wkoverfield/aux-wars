@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  claimScreenOpened,
   joinSourceFrom,
   phoneAudioKey,
   pickStatus,
@@ -127,13 +126,6 @@ describe("session storage helpers", () => {
     expect(screenIdFor(storage, makeId)).toBe("id-1");
     expect(screenIdFor(storage, () => "id-2")).toBe("id-1");
     expect(makeId).toHaveBeenCalledTimes(1);
-  });
-
-  it("claims screen_opened once per room", () => {
-    const storage = memoryStorage();
-    expect(claimScreenOpened("ABC123", storage)).toBe(true);
-    expect(claimScreenOpened("ABC123", storage)).toBe(false);
-    expect(claimScreenOpened("XYZ789", storage)).toBe(true);
   });
 
   it("keys the phone audio choice by room", () => {

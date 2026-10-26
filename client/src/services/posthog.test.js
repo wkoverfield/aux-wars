@@ -53,7 +53,6 @@ describe("PostHog event allowlist", () => {
       "player_joined",
       "result_shared",
       "round_completed",
-      "screen_opened",
       "session_start",
       "song_search_no_results",
     ]);
