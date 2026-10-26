@@ -328,7 +328,8 @@ describe("speed", () => {
 
 describe("normalizeJoinSources", () => {
   it("shares joins between link and code, ignoring unsourced ones", () => {
-    expect(normalizeJoinSources({ total: 20, byLink: 3, byCode: 9 })).toEqual({ byLink: 3, byCode: 9, known: 12, linkShare: 0.25, invites: 0, resultsShared: 0, resultsViewed: 0 });
-    expect(normalizeJoinSources(undefined)).toEqual({ byLink: 0, byCode: 0, known: 0, linkShare: null, invites: 0, resultsShared: 0, resultsViewed: 0 });
+    expect(normalizeJoinSources({ total: 20, byLink: 3, byCode: 9 })).toEqual({ byLink: 3, byCode: 9, byScreen: 0, known: 12, linkShare: 0.25, screensOpened: 0, roomsWithScreen: 0, invites: 0, resultsShared: 0, resultsViewed: 0 });
+    expect(normalizeJoinSources(undefined)).toEqual({ byLink: 0, byCode: 0, byScreen: 0, known: 0, linkShare: null, screensOpened: 0, roomsWithScreen: 0, invites: 0, resultsShared: 0, resultsViewed: 0 });
+    expect(normalizeJoinSources({ byLink: 2, byCode: 4, byScreen: 2, screensOpened: 3, roomsWithScreen: 2 })).toMatchObject({ byScreen: 2, known: 8, linkShare: 0.25, screensOpened: 3, roomsWithScreen: 2 });
   });
 });

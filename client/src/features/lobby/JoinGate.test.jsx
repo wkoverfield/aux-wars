@@ -81,6 +81,21 @@ describe("JoinGate", () => {
     expect(captureGameEvent).toHaveBeenCalledWith("player_joined", expect.objectContaining({ join_source: "link" }));
   });
 
+  it("counts a join from the big screen's QR code as a screen join", async () => {
+    joinGame.mockResolvedValue({ success: true });
+    render(
+      <MemoryRouter initialEntries={["/lobby/ABC123?src=screen"]}>
+        <JoinGate code="ABC123" room={room()} players={players} />
+        <SessionProbe />
+      </MemoryRouter>
+    );
+    fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "Sam" } });
+    fireEvent.click(screen.getByRole("button", { name: "Join game" }));
+    await waitFor(() => expect(screen.getByTestId("session").textContent).toBe("ABC123:Sam"));
+    expect(joinGame.mock.calls[0][0]).toMatchObject({ source: "screen" });
+    expect(captureGameEvent).toHaveBeenCalledWith("player_joined", expect.objectContaining({ join_source: "screen" }));
+  });
+
   it("asks for a name before calling the server", () => {
     renderGate();
     fireEvent.click(screen.getByRole("button", { name: "Join game" }));

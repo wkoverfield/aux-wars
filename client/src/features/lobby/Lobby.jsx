@@ -13,6 +13,8 @@ import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 import { usePendingAction } from "../../hooks/usePendingAction";
 import { copyInvite, inviteUrl, sendInvite } from "./invite";
 import InviteQrModal from "./InviteQrModal";
+import ScreenLinkModal from "./ScreenLinkModal";
+import { screenUrl } from "../screen/screenModel";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
@@ -82,6 +84,7 @@ function PrivateLobby() {
   const locked = !!room?.locked;
   const [streamerHide, setStreamerHide] = useState(false);
   const [showQr, setShowQr] = useState(false);
+  const [showScreenLink, setShowScreenLink] = useState(false);
   const logEvent = useMutation(api.analytics.logEvent);
   const noteInvite = (method) => {
     logEvent({ eventType: "invite_shared", metadata: { reason: method } }).catch(() => {});
@@ -110,6 +113,10 @@ function PrivateLobby() {
   const handleShowQr = () => {
     setShowQr(true);
     noteInvite("qr");
+  };
+  const handleCopyScreenLink = async () => {
+    if (await copyInvite(screenUrl(gameCode))) showToast("Big screen link copied", "success");
+    else showToast("Couldn't copy the link.", "warning");
   };
 
   // Initialize game code once on mount
@@ -378,6 +385,21 @@ function PrivateLobby() {
                         </svg>
                       </button>
                     )}
+                    {/* The room on a TV or laptop: same reason to hide on a stream. */}
+                    {!streamerHide && (
+                      <button
+                        type="button"
+                        data-vital="screen-link"
+                        onClick={() => setShowScreenLink(true)}
+                        aria-label="Show on a big screen"
+                        title="Show on a big screen"
+                        className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 20.25h12m-7.5-3v3m3-3v3m-10.125-3h17.25c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125Z" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="lobby-container rounded-md lobby-count flex flex-col gap-2">
@@ -462,6 +484,9 @@ function PrivateLobby() {
         onToggleStreamerHide={() => setStreamerHide((v) => !v)}
       />
       {showQr && <InviteQrModal url={inviteUrl(gameCode)} onClose={() => setShowQr(false)} />}
+      {showScreenLink && (
+        <ScreenLinkModal code={gameCode} onCopy={handleCopyScreenLink} onClose={() => setShowScreenLink(false)} />
+      )}
       <SessionTakenOverModal
         show={showTakenOverModal}
         gameCode={gameCode}

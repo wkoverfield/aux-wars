@@ -7,6 +7,7 @@
  * Which view the screen shows for a getRoomByCode result.
  * - "loading": the query has not answered yet
  * - "missing": no such room (never existed, ended, or swept)
+ * - "unavailable": a Quick Play room; big screens are for private rooms
  * - otherwise the room phase's view: "lobby", "prompt", "selection",
  *   "rating" (or "tallying" while the rating query catches up), "results",
  *   "gameOver"
@@ -18,6 +19,7 @@ export function screenViewFor(roomResult, ratingSong) {
   if (roomResult === undefined) return "loading";
   if (roomResult === null) return "missing";
   const room = roomResult.room || roomResult;
+  if (room?.isPublic) return "unavailable";
   switch (room?.phase) {
     case "lobby":
       return "lobby";
@@ -59,6 +61,16 @@ export function pickStatus(players, round) {
 export function ratingVotes(status) {
   const total = Math.max(0, (status?.total || 0) - 1);
   return { submitted: Math.min(status?.submitted || 0, total), total };
+}
+
+/** The screen is laid out on a fixed 16:9 stage and scaled to fit the display. */
+export const STAGE_WIDTH = 1280;
+export const STAGE_HEIGHT = 720;
+
+/** Scale that fits the stage inside a viewport, letterboxed. */
+export function stageScale(width, height) {
+  if (!width || !height) return 1;
+  return Math.min(width / STAGE_WIDTH, height / STAGE_HEIGHT);
 }
 
 /** Who picked the song, or null when the room hides it (same rule as phones). */

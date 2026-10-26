@@ -24,6 +24,9 @@ import { fallBackToOriginal, largeCoverArt } from "../../utils/coverArt";
  * @param {boolean} props.anonymousMode - Whether to hide who submitted the song
  * @param {boolean} props.spectatorMode - If true, show player but hide rating UI (viewing own song)
  * @param {Function} props.onAutoSubmit - Optional callback for auto-submit on timeout (called with rating)
+ * @param {boolean} props.screenAttached - A big screen in the room plays the clip
+ * @param {boolean} props.playOnPhone - Play the clip here too (only matters with a screen attached)
+ * @param {Function} props.onTogglePlayOnPhone - Turns playing on this phone on or off
  * @returns {JSX.Element} Rendered component
  */
 const RatingScreen = ({
@@ -34,7 +37,10 @@ const RatingScreen = ({
   totalSongs,
   anonymousMode = false,
   spectatorMode = false,
-  onAutoSubmit
+  onAutoSubmit,
+  screenAttached = false,
+  playOnPhone = false,
+  onTogglePlayOnPhone,
 }) => {
   const [selectedRating, setSelectedRating] = useState(-1);
   const [hasSubmitted, setHasSubmitted] = useState(false);
@@ -47,6 +53,8 @@ const RatingScreen = ({
   const snippet = songToRate?.snippet;
   const startTime = snippet?.startTime ?? 0;
   const endTime = snippet?.endTime ?? 0;
+  // The big screen plays the clip; this phone stays quiet unless asked.
+  const silent = screenAttached && !playOnPhone;
 
   /**
    * Handles clicking a rating record
@@ -129,7 +137,7 @@ const RatingScreen = ({
 
         {/* Album art — for preview tracks; YouTube tracks show the video instead.
             Sizes off viewport HEIGHT so it shrinks on short/landscape screens. */}
-        {songToRate?.albumCover && !videoId && (
+        {songToRate?.albumCover && (!videoId || silent) && (
           <div className="mb-3 flex justify-center">
             <img
               src={largeCoverArt(songToRate.albumCover)}
@@ -142,13 +150,34 @@ const RatingScreen = ({
 
         {/* Player and its scrubber: its own component, so playback ticks never
             re-render this screen and a rating tap never re-renders the player. */}
-        <ClipPlayer
-          key={songToRate?.songId}
-          videoId={videoId}
-          previewUrl={previewUrl}
-          startTime={startTime}
-          endTime={endTime}
-        />
+        {!silent && (
+          <ClipPlayer
+            key={songToRate?.songId}
+            videoId={videoId}
+            previewUrl={previewUrl}
+            startTime={startTime}
+            endTime={endTime}
+          />
+        )}
+
+        {/* Quiet on purpose: the screen is where the song plays. */}
+        {screenAttached && (
+          <button
+            type="button"
+            data-vital="phone-audio"
+            onClick={onTogglePlayOnPhone}
+            className="mb-3 flex items-center gap-1.5 text-xs text-white/50 hover:text-white transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4" aria-hidden="true">
+              {playOnPhone ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75 19.5 12m0 0 2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6 4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" />
+              )}
+            </svg>
+            {playOnPhone ? "Mute this phone" : "Play on this phone"}
+          </button>
+        )}
 
         {/* Track name and artist name */}
         <div className="flex flex-col justify-center items-center mb-3">

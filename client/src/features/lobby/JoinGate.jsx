@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useSession } from "../../hooks/useSession";
@@ -10,6 +10,7 @@ import { getVisitorId } from "../../utils/visitorId";
 import { makeSeatKey } from "../quickplay/quickPlayModel";
 import logo from "../../assets/aux-wars-logo.svg";
 import { isPlaceholderName, joinGateCopy } from "./joinGateCopy";
+import { joinSourceFrom } from "../screen/screenModel";
 
 /**
  * Shown on a room URL to someone who is not in that room: the landing screen
@@ -25,6 +26,8 @@ import { isPlaceholderName, joinGateCopy } from "./joinGateCopy";
  */
 export default function JoinGate({ code, room, players }) {
   const navigate = useNavigate();
+  // Joins from the big screen's QR code are counted as their own method.
+  const source = joinSourceFrom(useLocation().search);
   const joinGame = useMutation(api.game.rooms.joinGame);
   const { session, connectionId, createSession } = useSession();
   const { showToast } = useToast();
@@ -57,7 +60,7 @@ export default function JoinGate({ code, room, players }) {
           // key can only be pointed at another connection by presenting it,
           // and nothing in a private room does, so the key is not kept.
           seatKey: makeSeatKey(),
-          source: "link",
+          source,
           ...(visitorId && visitorId !== "anon" ? { visitorId } : {}),
         });
         if (!resp?.success) {
@@ -67,7 +70,7 @@ export default function JoinGate({ code, room, players }) {
         captureGameEvent("player_joined", {
           room_code_hash: hashRoomCode(code),
           took_over_connection: Boolean(resp.tookOver),
-          join_source: "link",
+          join_source: source,
         });
         // Replaces any session for another room: this tab now plays here.
         createSession({ gameCode: code, playerId, playerName: trimmed, lastPhase: room.phase || "lobby" });

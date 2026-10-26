@@ -216,11 +216,12 @@ function Funnel({ funnel, joinSources, windowDays }) {
   return (
     <Card title="Funnel" aside={`last ${windowDays} days`}>
       <RankedBars rows={rows} format={fmtInt} emptyText="No visits recorded in this window yet." />
-      {(joinSources.known > 0 || joinSources.invites > 0 || joinSources.resultsShared > 0 || joinSources.resultsViewed > 0) && (
+      {(joinSources.known > 0 || joinSources.invites > 0 || joinSources.screensOpened > 0 || joinSources.resultsShared > 0 || joinSources.resultsViewed > 0) && (
         <p className="text-xs text-gray-500 mt-4">
           Invites sent from lobbies: {fmtInt(joinSources.invites)}. Room joins: {fmtInt(joinSources.byLink)} by invite
-          link, {fmtInt(joinSources.byCode)} by typed code
-          {joinSources.linkShare !== null ? ` (${fmtPct(joinSources.linkShare)} by link)` : ""}. Results links:{" "}
+          link, {fmtInt(joinSources.byCode)} by typed code, {fmtInt(joinSources.byScreen)} from a big screen&apos;s QR
+          {joinSources.linkShare !== null ? ` (${fmtPct(joinSources.linkShare)} by link)` : ""}. Big screens opened:{" "}
+          {fmtInt(joinSources.screensOpened)}, in {fmtInt(joinSources.roomsWithScreen)} room-days. Results links:{" "}
           {fmtInt(joinSources.resultsShared)} shared, {fmtInt(joinSources.resultsViewed)} opened. Includes today.
         </p>
       )}

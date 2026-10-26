@@ -12,6 +12,7 @@ import {
   screenUrl,
   screenUrlLabel,
   screenViewFor,
+  stageScale,
   submitterLabel,
   writeSession,
 } from "./screenModel";
@@ -37,6 +38,10 @@ describe("screenViewFor", () => {
   it("waits for the query and reports a missing room", () => {
     expect(screenViewFor(undefined)).toBe("loading");
     expect(screenViewFor(null)).toBe("missing");
+  });
+
+  it("does not show Quick Play rooms", () => {
+    expect(screenViewFor({ room: { phase: "lobby", isPublic: true }, players: [] })).toBe("unavailable");
   });
 
   it("maps each room phase to its view", () => {
@@ -143,5 +148,15 @@ describe("screenLeaveBeaconBody", () => {
       args: { code: "ABC123", screenId: "s1" },
       format: "json",
     });
+  });
+});
+
+describe("stageScale", () => {
+  it("fits the 1280x720 stage inside the display, letterboxed", () => {
+    expect(stageScale(1920, 1080)).toBe(1.5);
+    expect(stageScale(1280, 720)).toBe(1);
+    expect(stageScale(1440, 900)).toBe(1.125);
+    expect(stageScale(1280, 600)).toBeCloseTo(600 / 720);
+    expect(stageScale(0, 0)).toBe(1);
   });
 });
