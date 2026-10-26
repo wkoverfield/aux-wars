@@ -161,6 +161,19 @@ describe("screen presence", () => {
     expect(rows).toEqual([]);
   });
 
+  test("a public room never registers a screen", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ["h"]);
+    await t.run(async (ctx) => {
+      const r = await ctx.db.query("rooms").withIndex("by_code", (q) => q.eq("code", code)).unique();
+      await ctx.db.patch(r!._id, { isPublic: true });
+    });
+    expect(await t.mutation(api.screens.heartbeat, { code, screenId: SCREEN })).toEqual({ ok: false });
+    expect(await t.query(api.screens.screenAttached, { code })).toBe(false);
+    const rows = await t.run(async (ctx) => presence.listRoom(ctx, screenRoomKey(code), false));
+    expect(rows).toEqual([]);
+  });
+
   test("a room holds a bounded number of online screens", async () => {
     const t = setup();
     const code = await hostedRoom(t, ["h"]);
@@ -216,6 +229,25 @@ describe("song hold with a shared screen", () => {
     expect(await index(t, code)).toBe(1);
     const next = (await room(t, code))!.ratingSongStartedAt!;
     expect(next).toBeGreaterThanOrEqual(holdEnd);
+  });
+
+  test("a public room is never held, even with a screen row present", async () => {
+    const t = setup();
+    const code = await hostedRoom(t, ids);
+    // Register a screen directly in the component (heartbeat refuses public
+    // rooms) and mark every player present, then make the room public.
+    await t.run(async (ctx) => {
+      await presence.heartbeat(ctx, screenRoomKey(code), SCREEN, `${code}:${SCREEN}`, SCREEN_HEARTBEAT_INTERVAL_MS);
+      for (const id of ids) await presence.heartbeat(ctx, code, id, `s-${id}`, 30_000);
+    });
+    await startRating(t, code, ids, window20s);
+    await t.run(async (ctx) => {
+      const r = await ctx.db.query("rooms").withIndex("by_code", (q) => q.eq("code", code)).unique();
+      await ctx.db.patch(r!._id, { isPublic: true });
+    });
+    await advance(t, 1_000);
+    await everyoneRates(t, code, ids);
+    expect(await index(t, code)).toBe(1);
   });
 
   test("a vote after the clip has played advances at once", async () => {

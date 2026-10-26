@@ -2,7 +2,9 @@ import { v } from "convex/values";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { presence } from "./presence";
 
-// Shared screens (a TV or laptop showing /screen/:code) are display-only. They
+// Shared screens (a TV or laptop showing /screen/:code) are display-only and
+// private-room only: a public (Quick Play) room never registers one, so a
+// stranger cannot hold songs or mute phones for matched players. They
 // are never players: nothing here reads or writes `rooms` or `players`
 // documents beyond a read of the room to confirm it exists, and nothing counts
 // toward caps, joins or seats.
@@ -66,7 +68,7 @@ export const heartbeat = mutation({
       .query("rooms")
       .withIndex("by_code", (q) => q.eq("code", roomCode))
       .unique();
-    if (!room) return { ok: false } as const;
+    if (!room || room.isPublic) return { ok: false } as const;
 
     const key = screenRoomKey(roomCode);
     const online = await presence.listRoom(ctx, key, true, MAX_SCREENS_PER_ROOM + 1);
@@ -95,7 +97,12 @@ export const leave = mutation({
   },
 });
 
-/** Whether any screen is attached to the room. Room-keyed; returns a boolean. */
+/**
+ * Whether any screen is attached to the room. Room-keyed; returns a boolean.
+ * Always false for a public room, since heartbeat never registers a screen
+ * there; the room doc is deliberately not read, so room writes do not re-run
+ * this query.
+ */
 export const screenAttached = query({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {

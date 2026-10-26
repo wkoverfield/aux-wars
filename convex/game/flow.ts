@@ -1071,7 +1071,7 @@ export function clipLengthMs(
 /**
  * When a room with a shared screen may leave the current song: the clip's
  * length after the song became current, plus load slack, capped at the
- * rating timeout. Null when no hold applies (no screen attached, or a song
+ * rating timeout. Null when no hold applies (a public room, no screen, or a song
  * that became current before ratingSongStartedAt existed).
  */
 async function screenHoldUntil(
@@ -1080,7 +1080,7 @@ async function screenHoldUntil(
   current: Doc<"submissions">
 ): Promise<number | null> {
   const startedAt = room.ratingSongStartedAt;
-  if (startedAt === undefined) return null;
+  if (startedAt === undefined || room.isPublic) return null; // screens are private-room only
   if (!(await isScreenAttached(ctx, room.code))) return null;
   const hold = Math.min(
     clipLengthMs(current.trackDetails, room.settings?.snippetDuration) + SCREEN_HOLD_GRACE_MS,
