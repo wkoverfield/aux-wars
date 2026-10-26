@@ -13,11 +13,21 @@ import {
 } from "./roomOps";
 import { pendingPlayers, startPublicRematch } from "./publicRooms";
 import { AUTO_ADVANCE_MS, AUTO_REMATCH_MS } from "./quickPlayRules";
+import { isScreenAttached } from "../screens";
 // Note: internal.analytics.trackEvent is used for fire-and-forget analytics tracking
 // Public (Quick Play) rooms have no host: their start, round advance and
 // rematch are scheduler-driven, and the host-only mutations below no-op on them.
 
 function now() { return Date.now(); }
+
+// A song is rated for at most this long before the next one starts.
+export const RATING_TIMEOUT_MS = 60_000;
+// Length assumed for a clip with no usable YouTube window (iTunes/Deezer
+// previews are 30 s).
+export const DEFAULT_CLIP_MS = 30_000;
+// Slack for the shared screen to load and start the clip after the song
+// becomes current.
+export const SCREEN_HOLD_GRACE_MS = 1_500;
 
 type RateLimitField = "lastSubmissionAttempt" | "lastRatingAttempt" | "lastVoteSkipAttempt";
 
@@ -877,7 +887,7 @@ export const startRatingPhaseInternal = internalMutation({
       return;
     }
 
-    await ctx.db.patch(room._id, { phase: "rating", currentRatingIndex: 0, lastActivityAt: now() });
+    await ctx.db.patch(room._id, { phase: "rating", currentRatingIndex: 0, ratingSongStartedAt: now(), lastActivityAt: now() });
     // Kick off first rating step shortly
     await ctx.scheduler.runAfter(500, internal.game.flow.advanceRating, {
       code,
@@ -943,7 +953,13 @@ export const calculateResultsInternal = internalMutation({
       calculatedAt: now(),
     });
     const advance = autoAdvancePatch(room);
-    await ctx.db.patch(room._id, { phase: "results", lastActivityAt: now(), currentRatingIndex: undefined, ...advance });
+    await ctx.db.patch(room._id, {
+      phase: "results",
+      lastActivityAt: now(),
+      currentRatingIndex: undefined,
+      ratingSongStartedAt: undefined,
+      ...advance,
+    });
     await scheduleAutoAdvance(ctx, code, advance);
 
     // Track game completed when final round is done
@@ -1009,7 +1025,7 @@ export const advanceRating = internalMutation({
 
     if (timedOut) {
       const nextIndex = ratingIndex + 1;
-      await ctx.db.patch(room._id, { currentRatingIndex: nextIndex, lastActivityAt: now() });
+      await ctx.db.patch(room._id, { currentRatingIndex: nextIndex, ratingSongStartedAt: now(), lastActivityAt: now() });
       await ctx.scheduler.runAfter(200, internal.game.flow.advanceRating, {
         code,
         round,
@@ -1020,7 +1036,7 @@ export const advanceRating = internalMutation({
       return;
     }
 
-    await ctx.scheduler.runAfter(60_000, internal.game.flow.advanceRating, {
+    await ctx.scheduler.runAfter(RATING_TIMEOUT_MS, internal.game.flow.advanceRating, {
       code,
       round,
       ratingIndex,
@@ -1034,9 +1050,53 @@ export const advanceRating = internalMutation({
 });
 
 /**
+ * How long the clip for a submission plays, in ms: its YouTube window when it
+ * has one, the whole rating window for a full-song YouTube track, else a
+ * 30 s preview. Never more than the rating timeout.
+ */
+export function clipLengthMs(
+  trackDetails: Doc<"submissions">["trackDetails"],
+  snippetDuration: number | undefined
+): number {
+  const w = trackDetails.snippet;
+  let ms = DEFAULT_CLIP_MS;
+  if (w && Number.isFinite(w.startTime) && Number.isFinite(w.endTime) && w.endTime > w.startTime) {
+    ms = (w.endTime - w.startTime) * 1000;
+  } else if (trackDetails.videoId && snippetDuration === 0) {
+    ms = RATING_TIMEOUT_MS;
+  }
+  return Math.min(ms, RATING_TIMEOUT_MS);
+}
+
+/**
+ * When a room with a shared screen may leave the current song: the clip's
+ * length after the song became current, plus load slack, capped at the
+ * rating timeout. Null when no hold applies (no screen attached, or a song
+ * that became current before ratingSongStartedAt existed).
+ */
+async function screenHoldUntil(
+  ctx: MutationCtx,
+  room: Doc<"rooms">,
+  current: Doc<"submissions">
+): Promise<number | null> {
+  const startedAt = room.ratingSongStartedAt;
+  if (startedAt === undefined) return null;
+  if (!(await isScreenAttached(ctx, room.code))) return null;
+  const hold = Math.min(
+    clipLengthMs(current.trackDetails, room.settings?.snippetDuration) + SCREEN_HOLD_GRACE_MS,
+    RATING_TIMEOUT_MS
+  );
+  return startedAt + hold;
+}
+
+/**
  * Moves to the next song once every player the room still waits on (see
  * pendingPlayers: everyone in a private room, present players in a public
  * one) has rated the current song. The submitter does not rate their own.
+ *
+ * With a shared screen attached, the song is held until its clip has played
+ * (screenHoldUntil) even when everyone has rated; a re-check is scheduled for
+ * the hold's end. The rating timeout in advanceRating still applies.
  */
 async function advanceIfAllRated(ctx: MutationCtx, room: Doc<"rooms">) {
   const code = room.code;
@@ -1056,7 +1116,17 @@ async function advanceIfAllRated(ctx: MutationCtx, room: Doc<"rooms">) {
   const voters = (await getPlayers(ctx, code)).filter((p: any) => p.playerId !== current.playerId);
   const { pending, recheckAt } = await pendingPlayers(ctx, room, voters, (p) => rated.has(p.playerId));
   if (pending.length === 0) {
-    await ctx.db.patch(room._id, { currentRatingIndex: idx + 1, lastActivityAt: now() });
+    const holdUntil = await screenHoldUntil(ctx, room, current);
+    if (holdUntil !== null && holdUntil > now()) {
+      await ctx.scheduler.runAfter(holdUntil - now(), internal.game.flow.maybeAdvanceOnAllVotes, {
+        code,
+        round: room.currentRound,
+        ratingIndex: idx,
+        epoch: gameEpochOf(room),
+      });
+      return;
+    }
+    await ctx.db.patch(room._id, { currentRatingIndex: idx + 1, ratingSongStartedAt: now(), lastActivityAt: now() });
     await ctx.scheduler.runAfter(200, internal.game.flow.advanceRating, {
       code,
       round: room.currentRound,
@@ -1093,12 +1163,24 @@ async function startRatingIfAllSubmitted(ctx: MutationCtx, room: Doc<"rooms">, p
   }
 }
 
-/** Re-runs the "everyone rated" check (after a rating, a departure, or a lapsed grace). */
+/**
+ * Re-runs the "everyone rated" check (after a rating, a departure, a lapsed
+ * grace, or the end of a shared-screen hold). A hold re-check carries the
+ * song it was armed for and no-ops once that song is no longer current.
+ */
 export const maybeAdvanceOnAllVotes = internalMutation({
-  args: { code: v.string() },
-  handler: async (ctx, { code }) => {
+  args: {
+    code: v.string(),
+    round: v.optional(v.number()),
+    ratingIndex: v.optional(v.number()),
+    epoch: v.optional(v.number()),
+  },
+  handler: async (ctx, { code, round, ratingIndex, epoch }) => {
     const room = await getRoom(ctx, code);
     if (!room || room.phase !== "rating") return;
+    if (round !== undefined && room.currentRound !== round) return;
+    if (ratingIndex !== undefined && (room.currentRatingIndex ?? 0) !== ratingIndex) return;
+    if (epoch !== undefined && !isCurrentGame(room, epoch)) return;
     await advanceIfAllRated(ctx, room);
   },
 });

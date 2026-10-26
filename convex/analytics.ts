@@ -20,7 +20,7 @@ const eventMetadata = v.optional(v.object({
   reason: v.optional(v.string()), // search_failed: see searchFailReason
   waitedMs: v.optional(v.number()), // quickplay_matched / quickplay_left_waiting
   playersAtStart: v.optional(v.number()), // quickplay_matched
-  source: v.optional(v.string()), // player_joined: "link" | "code" (absent on older clients)
+  source: v.optional(v.string()), // player_joined: "link" | "code" | "screen" (absent on older clients)
   // web_vital / client_error / client_error_boundary (see sanitizers below)
   name: v.optional(v.string()), // metric name, or error class name
   rating: v.optional(v.string()),
@@ -135,8 +135,20 @@ export function inviteMethod(reason: unknown): string {
   return typeof reason === "string" && INVITE_METHODS.has(reason) ? reason : "unknown";
 }
 
+const ROOM_CODE_RE = /^[A-Z0-9]{6}$/;
+
+/**
+ * screen_opened: only the room code, and only when it is a well-formed code,
+ * so the rollup can count distinct rooms that had a shared screen.
+ */
+export function sanitizeScreenOpened(m: EventMetadata | undefined): EventMetadata {
+  const code = typeof m?.roomCode === "string" ? m.roomCode.trim().toUpperCase() : "";
+  return ROOM_CODE_RE.test(code) ? { roomCode: code } : {};
+}
+
 const PUBLIC_EVENT_TYPES = new Set([
   "invite_shared",
+  "screen_opened",
   "result_shared",
   "result_viewed",
   "client_error",
@@ -218,6 +230,8 @@ export const logEvent = mutation({
       metadata = { reason: searchFailReason(metadata?.reason) };
     } else if (eventType === "invite_shared") {
       metadata = { reason: inviteMethod(metadata?.reason) };
+    } else if (eventType === "screen_opened") {
+      metadata = sanitizeScreenOpened(metadata);
     } else if (eventType === "result_shared" || eventType === "result_viewed") {
       // Counted only: a results link id is never stored with the event.
       metadata = undefined;

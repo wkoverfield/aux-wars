@@ -2,6 +2,7 @@ import type { MutationCtx } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
 import { internal } from "../_generated/api";
 import { presence } from "../presence";
+import { removeScreenPresence } from "../screens";
 
 /**
  * Room-level game primitives shared by the host-driven flow (flow.ts) and the
@@ -249,6 +250,7 @@ export async function deleteRoomCascade(ctx: MutationCtx, room: Room) {
   for (const row of rateLimits) await ctx.db.delete(row._id);
   await ctx.db.delete(room._id);
   await presence.removeRoom(ctx, code);
+  await removeScreenPresence(ctx, code);
 }
 
 /** A 6-character room code no existing room uses. */

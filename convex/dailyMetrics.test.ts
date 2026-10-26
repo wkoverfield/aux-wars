@@ -37,6 +37,7 @@ function emptyEvents(): DayEvents {
       quickplay_matched: [],
       quickplay_left_waiting: [],
       invite_shared: [],
+      screen_opened: [],
       web_vital: [],
       client_error: [],
       client_error_boundary: [],
@@ -140,6 +141,27 @@ describe("web vitals rollup", () => {
       invitesByMethod: { share: 2, qr: 1, code: 1, copy: 1, unknown: 2 },
     });
     expect(computeDayMetrics(inputs())).toMatchObject({ invitesShared: 0, invitesByMethod: {} });
+  });
+
+  test("computeDayMetrics counts shared screens and screen QR joins", () => {
+    const join = (roomCode: string, playerId: string, visitorId: string): SlimEvent => ({ roomCode, playerId, visitorId });
+    const ev = emptyEvents();
+    ev.detail.screen_opened = [{ roomCode: "AAAAAA" }, { roomCode: "AAAAAA" }, { roomCode: "BBBBBB" }, {}];
+    ev.detail.player_joined = [
+      { ...join("AAAAAA", "p1", "v1"), source: "screen" },
+      { ...join("AAAAAA", "p2", "v2"), source: "screen" },
+      { ...join("AAAAAA", "p3", "v3"), source: "link" },
+      join("AAAAAA", "p4", "v4"),
+    ];
+    expect(computeDayMetrics(inputs({ events: ev }))).toMatchObject({
+      screensOpened: 4,
+      roomsWithScreen: 2,
+      playerJoins: 4,
+      playerJoinsByScreen: 2,
+      playerJoinsByLink: 1,
+      playerJoinsByCode: 0,
+    });
+    expect(computeDayMetrics(inputs())).toMatchObject({ screensOpened: 0, roomsWithScreen: 0, playerJoinsByScreen: 0 });
   });
 
   test("computeDayMetrics carries vitals and client error counts", () => {

@@ -17,6 +17,11 @@ export const dailyMetricsFields = {
   // joins from clients that predate the field count in neither.
   playerJoinsByLink: v.optional(v.number()),
   playerJoinsByCode: v.optional(v.number()),
+  playerJoinsByScreen: v.optional(v.number()), // QR on a room's shared screen
+  // Shared screens opened (/screen/:code, once per screen per room) and the
+  // distinct rooms they were opened for. Optional: older rows lack them.
+  screensOpened: v.optional(v.number()),
+  roomsWithScreen: v.optional(v.number()),
   // Invite sends from the lobby (share sheet, copied link, QR shown), total
   // and by method. Optional: older rows lack them.
   invitesShared: v.optional(v.number()),
@@ -135,6 +140,10 @@ export default defineSchema({
     gameEpoch: v.optional(v.number()),
     currentPrompt: v.optional(v.string()),
     currentRatingIndex: v.optional(v.number()),
+    // When the song at currentRatingIndex became current. Written only in the
+    // same patch that moves currentRatingIndex (once per song, never on a
+    // timer); read by the shared-screen song hold in game/flow.ts.
+    ratingSongStartedAt: v.optional(v.number()),
     hostPlayerId: v.optional(v.id("players")),
     locked: v.optional(v.boolean()), // host sealed the room — block new joins (streamer-safe)
     settings: v.object({

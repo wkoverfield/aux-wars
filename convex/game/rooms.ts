@@ -4,6 +4,7 @@ import { internal } from "../_generated/api";
 import type { Doc } from "../_generated/dataModel";
 import { containsHateSpeech } from "./contentFilter";
 import { presence } from "../presence";
+import { removeScreenPresence } from "../screens";
 import { cleanVisitorId, recordVisitorPlayed } from "../siteStats";
 import { kickTallies, leavePublicRoom } from "./publicRooms";
 import { hashSeatKey, isValidSeatKey, mayTakeOverSeat } from "./roomOps";
@@ -80,8 +81,9 @@ export const joinGame = mutation({
     // seat can then only be taken over with it.
     seatKey: v.optional(v.string()),
     // How the player got here: an invite link (the join screen on a room
-    // URL) or the code box on the home page. Recorded on the join event.
-    source: v.optional(v.union(v.literal("link"), v.literal("code"))),
+    // URL), the code box on the home page, or the QR on a room's shared
+    // screen. Recorded on the join event.
+    source: v.optional(v.union(v.literal("link"), v.literal("code"), v.literal("screen"))),
   },
   handler: async (ctx, { code, playerId, connectionId, name, visitorId, seatKey, source }) => {
     // Validate player name
@@ -836,6 +838,7 @@ async function deleteRoomAndData(ctx: any, room: any) {
 
   // Clear the room's presence state in the component too.
   await presence.removeRoom(ctx, code);
+  await removeScreenPresence(ctx, code);
 
   console.log(`[deleteRoomAndData] Deleted room ${code} and all associated data`);
 }
