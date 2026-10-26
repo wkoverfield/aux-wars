@@ -11,6 +11,7 @@ import { screenUrl, screenUrlLabel } from "../screen/screenModel";
  * @param {Function} props.onClose - Closes the modal
  */
 export default function ScreenLinkModal({ code, onCopy, onClose }) {
+  const label = screenUrlLabel(code);
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose();
@@ -40,9 +41,12 @@ export default function ScreenLinkModal({ code, onCopy, onClose }) {
           href={screenUrl(code)}
           target="_blank"
           rel="noopener"
-          className="w-full rounded-md bg-[#121212] px-4 py-5 text-center text-xl font-semibold break-all hover:text-[#68d570] transition-colors"
+          className="w-full rounded-md bg-[#121212] px-4 py-5 text-center text-xl font-semibold hover:text-[#68d570] transition-colors"
         >
-          {screenUrlLabel(code)}
+          {/* Wraps only before the path, never inside the code. */}
+          {label.slice(0, label.indexOf("/screen/"))}
+          <wbr />
+          <span className="whitespace-nowrap">{label.slice(label.indexOf("/screen/"))}</span>
         </a>
         <div className="w-full flex gap-3">
           <button

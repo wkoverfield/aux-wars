@@ -70,8 +70,9 @@ export default function ScreenGameOver({ code, room }) {
 
   const [winner, ...rest] = everyone;
 
+  // Display only: a mouse left resting on the TV must not open the album hover cards.
   return (
-    <div data-vital="screen-game-over" className="relative h-full w-full text-white">
+    <div data-vital="screen-game-over" className="relative h-full w-full text-white pointer-events-none">
       {stage !== "final" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center px-16 text-center">
           <AnimatePresence mode="wait">
