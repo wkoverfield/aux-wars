@@ -36,6 +36,19 @@ export const snapshotDailyMetrics = internalMutation({
     metrics["pageviews:day"] = await readCounter(`day:${date}`);
     metrics["pageviews:uvday"] = await readCounter(`uvday:${date}`);
 
+    // Distinct visitors and players to date, summed from the per-day new
+    // counts in dailyMetrics (one small row per day). Days whose count is null
+    // (before visitorFirstSeen history began, and its first day) are skipped,
+    // and today is not rolled up yet, so both are lower bounds.
+    let visitorsToDate = 0;
+    let playersToDate = 0;
+    for await (const day of ctx.db.query("dailyMetrics")) {
+      visitorsToDate += day.newVisitors ?? 0;
+      playersToDate += day.newPlayers ?? 0;
+    }
+    metrics["uniques:visitors"] = visitorsToDate;
+    metrics["uniques:players"] = playersToDate;
+
     const capturedAt = Date.now();
 
     // Idempotent upsert: exactly one row per UTC date.
