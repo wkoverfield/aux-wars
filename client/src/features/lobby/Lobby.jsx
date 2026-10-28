@@ -115,7 +115,7 @@ function PrivateLobby() {
   };
   const localPlayLabel = screenUrlLabel(gameCode);
   const handleCopyScreenLink = async () => {
-    if (await copyInvite(screenUrl(gameCode))) showToast("Local play link copied", "success");
+    if (await copyInvite(screenUrl(gameCode))) showToast("Local Play link copied", "success");
     else showToast("Couldn't copy the link.", "warning");
   };
 
@@ -395,11 +395,11 @@ function PrivateLobby() {
                   <p className="text-2xl">{players.length}/{room?.settings?.hostPro ? 50 : 8}</p>
                 </div>
               </div>
-              {/* Local play (Game Settings): the host opens this address on the
+              {/* Local Play (Game Settings): the host opens this address on the
                   shared screen. Hidden from a stream like the code itself. */}
               {isHost && room?.settings?.localPlay && !streamerHide && (
                 <div data-vital="local-play-card" className="lobby-container rounded-md flex flex-col gap-2">
-                  <p className="text-xs font-normal">Local play</p>
+                  <p className="text-xs font-normal">Local Play</p>
                   <p className="text-xl font-semibold">
                     {localPlayLabel.slice(0, localPlayLabel.indexOf("/screen/"))}
                     <wbr />

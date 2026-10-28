@@ -74,7 +74,7 @@ function StartOverlay({ onStart }) {
     >
       <img src={logo} alt="" className="w-20" />
       <span className="rounded-full bg-[#68d570] px-10 py-4 text-3xl font-bold text-black">
-        Tap to start Local play
+        Tap to start Local Play
       </span>
       <span className="text-2xl text-white/60 text-center px-10">The songs play from here. Everyone picks and votes on their phone.</span>
     </button>
@@ -85,7 +85,7 @@ function RoomNotFound({ quickPlay = false }) {
   return (
     <div className="h-full w-full flex flex-col items-center justify-center gap-6 text-white text-center px-10">
       <img src={logo} alt="" className="w-20" />
-      <h1 className="text-5xl font-bold">{quickPlay ? "Local play isn't available here" : "Room not found"}</h1>
+      <h1 className="text-5xl font-bold">{quickPlay ? "Local Play isn't available here" : "Room not found"}</h1>
       <p className="text-2xl text-gray-300">
         {quickPlay ? "Quick Play rooms play on phones only." : "This game has ended or the code is wrong."}
       </p>
