@@ -109,6 +109,9 @@ describe("publicImpact", () => {
       uniqueVisitors: 65,
       uniquePlayers: 21,
     });
+    expect(await t.query(api.analytics.getLiveStats, {})).toBeNull();
+    await t.mutation(internal.analytics.refreshLiveStats, {});
+    expect(await t.query(api.analytics.getLiveStats, {})).toMatchObject({ unique_visitors: 65 });
   });
 });
 
