@@ -36,7 +36,7 @@ export const FAQ = [
   },
   {
     q: 'Can we play together in the same room?',
-    a: 'Yes. The host turns on Local play in Game Settings and opens the address it shows on a TV, a laptop, or one phone in the middle of the table. That screen plays the music while everyone picks and votes on their own phone.',
+    a: 'Yes. The host turns on Local Play in Game Settings and opens the address it shows on a TV, a laptop, or one phone in the middle of the table. That screen plays the music while everyone picks and votes on their own phone.',
   },
   {
     q: 'Can we use our own prompts?',
