@@ -445,17 +445,20 @@ export const refreshLiveStats = internalMutation({
 
 /**
  * Homepage counters. Reads the single liveStats row (see refreshLiveStats);
- * null until the first refresh has run.
+ * null until the first refresh has run. unique_visitors comes from the latest
+ * daily metricSnapshots row, so it moves once a day.
  */
 export const getLiveStats = query({
   args: {},
   handler: async (ctx) => {
     const row = await ctx.db.query("liveStats").first();
     if (!row) return null;
+    const snap = await ctx.db.query("metricSnapshots").withIndex("by_date").order("desc").first();
     return {
       game_started: row.gameStarted,
       player_joined: row.playerJoined,
       rating_submitted: row.ratingSubmitted,
+      unique_visitors: snap?.metrics["uniques:visitors"] ?? null,
     };
   },
 });

@@ -313,6 +313,8 @@ export const publicImpact = query({
       asOf: snap.date,
       players: m["agg:player_joined"] ?? 0,
       games: m["agg:game_completed"] ?? 0,
+      gamesStarted: m["agg:game_started"] ?? 0,
+      ratings: m["agg:rating_submitted"] ?? 0,
       songs: m["agg:song_submitted"] ?? 0,
       // distinct visitor ids (one per browser), not join events
       uniquePlayers: m["uniques:players"] ?? 0,
