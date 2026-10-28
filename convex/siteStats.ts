@@ -314,6 +314,9 @@ export const publicImpact = query({
       players: m["agg:player_joined"] ?? 0,
       games: m["agg:game_completed"] ?? 0,
       songs: m["agg:song_submitted"] ?? 0,
+      // distinct visitor ids (one per browser), not join events
+      uniquePlayers: m["uniques:players"] ?? 0,
+      uniqueVisitors: m["uniques:visitors"] ?? 0,
     };
   },
 });

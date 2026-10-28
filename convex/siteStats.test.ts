@@ -85,6 +85,33 @@ describe("sharded pageview counters", () => {
   });
 });
 
+describe("publicImpact", () => {
+  test("serves distinct visitors and players summed from daily rollups", async () => {
+    const t = setup();
+    const base = {
+      computedAt: 0, gamesCreated: 0, gamesStarted: 0, gamesCompleted: 0, gamesAbandoned: 0,
+      abandonedByPhase: {}, completionRate: null, playerJoins: 0, uniquePlayers: 0,
+      joinsWithVisitorId: 0, playersInStartedGames: 0, playersInCompletedGames: 0,
+      playerSeatsCompleted: 0, avgPlayersPerGame: null, p90PlayersPerGame: null,
+      maxPlayersPerGame: 0, songsSubmitted: 0, ratingsSubmitted: 0, pageviews: 0,
+      uniqueVisitors: 0, returningVisitors: null, newVisitorsPlayed: null,
+      peakPlayersOnline: null, peakPlayersInGame: null, peakHourUTC: null, proPurchases: 0,
+      searchNoResults: 0, topNoResultSearches: [], hourlyPeaks: [],
+    };
+    await t.run(async (ctx) => {
+      // Before visitor history: null counts are skipped, not zero-filled.
+      await ctx.db.insert("dailyMetrics", { ...base, date: "2026-01-01", newVisitors: null, newPlayers: null });
+      await ctx.db.insert("dailyMetrics", { ...base, date: "2026-01-02", newVisitors: 40, newPlayers: 12 });
+      await ctx.db.insert("dailyMetrics", { ...base, date: "2026-01-03", newVisitors: 25, newPlayers: 9 });
+    });
+    await t.mutation(internal.metricsRollup.snapshotDailyMetrics, {});
+    expect(await t.query(api.siteStats.publicImpact, {})).toMatchObject({
+      uniqueVisitors: 65,
+      uniquePlayers: 21,
+    });
+  });
+});
+
 describe("visitor identity", () => {
   test("pageview records firstSeenDate once; anon is ignored", async () => {
     const t = setup();
