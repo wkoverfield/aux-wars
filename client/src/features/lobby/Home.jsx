@@ -238,7 +238,7 @@ export default function Home() {
         </div>
 
         {/* News */}
-        <div className="bg-white/5 border border-white/10 rounded-xl p-5">
+        <div className="bg-white/5 border border-white/10 rounded-xl p-5 flex flex-col">
           <h2 className="text-xl font-bold text-white mb-3">News</h2>
           <NewsSection />
         </div>
