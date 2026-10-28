@@ -547,7 +547,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
 	                  onClick={() => setLocalPlay(!localPlay)}
 	                >
 	                  <div>
-	                    <p className="text-white font-medium">Local play</p>
+	                    <p className="text-white font-medium">Local Play</p>
 	                    <p className="text-xs text-gray-400">One screen plays the music, everyone votes on their phone.</p>
 	                  </div>
 	                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${localPlay ? 'bg-green-600' : 'bg-gray-600'}`}>
