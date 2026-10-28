@@ -93,6 +93,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
   const [selectedPrompts, setSelectedPrompts] = useState(roomSettings?.selectedPrompts ?? []);
   const [enablePromptVoting, setEnablePromptVoting] = useState(roomSettings?.enablePromptVoting !== false); // default true
   const [anonymousMode, setAnonymousMode] = useState(roomSettings?.anonymousMode ?? false); // default false
+  const [localPlay, setLocalPlay] = useState(roomSettings?.localPlay ?? false); // default false
   const [savedPromptPacks, setSavedPromptPacks] = useState(() => loadSavedPromptPacks());
   // Shared custom prompts, reactive per room
   const roomCustomPrompts = useQuery(
@@ -122,6 +123,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
       setSelectedPrompts(roomSettings.selectedPrompts);
       setEnablePromptVoting(roomSettings.enablePromptVoting !== false);
       setAnonymousMode(roomSettings.anonymousMode || false);
+      setLocalPlay(roomSettings.localPlay || false);
     }
 
     // Merge custom prompts into selection
@@ -361,7 +363,8 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
         snippetDuration,
         selectedPrompts,
         enablePromptVoting,
-        anonymousMode
+        anonymousMode,
+        localPlay
         });
       });
       if (!sent) return; // a save was already in flight
@@ -534,6 +537,21 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
 	                  </div>
 	                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${anonymousMode ? 'bg-green-600' : 'bg-gray-600'}`}>
 	                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${anonymousMode ? 'translate-x-6' : 'translate-x-0'}`} />
+	                  </div>
+	                </div>
+
+	                {/* Local play: shows the host the address to open on the shared screen */}
+	                <div
+	                  data-vital="local-play-toggle"
+	                  className="flex items-center justify-between p-3 bg-[#242424] rounded-md cursor-pointer hover:bg-[#333] transition-colors"
+	                  onClick={() => setLocalPlay(!localPlay)}
+	                >
+	                  <div>
+	                    <p className="text-white font-medium">Local Play</p>
+	                    <p className="text-xs text-gray-400">One screen plays the music, everyone votes on their phone.</p>
+	                  </div>
+	                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${localPlay ? 'bg-green-600' : 'bg-gray-600'}`}>
+	                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${localPlay ? 'translate-x-6' : 'translate-x-0'}`} />
 	                  </div>
 	                </div>
 	              </div>

@@ -20,7 +20,7 @@ const eventMetadata = v.optional(v.object({
   reason: v.optional(v.string()), // search_failed: see searchFailReason
   waitedMs: v.optional(v.number()), // quickplay_matched / quickplay_left_waiting
   playersAtStart: v.optional(v.number()), // quickplay_matched
-  source: v.optional(v.string()), // player_joined: "link" | "code" (absent on older clients)
+  source: v.optional(v.string()), // player_joined: "link" | "code" | "screen" (absent on older clients)
   // web_vital / client_error / client_error_boundary (see sanitizers below)
   name: v.optional(v.string()), // metric name, or error class name
   rating: v.optional(v.string()),
@@ -137,6 +137,7 @@ export function inviteMethod(reason: unknown): string {
 
 const PUBLIC_EVENT_TYPES = new Set([
   "invite_shared",
+  "screen_opened",
   "result_shared",
   "result_viewed",
   "client_error",
@@ -218,6 +219,10 @@ export const logEvent = mutation({
       metadata = { reason: searchFailReason(metadata?.reason) };
     } else if (eventType === "invite_shared") {
       metadata = { reason: inviteMethod(metadata?.reason) };
+    } else if (eventType === "screen_opened") {
+      // Recorded server-side by screens.heartbeat on a screen's first attach.
+      // Accepted from clients that still send it, and dropped.
+      return { success: true } as const;
     } else if (eventType === "result_shared" || eventType === "result_viewed") {
       // Counted only: a results link id is never stored with the event.
       metadata = undefined;

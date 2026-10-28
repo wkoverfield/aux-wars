@@ -5,6 +5,7 @@ vi.mock("convex/react", () => ({ useMutation: () => vi.fn(async () => {}) }));
 vi.mock("../../contexts/ToastContext", () => ({ useToast: () => ({ showToast: vi.fn() }) }));
 vi.mock("../../components/TrackPlayer", () => ({ default: () => null }));
 vi.mock("../../components/ScrollFade", () => ({ default: ({ children }) => <div>{children}</div> }));
+vi.mock("./ClipPlayer", () => ({ default: () => <div data-testid="clip-player" /> }));
 
 const { default: RatingScreen } = await import("./RatingScreen");
 
@@ -74,5 +75,31 @@ describe("RatingScreen submit", () => {
     );
     expect(onAutoSubmit).toHaveBeenCalledWith("s1", 3);
     expect(submit().disabled).toBe(true); // no rating picked yet for s2
+  });
+});
+
+describe("RatingScreen with a big screen in the room", () => {
+  afterEach(cleanup);
+
+  it("plays the clip with no screen attached and shows no toggle", () => {
+    renderScreen();
+    expect(screen.getByTestId("clip-player")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Play on this phone" })).toBeNull();
+  });
+
+  it("stays silent by default, with a quiet toggle to play here", () => {
+    const onTogglePlayOnPhone = vi.fn();
+    renderScreen({ screenAttached: true, onTogglePlayOnPhone });
+    expect(screen.queryByTestId("clip-player")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Play on this phone" }));
+    expect(onTogglePlayOnPhone).toHaveBeenCalledTimes(1);
+    // Rating itself is unchanged.
+    expect(submit()).toBeTruthy();
+  });
+
+  it("plays here once the player turns it on", () => {
+    renderScreen({ screenAttached: true, playOnPhone: true, onTogglePlayOnPhone: vi.fn() });
+    expect(screen.getByTestId("clip-player")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Mute this phone" })).toBeTruthy();
   });
 });

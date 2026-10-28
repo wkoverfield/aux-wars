@@ -379,19 +379,25 @@ export const VITAL_THRESHOLDS = {
 };
 export const SPEED_METRICS = ["LCP", "INP", "CLS", "FCP"];
 /**
- * Joins by how the player arrived. `known` is link + code: joins from older
- * clients and Quick Play seats carry no source and are left out of the share.
+ * Joins by how the player arrived. `known` is link + code + big-screen QR:
+ * joins from older clients and Quick Play seats carry no source and are left
+ * out of the share. Big screens opened, and the rooms they were opened in,
+ * ride along.
  */
 export function normalizeJoinSources(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   const byLink = num(src.byLink) ?? 0;
   const byCode = num(src.byCode) ?? 0;
-  const known = byLink + byCode;
+  const byScreen = num(src.byScreen) ?? 0;
+  const known = byLink + byCode + byScreen;
   return {
     byLink,
     byCode,
+    byScreen,
     known,
     linkShare: known > 0 ? byLink / known : null,
+    screensOpened: num(src.screensOpened) ?? 0,
+    roomsWithScreen: num(src.roomsWithScreen) ?? 0,
     invites: num(src.invites) ?? 0,
     resultsShared: num(src.resultsShared) ?? 0,
     resultsViewed: num(src.resultsViewed) ?? 0,

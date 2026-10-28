@@ -312,6 +312,7 @@ async function returnPublicToLobby(ctx: MutationCtx, room: Room, players: Player
     currentRound: 1,
     currentPrompt: undefined,
     currentRatingIndex: undefined,
+    ratingSongStartedAt: undefined,
     usedPrompts: [],
     selectionStartedAt: undefined,
     promptVotingStartedAt: undefined,

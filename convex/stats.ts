@@ -382,12 +382,17 @@ export const getDashboard = query({
       completed: sum((r) => r.playersInCompletedGames),
     };
     // Joins by how the player arrived, including today so far. Quick Play
-    // seats and joins from older clients carry no source.
+    // seats and joins from older clients carry no source. roomsWithScreen is
+    // summed per day, so a room whose screen was opened on two days counts
+    // twice.
     const joinRows = [...rows, todayRow];
     const joinSources = {
       total: joinRows.reduce((s, r) => s + r.playerJoins, 0),
       byLink: joinRows.reduce((s, r) => s + (r.playerJoinsByLink ?? 0), 0),
       byCode: joinRows.reduce((s, r) => s + (r.playerJoinsByCode ?? 0), 0),
+      byScreen: joinRows.reduce((s, r) => s + (r.playerJoinsByScreen ?? 0), 0),
+      screensOpened: joinRows.reduce((s, r) => s + (r.screensOpened ?? 0), 0),
+      roomsWithScreen: joinRows.reduce((s, r) => s + (r.roomsWithScreen ?? 0), 0),
       invites: joinRows.reduce((s, r) => s + (r.invitesShared ?? 0), 0),
       resultsShared: joinRows.reduce((s, r) => s + (r.resultsShared ?? 0), 0),
       resultsViewed: joinRows.reduce((s, r) => s + (r.resultsViewed ?? 0), 0),

@@ -17,6 +17,7 @@ import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useNow } from "../quickplay/useQuickPlay";
 import { secondsUntil } from "../quickplay/quickPlayModel";
+import { usePhoneAudio } from "../screen/usePhoneAudio";
 
 const SUBMIT_SONG_FALLBACK_MESSAGE = "Couldn't submit that song. Please try again.";
 
@@ -89,6 +90,8 @@ export default function Round() {
   const logEvent = useMutation(api.analytics.logEvent);
   const { showToast } = useToast();
   const { session, clearSession, connectionId, updateSession } = useSession();
+  // With a big screen in the room, the screen plays the clips.
+  const phoneAudio = usePhoneAudio(gameCode);
 
   // Ensure session always has connectionId (handles back button navigation)
   useEffect(() => {
@@ -429,6 +432,9 @@ export default function Round() {
             totalSongs={totalSongs}
             anonymousMode={room?.settings?.anonymousMode}
             spectatorMode={isOwnSong}
+            screenAttached={phoneAudio.screenAttached}
+            playOnPhone={phoneAudio.playOnPhone}
+            onTogglePlayOnPhone={phoneAudio.togglePlayOnPhone}
           />
         );
       }

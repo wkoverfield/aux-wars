@@ -35,6 +35,10 @@ export const FAQ = [
     a: 'Search for any song by name or artist. Picks play from YouTube, so almost anything is fair game.',
   },
   {
+    q: 'Can we play together in the same room?',
+    a: 'Yes. The host turns on Local play in Game Settings and opens the address it shows on a TV, a laptop, or one phone in the middle of the table. That screen plays the music while everyone picks and votes on their own phone.',
+  },
+  {
     q: 'Can we use our own prompts?',
     a: 'Yes. Pick from prompt packs like Throwbacks, In My Feels and Unhinged, or write your own in the lobby.',
   },

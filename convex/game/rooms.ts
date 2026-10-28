@@ -4,6 +4,7 @@ import { internal } from "../_generated/api";
 import type { Doc } from "../_generated/dataModel";
 import { containsHateSpeech } from "./contentFilter";
 import { presence } from "../presence";
+import { removeScreenPresence } from "../screens";
 import { cleanVisitorId, recordVisitorPlayed } from "../siteStats";
 import { kickTallies, leavePublicRoom } from "./publicRooms";
 import { hashSeatKey, isValidSeatKey, mayTakeOverSeat } from "./roomOps";
@@ -80,8 +81,9 @@ export const joinGame = mutation({
     // seat can then only be taken over with it.
     seatKey: v.optional(v.string()),
     // How the player got here: an invite link (the join screen on a room
-    // URL) or the code box on the home page. Recorded on the join event.
-    source: v.optional(v.union(v.literal("link"), v.literal("code"))),
+    // URL), the code box on the home page, or the QR on a room's shared
+    // screen. Recorded on the join event.
+    source: v.optional(v.union(v.literal("link"), v.literal("code"), v.literal("screen"))),
   },
   handler: async (ctx, { code, playerId, connectionId, name, visitorId, seatKey, source }) => {
     // Validate player name
@@ -478,8 +480,11 @@ export const updateSettings = mutation({
     selectedPrompts: v.array(v.string()),
     enablePromptVoting: v.optional(v.boolean()), // default true - let players vote to skip prompts
     anonymousMode: v.optional(v.boolean()), // default false - hide submitter names during rating
+    // Local play: the host's lobby shows the shared-screen address. Absent
+    // (clients that predate it) keeps the room's current value.
+    localPlay: v.optional(v.boolean()),
   },
-  handler: async (ctx, { code, playerId, connectionId, numberOfRounds, roundLength, snippetDuration, selectedPrompts, enablePromptVoting, anonymousMode }) => {
+  handler: async (ctx, { code, playerId, connectionId, numberOfRounds, roundLength, snippetDuration, selectedPrompts, enablePromptVoting, anonymousMode, localPlay }) => {
     // Validate settings
     if (numberOfRounds < 1 || numberOfRounds > 10) {
       return { success: false, message: "Number of rounds must be between 1 and 10" } as const;
@@ -523,6 +528,7 @@ export const updateSettings = mutation({
         selectedPrompts,
         enablePromptVoting: enablePromptVoting ?? true,
         anonymousMode: anonymousMode ?? false,
+        ...(localPlay !== undefined ? { localPlay } : {}),
       },
       lastActivityAt: now(),
     });
@@ -836,6 +842,7 @@ async function deleteRoomAndData(ctx: any, room: any) {
 
   // Clear the room's presence state in the component too.
   await presence.removeRoom(ctx, code);
+  await removeScreenPresence(ctx, code);
 
   console.log(`[deleteRoomAndData] Deleted room ${code} and all associated data`);
 }

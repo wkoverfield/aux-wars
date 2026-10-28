@@ -27,6 +27,7 @@ import type * as news from "../news.js";
 import type * as presence from "../presence.js";
 import type * as quickPlay from "../quickPlay.js";
 import type * as results from "../results.js";
+import type * as screens from "../screens.js";
 import type * as siteStats from "../siteStats.js";
 import type * as stats from "../stats.js";
 import type * as stripe from "../stripe.js";
@@ -58,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   presence: typeof presence;
   quickPlay: typeof quickPlay;
   results: typeof results;
+  screens: typeof screens;
   siteStats: typeof siteStats;
   stats: typeof stats;
   stripe: typeof stripe;

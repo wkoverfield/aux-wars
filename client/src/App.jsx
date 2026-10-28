@@ -24,21 +24,39 @@ import ErrorBoundary from "./components/ErrorBoundary";
 
 // Private admin dashboard: lazy so its code never ships in the main bundle.
 const StatsPage = lazy(() => import("./features/stats/StatsPage"));
+// The big screen is opened on a TV or laptop, never on a phone mid-game.
+const BigScreen = lazy(() => import("./features/screen/BigScreen"));
 
 function isStatsPath(pathname) {
   return pathname === "/stats" || pathname.startsWith("/stats/");
 }
 
-/** Site pageview counting, skipped on /stats so admin visits are not counted as players. */
+function isScreenPath(pathname) {
+  return pathname.startsWith("/screen/");
+}
+
+/**
+ * Site pageview counting, skipped on /stats so admin visits are not counted
+ * as players, and on /screen so a TV showing a room is not counted as a
+ * visitor who never plays.
+ */
 function SitePageviews() {
   const { pathname } = useLocation();
-  return isStatsPath(pathname) ? null : <PageviewTracker />;
+  return isStatsPath(pathname) || isScreenPath(pathname) ? null : <PageviewTracker />;
 }
 
 function StatsRoute() {
   return (
     <Suspense fallback={<div className="min-h-svh w-full bg-[#121212]" />}>
       <StatsPage />
+    </Suspense>
+  );
+}
+
+function BigScreenRoute() {
+  return (
+    <Suspense fallback={null}>
+      <BigScreen />
     </Suspense>
   );
 }
@@ -75,6 +93,8 @@ export default function App() {
                 <Route path="pro/success" element={<PageTransition><ProSuccess /></PageTransition>} />
                 <Route path="pro/restore" element={<PageTransition><ProRestore /></PageTransition>} />
                 <Route path="g/:shareId" element={<PageTransition><SharedResults /></PageTransition>} />
+                {/* Display only: never under the route guard, so it never joins the room. */}
+                <Route path="screen/:code" element={<BigScreenRoute />} />
                 <Route path="/lobby" element={<Navigate to="/" replace />} />
                 <Route path="/lobby/:gameCode" element={<GameRouteGuard />}>
                   <Route element={<RoomProviderOutlet />}>

@@ -122,10 +122,12 @@ export default function GameRouteGuard() {
 
 
     if (location.pathname !== targetPath) {
-      navigate(targetPath, { replace: true });
+      // Keep the query (?src=screen) so a join after the redirect is still
+      // counted by how the visitor arrived.
+      navigate({ pathname: targetPath, search: location.search }, { replace: true });
     }
     // Already on correct path, no action needed
-  }, [roomData, isValidating, gameCode, location.pathname, navigate]);
+  }, [roomData, isValidating, gameCode, location.pathname, location.search, navigate]);
 
   // Show loading state while validating
   if (isValidating) {

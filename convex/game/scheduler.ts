@@ -1,6 +1,7 @@
 import { internalMutation } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { presence } from "../presence";
+import { removeScreenPresence } from "../screens";
 import { removePublicPlayer, settlePublicRoom } from "./publicRooms";
 import { gameEpochOf } from "./roomOps";
 import { PUBLIC_IN_GAME_OFFLINE_MS, PUBLIC_WAITING_TIMEOUT_MS } from "./quickPlayRules";
@@ -226,6 +227,7 @@ async function deleteRoomAndData(ctx: any, room: any) {
 
   // Clear the room's presence state in the component too.
   await presence.removeRoom(ctx, code);
+  await removeScreenPresence(ctx, code);
 
   console.log(`[deleteRoomAndData] Deleted room ${code} and all associated data`);
 }

@@ -157,3 +157,39 @@ describe("Lobby ready and nickname", () => {
     expect(mutationFor(UPDATE)).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Lobby Local play card", () => {
+  beforeEach(() => {
+    for (const key of Object.keys(mutations)) delete mutations[key];
+  });
+  afterEach(cleanup);
+
+  it("shows the host the screen address when Local play is on", () => {
+    queryResults["game/rooms:getRoomByCode"] = { room: { settings: { localPlay: true } } };
+    setPlayers();
+    render(ui());
+    expect(screen.getByText("Local play")).toBeTruthy();
+    expect(screen.getByText("/screen/ABC123")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
+  });
+
+  it("hides the card from players who are not the host, and when Local play is off", () => {
+    queryResults["game/rooms:getRoomByCode"] = { room: { settings: { localPlay: true } } };
+    setPlayers({ isHost: false });
+    render(ui());
+    expect(screen.queryByText("Local play")).toBeNull();
+    cleanup();
+    queryResults["game/rooms:getRoomByCode"] = { room: { settings: {} } };
+    setPlayers();
+    render(ui());
+    expect(screen.queryByText("Local play")).toBeNull();
+  });
+
+  it("has no screen icon in the invite row", () => {
+    queryResults["game/rooms:getRoomByCode"] = { room: { settings: { localPlay: true } } };
+    setPlayers();
+    render(ui());
+    expect(screen.queryByRole("button", { name: /big screen/i })).toBeNull();
+    expect(screen.getByRole("button", { name: "Show QR code" })).toBeTruthy();
+  });
+});
