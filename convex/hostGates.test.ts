@@ -134,6 +134,20 @@ describe("private rooms keep their host", () => {
       success: true,
     });
     expect((await room(t, code))!.settings.numberOfRounds).toBe(5);
+    expect((await room(t, code))!.settings.localPlay).toBeUndefined();
+
+    // Local play is a host setting; a save without it keeps the room's value.
+    expect(await t.mutation(api.game.rooms.updateSettings, { ...as(code, "g"), ...settings, localPlay: true })).toMatchObject({
+      success: false,
+    });
+    expect(await t.mutation(api.game.rooms.updateSettings, { ...as(code, "h"), ...settings, localPlay: true })).toMatchObject({
+      success: true,
+    });
+    expect((await room(t, code))!.settings.localPlay).toBe(true);
+    await t.mutation(api.game.rooms.updateSettings, { ...as(code, "h"), ...settings });
+    expect((await room(t, code))!.settings.localPlay).toBe(true);
+    await t.mutation(api.game.rooms.updateSettings, { ...as(code, "h"), ...settings, localPlay: false });
+    expect((await room(t, code))!.settings.localPlay).toBe(false);
 
     expect(await t.mutation(api.game.rooms.setRoomLock, { ...as(code, "g"), locked: true })).toMatchObject({
       success: false,

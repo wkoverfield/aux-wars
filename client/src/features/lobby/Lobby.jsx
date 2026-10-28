@@ -13,8 +13,8 @@ import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 import { usePendingAction } from "../../hooks/usePendingAction";
 import { copyInvite, inviteUrl, sendInvite } from "./invite";
 import InviteQrModal from "./InviteQrModal";
-import ScreenLinkModal from "./ScreenLinkModal";
-import { screenUrl } from "../screen/screenModel";
+import HoverTip from "../../components/HoverTip";
+import { screenUrl, screenUrlLabel } from "../screen/screenModel";
 import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
@@ -84,7 +84,6 @@ function PrivateLobby() {
   const locked = !!room?.locked;
   const [streamerHide, setStreamerHide] = useState(false);
   const [showQr, setShowQr] = useState(false);
-  const [showScreenLink, setShowScreenLink] = useState(false);
   const logEvent = useMutation(api.analytics.logEvent);
   const noteInvite = (method) => {
     logEvent({ eventType: "invite_shared", metadata: { reason: method } }).catch(() => {});
@@ -114,8 +113,9 @@ function PrivateLobby() {
     setShowQr(true);
     noteInvite("qr");
   };
+  const localPlayLabel = screenUrlLabel(gameCode);
   const handleCopyScreenLink = async () => {
-    if (await copyInvite(screenUrl(gameCode))) showToast("Big screen link copied", "success");
+    if (await copyInvite(screenUrl(gameCode))) showToast("Local play link copied", "success");
     else showToast("Couldn't copy the link.", "warning");
   };
 
@@ -346,37 +346,39 @@ function PrivateLobby() {
                 <div className="lobby-container rounded-md lobby-code flex flex-col gap-2">
                   <p className="text-xs font-normal">Code{locked ? ' · 🔒' : ''}</p>
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      data-vital="invite"
-                      onClick={handleCopyCode}
-                      aria-label="Copy room code"
-                      title="Copy room code"
-                      className="text-2xl text-left cursor-pointer hover:text-[#68d570] transition-colors mr-1"
-                    >
-                      {streamerHide ? '••••••' : gameCode}
-                    </button>
+                    <HoverTip label="Copy room code" align="start">
+                      <button
+                        type="button"
+                        data-vital="invite"
+                        onClick={handleCopyCode}
+                        aria-label="Copy room code"
+                        className="text-2xl text-left cursor-pointer hover:text-[#68d570] transition-colors mr-1"
+                      >
+                        {streamerHide ? '••••••' : gameCode}
+                      </button>
+                    </HoverTip>
                     {/* Share sheet on a phone; copies the full invite link elsewhere. */}
+                    <HoverTip label="Share invite link">
                     <button
                       type="button"
                       data-vital="invite"
                       onClick={handleInvite}
                       aria-label="Share invite link"
-                      title="Share invite link"
                       className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15" />
                       </svg>
                     </button>
+                    </HoverTip>
                     {/* A QR code on screen would show the room to a stream. */}
                     {!streamerHide && (
+                      <HoverTip label="Show QR code">
                       <button
                         type="button"
                         data-vital="invite-qr"
                         onClick={handleShowQr}
                         aria-label="Show QR code"
-                        title="Show QR code"
                         className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
@@ -384,21 +386,7 @@ function PrivateLobby() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
                         </svg>
                       </button>
-                    )}
-                    {/* The room on a TV or laptop: same reason to hide on a stream. */}
-                    {!streamerHide && (
-                      <button
-                        type="button"
-                        data-vital="screen-link"
-                        onClick={() => setShowScreenLink(true)}
-                        aria-label="Show on a big screen"
-                        title="Show on a big screen"
-                        className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 20.25h12m-7.5-3v3m3-3v3m-10.125-3h17.25c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125Z" />
-                        </svg>
-                      </button>
+                      </HoverTip>
                     )}
                   </div>
                 </div>
@@ -407,6 +395,30 @@ function PrivateLobby() {
                   <p className="text-2xl">{players.length}/{room?.settings?.hostPro ? 50 : 8}</p>
                 </div>
               </div>
+              {/* Local play (Game Settings): the host opens this address on the
+                  shared screen. Hidden from a stream like the code itself. */}
+              {isHost && room?.settings?.localPlay && !streamerHide && (
+                <div data-vital="local-play-card" className="lobby-container rounded-md flex flex-col gap-2">
+                  <p className="text-xs font-normal">Local play</p>
+                  <p className="text-xl font-semibold">
+                    {localPlayLabel.slice(0, localPlayLabel.indexOf("/screen/"))}
+                    <wbr />
+                    <span className="whitespace-nowrap">{localPlayLabel.slice(localPlayLabel.indexOf("/screen/"))}</span>
+                  </p>
+                  <p className="text-xs text-gray-400">Open this on the TV, laptop, or a phone in the middle of the table.</p>
+                  <button
+                    type="button"
+                    data-vital="local-play-copy"
+                    onClick={handleCopyScreenLink}
+                    className="self-start flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
+                    </svg>
+                    Copy link
+                  </button>
+                </div>
+              )}
               <div className="flex flex-col items-center gap-5">
                 <motion.div
                   className="w-full flex items-center justify-center"
@@ -484,9 +496,6 @@ function PrivateLobby() {
         onToggleStreamerHide={() => setStreamerHide((v) => !v)}
       />
       {showQr && <InviteQrModal url={inviteUrl(gameCode)} onClose={() => setShowQr(false)} />}
-      {showScreenLink && (
-        <ScreenLinkModal code={gameCode} onCopy={handleCopyScreenLink} onClose={() => setShowScreenLink(false)} />
-      )}
       <SessionTakenOverModal
         show={showTakenOverModal}
         gameCode={gameCode}

@@ -259,6 +259,9 @@ export default function Home() {
               </li>
             ))}
           </ol>
+          <p className="mt-4 text-sm text-gray-400">
+            Playing in the same room? Turn on Local play in Game Settings: one screen plays the music and everyone votes on their phone.
+          </p>
           <Link to="/faq" className="inline-block mt-4 text-xs text-gray-400 hover:text-white underline underline-offset-2">
             More questions? Read the FAQ
           </Link>

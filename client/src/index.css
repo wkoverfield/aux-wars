@@ -417,3 +417,40 @@ body {
   color: #ffffff;
   border-color: #ffffff;
 } 
+
+/* Hover labels for icon buttons (components/HoverTip.jsx). Shown at once on
+   hover or keyboard focus, and only where the pointer can hover, so phones
+   never see them. */
+.hover-tip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 30;
+  white-space: nowrap;
+  pointer-events: none;
+  background-color: #121212;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.hover-tip.tip-center {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.hover-tip.tip-start {
+  left: 0;
+}
+
+@media (hover: hover) {
+  .has-tip:hover > .hover-tip,
+  .has-tip:has(:focus-visible) > .hover-tip {
+    display: block;
+  }
+}

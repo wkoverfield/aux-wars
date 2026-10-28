@@ -480,8 +480,11 @@ export const updateSettings = mutation({
     selectedPrompts: v.array(v.string()),
     enablePromptVoting: v.optional(v.boolean()), // default true - let players vote to skip prompts
     anonymousMode: v.optional(v.boolean()), // default false - hide submitter names during rating
+    // Local play: the host's lobby shows the shared-screen address. Absent
+    // (clients that predate it) keeps the room's current value.
+    localPlay: v.optional(v.boolean()),
   },
-  handler: async (ctx, { code, playerId, connectionId, numberOfRounds, roundLength, snippetDuration, selectedPrompts, enablePromptVoting, anonymousMode }) => {
+  handler: async (ctx, { code, playerId, connectionId, numberOfRounds, roundLength, snippetDuration, selectedPrompts, enablePromptVoting, anonymousMode, localPlay }) => {
     // Validate settings
     if (numberOfRounds < 1 || numberOfRounds > 10) {
       return { success: false, message: "Number of rounds must be between 1 and 10" } as const;
@@ -525,6 +528,7 @@ export const updateSettings = mutation({
         selectedPrompts,
         enablePromptVoting: enablePromptVoting ?? true,
         anonymousMode: anonymousMode ?? false,
+        ...(localPlay !== undefined ? { localPlay } : {}),
       },
       lastActivityAt: now(),
     });

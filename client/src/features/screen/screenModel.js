@@ -63,14 +63,21 @@ export function ratingVotes(status) {
   return { submitted: Math.min(status?.submitted || 0, total), total };
 }
 
-/** The screen is laid out on a fixed 16:9 stage and scaled to fit the display. */
+/**
+ * The screen is drawn on a fixed stage and scaled to fit the display:
+ * 1280x720 for a landscape display, 720x1280 for an upright phone or
+ * tablet (a display taller than it is wide).
+ */
 export const STAGE_WIDTH = 1280;
 export const STAGE_HEIGHT = 720;
 
-/** Scale that fits the stage inside a viewport, letterboxed. */
-export function stageScale(width, height) {
-  if (!width || !height) return 1;
-  return Math.min(width / STAGE_WIDTH, height / STAGE_HEIGHT);
+/** The stage for a viewport: its orientation, size, and the letterboxed scale. */
+export function stageFor(width, height) {
+  const portrait = Boolean(width && height && height > width);
+  const stageWidth = portrait ? STAGE_HEIGHT : STAGE_WIDTH;
+  const stageHeight = portrait ? STAGE_WIDTH : STAGE_HEIGHT;
+  const scale = width && height ? Math.min(width / stageWidth, height / stageHeight) : 1;
+  return { portrait, width: stageWidth, height: stageHeight, scale };
 }
 
 /** Who picked the song, or null when the room hides it (same rule as phones). */

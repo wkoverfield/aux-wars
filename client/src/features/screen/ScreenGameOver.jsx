@@ -6,6 +6,9 @@ import PlayerResultWithHover from "../../components/PlayerResultWithHover";
 import { computeAwards } from "../round-winner/computeAwards";
 import { pickReel, reelSeedFor, standingsFrom, withNonSubmitters } from "../round-winner/resultsModel";
 import { useSecondsUntil } from "../quickplay/useQuickPlay";
+import recordLogo from "../../components/record-logo.svg";
+import { fallBackToOriginal, largeCoverArt } from "../../utils/coverArt";
+import { usePortrait } from "./stage";
 
 const SUSPENSE_MS = 1800;
 const WINNER_MS = 4000;
@@ -26,7 +29,29 @@ function RematchBanner({ rematchAt }) {
  * winner, awards one by one), on a timer since nobody taps a TV, then the
  * final standings with the awards.
  */
+/** One finisher on an upright screen: large enough to read off a phone across the table. */
+function PortraitStandingRow({ player, place }) {
+  const cover = player.songs?.[0]?.albumCover;
+  return (
+    <div className="flex items-center gap-4 rounded-lg bg-[#242424]/85 px-4 py-2">
+      <span className="w-8 shrink-0 text-2xl text-white/50 tabular-nums">{place}</span>
+      {cover ? (
+        <img src={largeCoverArt(cover)} onError={fallBackToOriginal(cover)} alt="" className="w-14 h-14 rounded-md object-cover shrink-0" />
+      ) : (
+        <span className="w-14 h-14 rounded-md bg-[#333] shrink-0" />
+      )}
+      <p className="flex-1 min-w-0 text-3xl font-bold truncate">{player.playerName}</p>
+      <span className="shrink-0 text-2xl text-white tabular-nums">{player.wins} Win{player.wins !== 1 ? "s" : ""}</span>
+      <span className="shrink-0 flex items-center gap-1 text-2xl text-gray-300 tabular-nums">
+        <img src={recordLogo} alt="Records" className="w-8 h-8" />
+        {player.totalRecords}
+      </span>
+    </div>
+  );
+}
+
 export default function ScreenGameOver({ code, room }) {
+  const portrait = usePortrait();
   const rounds = useQuery(api.game.flow.getAllRoundResults, code ? { code } : "skip");
   const players = useQuery(api.game.rooms.getPlayers, code ? { code } : "skip");
   const voterAwards = useQuery(api.game.flow.getVoterAwards, code ? { code } : "skip");
@@ -120,7 +145,43 @@ export default function ScreenGameOver({ code, room }) {
         </div>
       )}
 
-      {stage === "final" && (
+      {stage === "final" && portrait && (
+        <motion.div
+          className="h-full w-full flex flex-col px-12 pt-20 pb-12"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}
+        >
+          <p className="text-3xl text-gray-400 text-center">Final standings</p>
+          {winner && (
+            <div className="flex flex-col items-center mt-2">
+              <div className="text-5xl mb-1">👑</div>
+              <div className="scale-125 origin-top -mb-6">
+                <PlayerResultWithHover
+                  playerName={winner.playerName} songs={winner.songs}
+                  wins={winner.wins} totalRecords={winner.totalRecords} isWinner
+                />
+              </div>
+            </div>
+          )}
+          <div className="flex flex-col gap-2 mt-6">
+            {rest.map((p, i) => <PortraitStandingRow key={p.playerId} player={p} place={i + 2} />)}
+          </div>
+          {reel.length > 0 && (
+            <ul aria-label="Awards" className="w-full mt-auto pt-6 space-y-2">
+              {reel.map((award) => (
+                <li key={award.id} className="flex items-baseline justify-between gap-4 text-2xl">
+                  <span className="flex items-baseline gap-3 min-w-0 text-white/50">
+                    <span aria-hidden="true" className="shrink-0">{award.emoji}</span>
+                    <span className="truncate">{award.title}</span>
+                  </span>
+                  <span className="text-white/80 truncate">{award.playerName}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </motion.div>
+      )}
+
+      {stage === "final" && !portrait && (
         <motion.div
           className="h-full w-full flex gap-12 px-16 pt-16 pb-10"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}

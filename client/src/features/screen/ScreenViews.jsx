@@ -8,6 +8,7 @@ import recordLogo from "../../components/record-logo.svg";
 import { fallBackToOriginal, largeCoverArt } from "../../utils/coverArt";
 import { useSecondsUntil } from "../quickplay/useQuickPlay";
 import { pickStatus, ratingVotes, screenJoinUrl, submitterLabel } from "./screenModel";
+import { usePortrait } from "./stage";
 
 /** The site's host as people type it: no "www.". */
 function siteLabel() {
@@ -36,15 +37,29 @@ function useQrDataUrl(url) {
 
 /** Quiet corner tag so someone arriving mid-game can still join. */
 export function ScreenJoinTag({ code }) {
+  const portrait = usePortrait();
   return (
-    <p className="absolute top-6 right-8 z-30 text-lg text-white/50">
+    <p className={`absolute z-30 text-white/50 ${portrait ? "top-6 inset-x-0 text-center text-2xl" : "top-6 right-8 text-lg"}`}>
       Join at {siteLabel()} · <span className="font-semibold text-white/80 tracking-wider">{code}</span>
     </p>
   );
 }
 
 /** "The prompt is:" with the prompt, sized for across the room. */
-function ScreenPromptCard({ prompt, size = "lg" }) {
+function ScreenPromptCard({ prompt, size: requested = "lg" }) {
+  // Upright screens are often a phone across the table: never the small size.
+  const portrait = usePortrait();
+  const size = portrait && requested === "sm" ? "md" : requested;
+  if (size === "md") {
+    return (
+      <div className="w-full">
+        <p className="text-gray-400 mb-2 text-2xl">The prompt is:</p>
+        <div className="bg-[#242424] rounded-xl px-7 py-5">
+          <p className="font-bold text-white leading-snug text-3xl">&quot;{prompt}&quot;</p>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="w-full">
       <p className={`text-gray-400 mb-3 ${size === "lg" ? "text-2xl" : "text-lg"}`}>The prompt is:</p>
@@ -93,44 +108,69 @@ function CountdownPill({ deadline }) {
  * own phone, and the players as they arrive.
  */
 export function ScreenLobby({ code, room, players }) {
+  const portrait = usePortrait();
   const qr = useQrDataUrl(screenJoinUrl(code));
   const cap = room?.settings?.hostPro ? 50 : 8;
   const seated = players.filter((p) => !p.isWaiting);
+  const qrBox = (size) => (
+    <div className="rounded-xl bg-white flex items-center justify-center" style={{ width: size, height: size }}>
+      {qr.src ? (
+        <img src={qr.src} alt="QR code to join this game" className="w-full h-full rounded-xl" />
+      ) : qr.failed ? (
+        <p className="text-xl text-black text-center px-8">Join with the code instead.</p>
+      ) : (
+        <span role="status" className="h-12 w-12 rounded-full border-4 border-[#242424] border-t-transparent animate-spin">
+          <span className="sr-only">Making the code...</span>
+        </span>
+      )}
+    </div>
+  );
+  const playerList = (
+    <>
+      <div className="flex items-baseline justify-between mb-4">
+        <p className="text-3xl">Players</p>
+        <p className="text-2xl text-gray-400 tabular-nums">{seated.length}/{cap}</p>
+      </div>
+      <div className={`grid grid-cols-2 gap-3 content-start overflow-hidden flex-1 min-h-0 ${portrait ? "text-2xl" : "text-xl"}`}>
+        {seated.map((p) => (
+          <PlayerBox
+            key={p.playerId || p._id}
+            playerId={p.playerId}
+            name={p.name}
+            isPlayerHost={!!p.isHost}
+            isReady={!!p.isReady}
+            canKick={false}
+          />
+        ))}
+      </div>
+    </>
+  );
+
+  if (portrait) {
+    return (
+      <div data-vital="screen-lobby" className="h-full w-full flex flex-col px-12 py-14 text-white">
+        <p className="text-3xl text-gray-400 text-center">Join at {siteLabel()} with the code</p>
+        <p className="text-[124px] leading-none font-bold tracking-[0.06em] mt-3 text-center">{code}</p>
+        <div className="flex flex-col items-center gap-4 mt-10">
+          {qrBox(420)}
+          <p className="text-3xl text-gray-300">Scan to join</p>
+        </div>
+        <div className="mt-10 flex-1 min-h-0 flex flex-col">{playerList}</div>
+        <p className="text-2xl text-white/50 mt-4 text-center">Waiting for the host to start.</p>
+      </div>
+    );
+  }
+
   return (
     <div data-vital="screen-lobby" className="h-full w-full flex gap-14 px-16 py-14 text-white">
       <div className="flex-1 min-w-0 flex flex-col">
         <p className="text-2xl text-gray-400">Join at {siteLabel()} with the code</p>
         <p className="text-[140px] leading-none font-bold tracking-[0.08em] mt-3">{code}</p>
-        <div className="flex items-baseline justify-between mt-10 mb-4">
-          <p className="text-3xl">Players</p>
-          <p className="text-2xl text-gray-400 tabular-nums">{seated.length}/{cap}</p>
-        </div>
-        <div className="grid grid-cols-2 gap-3 text-xl content-start overflow-hidden flex-1 min-h-0">
-          {seated.map((p) => (
-            <PlayerBox
-              key={p.playerId || p._id}
-              playerId={p.playerId}
-              name={p.name}
-              isPlayerHost={!!p.isHost}
-              isReady={!!p.isReady}
-              canKick={false}
-            />
-          ))}
-        </div>
+        <div className="mt-10 flex-1 min-h-0 flex flex-col">{playerList}</div>
         <p className="text-2xl text-white/50 mt-4">Waiting for the host to start.</p>
       </div>
       <div className="w-[400px] shrink-0 flex flex-col items-center justify-center gap-5">
-        <div className="w-[400px] h-[400px] rounded-xl bg-white flex items-center justify-center">
-          {qr.src ? (
-            <img src={qr.src} alt="QR code to join this game" className="w-full h-full rounded-xl" />
-          ) : qr.failed ? (
-            <p className="text-xl text-black text-center px-8">Join with the code instead.</p>
-          ) : (
-            <span role="status" className="h-12 w-12 rounded-full border-4 border-[#242424] border-t-transparent animate-spin">
-              <span className="sr-only">Making the code...</span>
-            </span>
-          )}
-        </div>
+        {qrBox(400)}
         <p className="text-2xl text-gray-300">Scan to join</p>
       </div>
     </div>
@@ -139,6 +179,7 @@ export function ScreenLobby({ code, room, players }) {
 
 /** Prompt voting: the prompt, the skip votes, and the clock. */
 export function ScreenPrompt({ code, room }) {
+  const portrait = usePortrait();
   const status = useQuery(api.game.flow.getPromptVotingStatus, code ? { code } : "skip");
   // The query reports whole seconds left; turn that into a local deadline.
   const [deadline, setDeadline] = useState(null);
@@ -150,14 +191,14 @@ export function ScreenPrompt({ code, room }) {
   const skipVotes = status?.skipVotes || 0;
   const needed = status?.majorityNeeded || 1;
   return (
-    <div data-vital="screen-prompt" className="h-full w-full flex flex-col items-center justify-center gap-12 px-24 text-white">
+    <div data-vital="screen-prompt" className={`h-full w-full flex flex-col items-center justify-center gap-12 text-white ${portrait ? "px-12" : "px-24"}`}>
       {deadline && <CountdownPill deadline={deadline} />}
       <motion.div key={prompt} className="w-full" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
         <ScreenPromptCard prompt={prompt} />
       </motion.div>
       <div className="flex flex-col items-center gap-3">
-        <p className="text-2xl text-gray-400">Not feeling it? Vote to skip on your phone.</p>
-        <div className="flex items-center gap-4 text-xl text-gray-400 tabular-nums">
+        <p className="text-2xl text-gray-400 text-center">Not feeling it? Vote to skip on your phone.</p>
+        <div className={`flex items-center gap-4 text-gray-400 tabular-nums ${portrait ? "text-2xl" : "text-xl"}`}>
           <span>{skipVotes}/{needed} votes to skip</span>
           <div className="w-64 h-3 bg-[#242424] rounded-full overflow-hidden">
             <div className="h-full bg-[#68d570] transition-all duration-300" style={{ width: `${Math.min(1, skipVotes / needed) * 100}%` }} />
@@ -170,20 +211,21 @@ export function ScreenPrompt({ code, room }) {
 
 /** Song selection: the prompt and who has picked. Never which songs. */
 export function ScreenSelection({ room, players }) {
+  const portrait = usePortrait();
   const { picked, waiting } = pickStatus(players, room?.currentRound);
   const anonymous = Boolean(room?.settings?.anonymousMode);
   const total = picked.length + waiting.length;
   const roundLength = room?.settings?.roundLength || 0;
   const deadline = room?.selectionStartedAt && roundLength > 0 ? room.selectionStartedAt + roundLength * 1000 : undefined;
   return (
-    <div data-vital="screen-selection" className="h-full w-full flex flex-col justify-center gap-12 px-24 text-white">
+    <div data-vital="screen-selection" className={`h-full w-full flex flex-col justify-center gap-12 text-white ${portrait ? "px-12" : "px-24"}`}>
       <div className="flex items-center justify-between">
         <p className="text-2xl text-gray-400">Round {room?.currentRound || 1} of {room?.settings?.numberOfRounds || 3}</p>
         {deadline && <CountdownPill deadline={deadline} />}
       </div>
       <ScreenPromptCard prompt={room?.currentPrompt || ""} />
       <div className="flex flex-col gap-5">
-        <div className="flex items-center gap-6">
+        <div className={`flex gap-6 ${portrait ? "flex-col items-start" : "items-center"}`}>
           <p className="text-3xl tabular-nums">{picked.length} of {total} picked</p>
           <ProgressDots done={picked.length} total={total} />
         </div>
@@ -213,7 +255,7 @@ export function ScreenSelection({ room, players }) {
  * moves on shortly after the clip ends), with its art or video and a
  * progress bar. Give it a `key` per song to reset it.
  */
-const ScreenClip = memo(function ScreenClip({ song, audioOn }) {
+const ScreenClip = memo(function ScreenClip({ song, audioOn, coverSize = 420 }) {
   const playerRef = useRef(null);
   const [duration, setDuration] = useState(0);
   const [time, setTime] = useState(0);
@@ -251,7 +293,8 @@ const ScreenClip = memo(function ScreenClip({ song, audioOn }) {
             src={largeCoverArt(song.albumCover)}
             onError={fallBackToOriginal(song.albumCover)}
             alt={`${song.name} album art`}
-            className="w-[420px] h-[420px] rounded-xl object-cover shadow-lg mx-auto"
+            className="rounded-xl object-cover shadow-lg mx-auto"
+            style={{ width: coverSize, height: coverSize }}
           />
         )}
         <div className={videoId ? "w-full" : "hidden"}>
@@ -289,12 +332,39 @@ const ScreenClip = memo(function ScreenClip({ song, audioOn }) {
 
 /** Rating: the song playing out loud, who picked it (unless anonymous), and the votes. */
 export function ScreenRating({ code, room, song, audioOn }) {
+  const portrait = usePortrait();
   const status = useQuery(api.game.flow.getCurrentRatingStatus, code ? { code } : "skip");
   const submissions = useQuery(api.game.flow.getSubmissionStatus, code ? { code } : "skip");
   const votes = ratingVotes(status);
   const by = submitterLabel(song, room?.settings?.anonymousMode);
   const index = room?.currentRatingIndex ?? 0;
   const totalSongs = submissions?.submitted || submissions?.total || 0;
+  const details = (
+    <div className="flex flex-col gap-2 min-w-0">
+      <p className={`text-gray-400 ${portrait ? "text-2xl" : "text-xl"}`}>Song {index + 1}{totalSongs ? ` of ${totalSongs}` : ""}</p>
+      <p className="text-5xl font-bold leading-tight line-clamp-2">{song?.name}</p>
+      <p className="text-3xl text-gray-300 truncate">{song?.artist}</p>
+      {by && <p className={`text-gray-400 mt-1 truncate ${portrait ? "text-3xl" : "text-2xl"}`}>Picked by {by}</p>}
+    </div>
+  );
+  const voteRow = (
+    <div className="flex items-center gap-6">
+      <p className={`tabular-nums ${portrait ? "text-3xl" : "text-2xl"}`}>{votes.submitted} of {votes.total} voted</p>
+      <ProgressDots done={votes.submitted} total={votes.total} />
+    </div>
+  );
+
+  if (portrait) {
+    return (
+      <div data-vital="screen-rating" className="h-full w-full flex flex-col justify-center gap-9 px-12 pt-20 pb-12 text-white">
+        <ScreenClip key={song?.songId} song={song} audioOn={audioOn} coverSize={480} />
+        {details}
+        {voteRow}
+        <ScreenPromptCard prompt={room?.currentPrompt || ""} size="sm" />
+      </div>
+    );
+  }
+
   return (
     <div data-vital="screen-rating" className="h-full w-full flex items-center gap-14 px-16 pt-16 pb-12 text-white">
       <div className={`${song?.videoId ? "w-[620px]" : "w-[440px]"} shrink-0`}>
@@ -302,16 +372,8 @@ export function ScreenRating({ code, room, song, audioOn }) {
       </div>
       <div className="flex-1 min-w-0 flex flex-col gap-8">
         <ScreenPromptCard prompt={room?.currentPrompt || ""} size="sm" />
-        <div className="flex flex-col gap-2 min-w-0">
-          <p className="text-xl text-gray-400">Song {index + 1}{totalSongs ? ` of ${totalSongs}` : ""}</p>
-          <p className="text-5xl font-bold leading-tight line-clamp-2">{song?.name}</p>
-          <p className="text-3xl text-gray-300 truncate">{song?.artist}</p>
-          {by && <p className="text-2xl text-gray-400 mt-1 truncate">Picked by {by}</p>}
-        </div>
-        <div className="flex items-center gap-6">
-          <p className="text-2xl tabular-nums">{votes.submitted} of {votes.total} voted</p>
-          <ProgressDots done={votes.submitted} total={votes.total} />
-        </div>
+        {details}
+        {voteRow}
       </div>
     </div>
   );
@@ -329,22 +391,24 @@ export function ScreenTallying() {
 
 /** Round result: the winning song big, the rest ranked beside it. */
 export function ScreenResults({ code, room }) {
+  const portrait = usePortrait();
   const round = room?.currentRound || 1;
   const results = useQuery(api.game.flow.getRoundResults, code ? { code, round } : "skip");
   const songs = results?.songs || [];
   const [winner, ...rest] = songs;
   const isFinal = round >= (room?.settings?.numberOfRounds || 3);
+  const cover = portrait ? 260 : 300;
   return (
-    <div data-vital="screen-results" className="h-full w-full flex flex-col px-16 pt-16 pb-10 text-white">
-      <p className="text-2xl text-gray-400">
+    <div data-vital="screen-results" className={`h-full w-full flex flex-col text-white ${portrait ? "px-12 pt-20 pb-12" : "px-16 pt-16 pb-10"}`}>
+      <p className={`text-gray-400 ${portrait ? "text-2xl line-clamp-2" : "text-2xl"}`}>
         Round {round} results{room?.currentPrompt ? <> · <span className="text-white/70">&quot;{room.currentPrompt}&quot;</span></> : null}
       </p>
       {!winner ? (
         <ScreenTallying />
       ) : (
-        <div className="flex-1 min-h-0 flex gap-14 mt-8">
+        <div className={`flex-1 min-h-0 flex mt-8 ${portrait ? "flex-col gap-8" : "gap-14"}`}>
           <motion.div
-            className="w-[400px] shrink-0 flex flex-col items-center text-center"
+            className={`shrink-0 flex flex-col items-center text-center ${portrait ? "w-full" : "w-[400px]"}`}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.6, delay: 0.2 }}
@@ -354,33 +418,34 @@ export function ScreenResults({ code, room }) {
                 src={largeCoverArt(winner.albumCover)}
                 onError={fallBackToOriginal(winner.albumCover)}
                 alt="Album Cover"
-                className="w-[300px] h-[300px] rounded-xl shadow-lg object-cover"
+                className="rounded-xl shadow-lg object-cover"
+                style={{ width: cover, height: cover }}
               />
               <div className="absolute -top-7 -right-7 flex items-center bg-[#191414] bg-opacity-90 rounded-2xl px-3 py-1 shadow-lg">
                 <img src={recordLogo} alt="Record" className="w-14 h-14 mr-1" />
                 <span className="text-4xl font-bold">x{winner.totalRecords}</span>
               </div>
             </div>
-            <p className="text-4xl font-bold mt-6 text-[#68d570] truncate max-w-full">{winner.player?.name}</p>
-            <p className="text-2xl mt-1 truncate max-w-full">{winner.name}</p>
-            <p className="text-xl text-gray-300 truncate max-w-full">{winner.artist}</p>
+            <p className={`text-4xl font-bold text-[#68d570] truncate max-w-full ${portrait ? "mt-5" : "mt-6"}`}>{winner.player?.name}</p>
+            <p className={`mt-1 truncate max-w-full ${portrait ? "text-3xl" : "text-2xl"}`}>{winner.name}</p>
+            <p className={`text-gray-300 truncate max-w-full ${portrait ? "text-2xl" : "text-xl"}`}>{winner.artist}</p>
           </motion.div>
-          <div className="flex-1 min-w-0 flex flex-col gap-3 overflow-hidden">
+          <div className={`flex-1 min-w-0 flex flex-col overflow-hidden ${portrait ? "gap-2" : "gap-3"}`}>
             {rest.map((s, i) => (
               <motion.div
                 key={s.songId || i}
-                className="flex items-center gap-5 rounded-lg bg-[#242424]/85 px-4 py-3"
+                className={`flex items-center gap-5 rounded-lg bg-[#242424]/85 px-4 ${portrait ? "py-2" : "py-3"}`}
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.4, delay: 0.5 + i * 0.1 }}
               >
-                <img src={s.albumCover} alt="Album Cover" className="w-16 h-16 rounded-md object-cover shrink-0" />
+                <img src={s.albumCover} alt="Album Cover" className={`rounded-md object-cover shrink-0 ${portrait ? "w-14 h-14" : "w-16 h-16"}`} />
                 <div className="flex-1 min-w-0">
                   <p className="text-2xl font-bold truncate">{s.player?.name}</p>
-                  <p className="text-lg text-gray-300 truncate">{s.name} · {s.artist}</p>
+                  <p className={`text-gray-300 truncate ${portrait ? "text-xl" : "text-lg"}`}>{s.name} · {s.artist}</p>
                 </div>
                 <div className="flex items-center shrink-0">
-                  <img src={recordLogo} alt="Record Logo" className="w-12 h-12 mr-1" />
+                  <img src={recordLogo} alt="Record Logo" className={`mr-1 ${portrait ? "w-10 h-10" : "w-12 h-12"}`} />
                   <span className="text-3xl font-bold tabular-nums">{s.totalRecords}</span>
                 </div>
               </motion.div>
@@ -388,7 +453,7 @@ export function ScreenResults({ code, room }) {
           </div>
         </div>
       )}
-      <p className="text-xl text-white/50 mt-4">
+      <p className={`text-white/50 mt-4 ${portrait ? "text-2xl text-center" : "text-xl"}`}>
         {isFinal ? "Waiting for the host to show the final results." : "Waiting for the host to start the next round."}
       </p>
     </div>

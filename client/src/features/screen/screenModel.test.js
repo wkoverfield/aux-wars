@@ -11,7 +11,7 @@ import {
   screenUrl,
   screenUrlLabel,
   screenViewFor,
-  stageScale,
+  stageFor,
   submitterLabel,
   writeSession,
 } from "./screenModel";
@@ -143,12 +143,17 @@ describe("screenLeaveBeaconBody", () => {
   });
 });
 
-describe("stageScale", () => {
-  it("fits the 1280x720 stage inside the display, letterboxed", () => {
-    expect(stageScale(1920, 1080)).toBe(1.5);
-    expect(stageScale(1280, 720)).toBe(1);
-    expect(stageScale(1440, 900)).toBe(1.125);
-    expect(stageScale(1280, 600)).toBeCloseTo(600 / 720);
-    expect(stageScale(0, 0)).toBe(1);
+describe("stageFor", () => {
+  it("fits the 1280x720 stage to a landscape display, letterboxed", () => {
+    expect(stageFor(1920, 1080)).toEqual({ portrait: false, width: 1280, height: 720, scale: 1.5 });
+    expect(stageFor(1366, 768).scale).toBeCloseTo(768 / 720);
+    expect(stageFor(812, 375)).toMatchObject({ portrait: false, scale: 375 / 720 });
+    expect(stageFor(0, 0)).toMatchObject({ portrait: false, scale: 1 });
+  });
+
+  it("uses the 720x1280 stage when the display is taller than wide", () => {
+    expect(stageFor(375, 812)).toEqual({ portrait: true, width: 720, height: 1280, scale: 375 / 720 });
+    expect(stageFor(768, 1024)).toMatchObject({ portrait: true, scale: 1024 / 1280 });
+    expect(stageFor(800, 800).portrait).toBe(false);
   });
 });

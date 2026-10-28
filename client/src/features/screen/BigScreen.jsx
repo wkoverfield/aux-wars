@@ -4,7 +4,8 @@ import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useNoIndex } from "../../hooks/useNoIndex";
 import logo from "../../assets/aux-wars-logo.svg";
-import { STAGE_HEIGHT, STAGE_WIDTH, screenViewFor, stageScale } from "./screenModel";
+import { screenViewFor, stageFor } from "./screenModel";
+import { StageContext } from "./stage";
 import { useScreenPresence } from "./useScreenPresence";
 import {
   ScreenLobby,
@@ -17,13 +18,18 @@ import {
 } from "./ScreenViews";
 import ScreenGameOver from "./ScreenGameOver";
 
-function useStageScale() {
-  const read = () => (typeof window === "undefined" ? 1 : stageScale(window.innerWidth, window.innerHeight));
+function useStage() {
+  const read = () => (typeof window === "undefined" ? stageFor(0, 0) : stageFor(window.innerWidth, window.innerHeight));
   const [scale, setScale] = useState(read);
   useEffect(() => {
     const onResize = () => setScale(read());
+    // Rotating a phone or tablet flips the stage between landscape and portrait.
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+    };
   }, []);
   return scale;
 }
@@ -68,9 +74,9 @@ function StartOverlay({ onStart }) {
     >
       <img src={logo} alt="" className="w-20" />
       <span className="rounded-full bg-[#68d570] px-10 py-4 text-3xl font-bold text-black">
-        Tap to start the big screen
+        Tap to start Local play
       </span>
-      <span className="text-xl text-white/60">The songs play from here. Everyone picks and votes on their phone.</span>
+      <span className="text-2xl text-white/60 text-center px-10">The songs play from here. Everyone picks and votes on their phone.</span>
     </button>
   );
 }
@@ -79,7 +85,7 @@ function RoomNotFound({ quickPlay = false }) {
   return (
     <div className="h-full w-full flex flex-col items-center justify-center gap-6 text-white text-center px-10">
       <img src={logo} alt="" className="w-20" />
-      <h1 className="text-5xl font-bold">{quickPlay ? "Big screen isn't available here" : "Room not found"}</h1>
+      <h1 className="text-5xl font-bold">{quickPlay ? "Local play isn't available here" : "Room not found"}</h1>
       <p className="text-2xl text-gray-300">
         {quickPlay ? "Quick Play rooms play on phones only." : "This game has ended or the code is wrong."}
       </p>
@@ -99,7 +105,7 @@ export default function BigScreen() {
   const { code: rawCode } = useParams();
   const code = (rawCode || "").toUpperCase();
   useNoIndex(code ? `Aux Wars · ${code}` : "Aux Wars");
-  const scale = useStageScale();
+  const stage = useStage();
   const [started, setStarted] = useState(false);
 
   const roomResult = useQuery(api.game.rooms.getRoomByCode, code ? { code } : "skip");
@@ -130,11 +136,14 @@ export default function BigScreen() {
     <div data-vital="screen" className="fixed inset-0 overflow-hidden flex items-center justify-center">
       <div
         className="relative shrink-0"
-        style={{ width: STAGE_WIDTH, height: STAGE_HEIGHT, transform: `scale(${scale})`, transformOrigin: "center" }}
+        data-stage={stage.portrait ? "portrait" : "landscape"}
+        style={{ width: stage.width, height: stage.height, transform: `scale(${stage.scale})`, transformOrigin: "center" }}
       >
-        {content}
-        {exists && view !== "lobby" && <ScreenJoinTag code={code} />}
-        {exists && !started && <StartOverlay onStart={() => setStarted(true)} />}
+        <StageContext.Provider value={{ portrait: stage.portrait }}>
+          {content}
+          {exists && view !== "lobby" && <ScreenJoinTag code={code} />}
+          {exists && !started && <StartOverlay onStart={() => setStarted(true)} />}
+        </StageContext.Provider>
       </div>
     </div>
   );
