@@ -354,26 +354,22 @@ export function ScreenRating({ code, room, song, audioOn }) {
     </div>
   );
 
-  if (portrait) {
-    return (
-      <div data-vital="screen-rating" className="h-full w-full flex flex-col justify-center gap-9 px-12 pt-20 pb-12 text-white">
-        <ScreenClip key={song?.songId} song={song} audioOn={audioOn} coverSize={480} />
-        {details}
-        {voteRow}
-        <ScreenPromptCard prompt={room?.currentPrompt || ""} size="sm" />
-      </div>
-    );
-  }
-
+  // One tree for both orientations, so rotating mid-song keeps the player
+  // (and the song) playing instead of remounting it.
+  const prompt = <ScreenPromptCard prompt={room?.currentPrompt || ""} size="sm" />;
   return (
-    <div data-vital="screen-rating" className="h-full w-full flex items-center gap-14 px-16 pt-16 pb-12 text-white">
-      <div className={`${song?.videoId ? "w-[620px]" : "w-[440px]"} shrink-0`}>
-        <ScreenClip key={song?.songId} song={song} audioOn={audioOn} />
+    <div
+      data-vital="screen-rating"
+      className={`h-full w-full flex text-white ${portrait ? "flex-col justify-center gap-9 px-12 pt-20 pb-12" : "items-center gap-14 px-16 pt-16 pb-12"}`}
+    >
+      <div className={portrait ? "w-full" : `${song?.videoId ? "w-[620px]" : "w-[440px]"} shrink-0`}>
+        <ScreenClip key={song?.songId} song={song} audioOn={audioOn} coverSize={portrait ? 480 : 420} />
       </div>
-      <div className="flex-1 min-w-0 flex flex-col gap-8">
-        <ScreenPromptCard prompt={room?.currentPrompt || ""} size="sm" />
+      <div className={`flex flex-col ${portrait ? "gap-9" : "flex-1 min-w-0 gap-8"}`}>
+        {!portrait && prompt}
         {details}
         {voteRow}
+        {portrait && prompt}
       </div>
     </div>
   );
@@ -430,7 +426,8 @@ export function ScreenResults({ code, room }) {
             <p className={`mt-1 truncate max-w-full ${portrait ? "text-3xl" : "text-2xl"}`}>{winner.name}</p>
             <p className={`text-gray-300 truncate max-w-full ${portrait ? "text-2xl" : "text-xl"}`}>{winner.artist}</p>
           </motion.div>
-          <div className={`flex-1 min-w-0 flex flex-col overflow-hidden ${portrait ? "gap-2" : "gap-3"}`}>
+          {/* A full room (8) does not fit one column beside the winner on a wide screen. */}
+          <div className={`flex-1 min-w-0 overflow-hidden ${portrait ? "flex flex-col gap-2" : rest.length > 5 ? "grid grid-cols-2 content-start gap-3" : "flex flex-col gap-3"}`}>
             {rest.map((s, i) => (
               <motion.div
                 key={s.songId || i}

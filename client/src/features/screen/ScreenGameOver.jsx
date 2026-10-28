@@ -29,6 +29,39 @@ function RematchBanner({ rematchAt }) {
  * winner, awards one by one), on a timer since nobody taps a TV, then the
  * final standings with the awards.
  */
+/**
+ * The game's winner, sized in stage units. The phones' winner card sizes
+ * itself by viewport breakpoints, which read wrong on a scaled stage (an
+ * upright phone gets its smallest sizes), so the screen draws its own.
+ */
+function WinnerBlock({ player, size = 150 }) {
+  const covers = (player.songs || []).map((song) => song.albumCover).filter(Boolean).slice(0, 3);
+  return (
+    <div className="flex flex-col items-center text-center">
+      <div className="flex justify-center">
+        {covers.map((cover, i) => (
+          <img
+            key={i}
+            src={largeCoverArt(cover)}
+            onError={fallBackToOriginal(cover)}
+            alt=""
+            className="rounded-lg object-cover shadow-lg ring-2 ring-[#121212]"
+            style={{ width: size, height: size, marginLeft: i ? -size * 0.35 : 0, zIndex: covers.length - i }}
+          />
+        ))}
+      </div>
+      <p className="text-5xl font-bold text-[#68d570] mt-5 max-w-[620px] truncate">{player.playerName}</p>
+      <p className="mt-2 flex items-center gap-4 text-3xl font-semibold">
+        <span>{player.wins} Win{player.wins !== 1 ? "s" : ""}</span>
+        <span className="flex items-center gap-1 text-gray-300 tabular-nums">
+          <img src={recordLogo} alt="Records" className="w-9 h-9" />
+          {player.totalRecords}
+        </span>
+      </p>
+    </div>
+  );
+}
+
 /** One finisher on an upright screen: large enough to read off a phone across the table. */
 function PortraitStandingRow({ player, place }) {
   const cover = player.songs?.[0]?.albumCover;
@@ -112,14 +145,11 @@ export default function ScreenGameOver({ code, room }) {
             {stage === "winner" && winner && (
               <motion.div
                 key="winner" className="flex flex-col items-center"
-                initial={{ scale: 1.2, opacity: 0 }} animate={{ scale: 1.6, opacity: 1 }} exit={{ opacity: 0, scale: 1.7 }}
+                initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ opacity: 0, scale: 1.05 }}
                 transition={{ type: "spring", stiffness: 220, damping: 16 }}
               >
-                <div className="text-5xl mb-1">👑</div>
-                <PlayerResultWithHover
-                  playerName={winner.playerName} songs={winner.songs}
-                  wins={winner.wins} totalRecords={winner.totalRecords} isWinner
-                />
+                <div className="text-7xl mb-3">👑</div>
+                <WinnerBlock player={winner} size={220} />
               </motion.div>
             )}
             {stage === "superlatives" && reel[supIdx] && (
@@ -153,20 +183,15 @@ export default function ScreenGameOver({ code, room }) {
           <p className="text-3xl text-gray-400 text-center">Final standings</p>
           {winner && (
             <div className="flex flex-col items-center mt-2">
-              <div className="text-5xl mb-1">👑</div>
-              <div className="scale-125 origin-top -mb-6">
-                <PlayerResultWithHover
-                  playerName={winner.playerName} songs={winner.songs}
-                  wins={winner.wins} totalRecords={winner.totalRecords} isWinner
-                />
-              </div>
+              <div className="text-5xl mb-2">👑</div>
+              <WinnerBlock player={winner} size={170} />
             </div>
           )}
           <div className="flex flex-col gap-2 mt-6">
             {rest.map((p, i) => <PortraitStandingRow key={p.playerId} player={p} place={i + 2} />)}
           </div>
           {reel.length > 0 && (
-            <ul aria-label="Awards" className="w-full mt-auto pt-6 space-y-2">
+            <ul aria-label="Awards" className="w-full mt-8 space-y-2">
               {reel.map((award) => (
                 <li key={award.id} className="flex items-baseline justify-between gap-4 text-2xl">
                   <span className="flex items-baseline gap-3 min-w-0 text-white/50">
@@ -190,13 +215,8 @@ export default function ScreenGameOver({ code, room }) {
             <p className="text-2xl text-gray-400 mb-2">Final standings</p>
             {winner && (
               <>
-                <div className="text-5xl mb-1">👑</div>
-                <div className="scale-125 origin-top">
-                  <PlayerResultWithHover
-                    playerName={winner.playerName} songs={winner.songs}
-                    wins={winner.wins} totalRecords={winner.totalRecords} isWinner
-                  />
-                </div>
+                <div className="text-5xl mb-2">👑</div>
+                <WinnerBlock player={winner} size={150} />
               </>
             )}
             {reel.length > 0 && (
