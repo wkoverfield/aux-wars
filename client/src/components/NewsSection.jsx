@@ -29,7 +29,14 @@ export default function NewsSection() {
   }
 
   return (
-    <ScrollFade className="" scrollClassName="max-h-80 w-full" contentClassName="space-y-4 pr-1">
+    // Phones (one column): a fixed-height scroller. Side by side (md+): the list
+    // is taken out of flow and fills the card, so the card's height comes from
+    // its neighbors and the list ends at the card's bottom edge.
+    <ScrollFade
+      className="md:flex-1 md:min-h-0"
+      scrollClassName="max-h-80 w-full md:max-h-none md:absolute md:inset-0"
+      contentClassName="space-y-4 pr-1"
+    >
       {news.map((n) => (
         <div key={n.id}>
           <div className="flex items-baseline justify-between gap-2">
