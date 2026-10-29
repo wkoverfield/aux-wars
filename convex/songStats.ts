@@ -17,12 +17,18 @@ import { CURATED_PROMPTS } from "./game/promptPacks";
 const CURATED = new Set(CURATED_PROMPTS);
 const MAX_SOURCES = 5;
 
-// Bracketed or trailing qualifiers that YouTube titles carry and catalog
-// titles do not.
-const JUNK =
-  /\s*[([](?:[^)\]]*\b(?:official|video|audio|lyrics?|visuali[sz]er|hd|hq|4k|mv|explicit|clean|remaster(?:ed)?|music video)\b[^)\]]*)[)\]]/gi;
-// "(feat. X)" / "[with X]" anywhere, or a trailing unbracketed "feat. X".
-const FEAT = /\s*[([]\s*(?:feat|ft|featuring|with)\b\.?[^)\]]*[)\]]|\s+(?:feat|ft|featuring)\.?\s.*$/gi;
+// Titles and artists longer than this are not real catalog entries. Checked
+// before any regex runs so player-supplied strings cannot make normalization
+// slow enough to hit the mutation time limit.
+const MAX_INPUT = 300;
+// Bracket groups are found with one linear pattern, then tested against the
+// keyword lists: a group holding video junk ("(Official Video)") or a featured
+// artist ("(feat. X)", "[with X]") is dropped. Trailing unbracketed
+// "feat. X" is dropped too.
+const BRACKET = /\s*[([][^)\]]*[)\]]/g;
+const JUNK_WORD = /\b(?:official|video|audio|lyrics?|visuali[sz]er|hd|hq|4k|mv|explicit|clean|remaster(?:ed)?)\b/i;
+const FEAT_GROUP = /^\s*[([]\s*(?:feat|ft|featuring|with)\b/i;
+const TRAILING_FEAT = /\s+(?:feat|ft|featuring)\.?\s.*$/i;
 // Longest key we index; anything longer is not a real catalog title.
 const MAX_KEY = 200;
 const MAX_FIELD = 300;
@@ -50,11 +56,14 @@ function cleanArtist(artist: string): string {
 /**
  * Stable key for a song across sources: "artist|title", normalized so the
  * iTunes, Deezer and YouTube copies of one recording usually share a key.
- * Returns null when either half is empty or the key is too long to index.
+ * Returns null for over-long input, an empty half, or a key too long to index.
  */
 export function songKey(name: string, artist: string): string | null {
+  if (name.length > MAX_INPUT || artist.length > MAX_INPUT) return null;
   let artistKey = cleanArtist(artist);
-  let title = name.replace(JUNK, "").replace(FEAT, "");
+  let title = name
+    .replace(BRACKET, (group) => (JUNK_WORD.test(group) || FEAT_GROUP.test(group) ? "" : group))
+    .replace(TRAILING_FEAT, "");
   // YouTube titles are often "Artist - Title" under a channel name such as
   // "ArtistVEVO"; the title's artist is the cleaner of the two. Compare with
   // spaces removed because channel names usually have none.

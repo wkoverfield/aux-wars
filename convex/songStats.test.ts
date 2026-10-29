@@ -57,6 +57,16 @@ describe("songKey", () => {
     expect(songKey("!!!", "Band")).toBeNull();
     expect(songKey("Song", "")).toBeNull();
     expect(songKey("a".repeat(5000), "Band")).toBeNull();
+    expect(songKey("Song", "b".repeat(301))).toBeNull();
+  });
+
+  test("hostile input returns quickly", () => {
+    const started = performance.now();
+    for (const name of ["(".repeat(300), "( official ".repeat(27), "[".repeat(100000), " feat ".repeat(50)]) {
+      songKey(name, "Band");
+      songKey("Song", name);
+    }
+    expect(performance.now() - started).toBeLessThan(50);
   });
 });
 
