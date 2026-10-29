@@ -302,6 +302,26 @@ export default defineSchema({
     calculatedAt: v.number(),
   }).index("by_room_round", ["roomCode", "round"]),
 
+  // Permanent anonymous song stats (see songStats.ts). Never deleted with a
+  // room. prompt undefined = every prompt combined; otherwise a curated prompt.
+  songStats: defineTable({
+    songKey: v.string(),
+    prompt: v.optional(v.string()),
+    name: v.string(),
+    artist: v.string(),
+    albumCover: v.string(),
+    picks: v.number(),
+    wins: v.number(),
+    ratingCount: v.number(),
+    ratingSum: v.number(),
+    ratingHist: v.array(v.number()), // counts of 1..5 ratings
+    sources: v.array(v.string()), // trackIds seen for this song, capped
+    firstSeenAt: v.number(),
+    lastSeenAt: v.number(),
+  })
+    .index("by_song_prompt", ["songKey", "prompt"])
+    .index("by_prompt_picks", ["prompt", "picks"]),
+
   // A saved copy of a finished game, opened by its link after the room is
   // gone (see results.ts). Holds no player ids or submission ids, only keys
   // local to the snapshot. roomCode is kept for the one-per-game lookup and

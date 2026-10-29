@@ -29,6 +29,7 @@ import type * as quickPlay from "../quickPlay.js";
 import type * as results from "../results.js";
 import type * as screens from "../screens.js";
 import type * as siteStats from "../siteStats.js";
+import type * as songStats from "../songStats.js";
 import type * as stats from "../stats.js";
 import type * as stripe from "../stripe.js";
 import type * as youtube from "../youtube.js";
@@ -61,6 +62,7 @@ declare const fullApi: ApiFromModules<{
   results: typeof results;
   screens: typeof screens;
   siteStats: typeof siteStats;
+  songStats: typeof songStats;
   stats: typeof stats;
   stripe: typeof stripe;
   youtube: typeof youtube;
