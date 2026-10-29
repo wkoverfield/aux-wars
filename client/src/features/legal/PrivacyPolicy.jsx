@@ -30,6 +30,11 @@ export default function PrivacyPolicy() {
               <li>Anonymous, aggregate usage analytics (e.g. how many games are played and which features are used).</li>
             </ul>
             <p className="mt-2">Game rooms are temporary and are automatically cleaned up after they end.</p>
+            <p className="mt-2">
+              We keep anonymous song stats from finished rounds: how often a song is picked and how
+              it is rated, overall and for each built-in prompt. These stats never include display
+              names, player or room identifiers, or custom prompts.
+            </p>
           </section>
 
           <section>

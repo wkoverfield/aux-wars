@@ -14,6 +14,7 @@ import {
 import { pendingPlayers, startPublicRematch } from "./publicRooms";
 import { AUTO_ADVANCE_MS, AUTO_REMATCH_MS } from "./quickPlayRules";
 import { isScreenAttached } from "../screens";
+import { recordRoundSongStats } from "../songStats";
 // Note: internal.analytics.trackEvent is used for fire-and-forget analytics tracking
 // Public (Quick Play) rooms have no host: their start, round advance and
 // rematch are scheduler-driven, and the host-only mutations below no-op on them.
@@ -912,6 +913,7 @@ export const calculateResultsInternal = internalMutation({
       .withIndex("by_room_round", (q) => q.eq("roomCode", code).eq("round", room.currentRound))
       .collect();
     const scores: Record<string, number> = {};
+    const ratingValues: Record<string, number[]> = {};
     for (const s of subs) {
       const ratings = await ctx.db
         .query("ratings")
@@ -919,6 +921,7 @@ export const calculateResultsInternal = internalMutation({
         .collect();
       const total = ratings.filter((r) => r.rating > 0).reduce((sum, r) => sum + r.rating, 0);
       scores[s._id] = total;
+      ratingValues[s._id] = ratings.map((r) => r.rating);
     }
     const sorted = subs
       .map((s) => ({
@@ -952,6 +955,21 @@ export const calculateResultsInternal = internalMutation({
       results,
       calculatedAt: now(),
     });
+    // Song stats are secondary: a failure there must never block results.
+    try {
+      await recordRoundSongStats(
+        ctx,
+        room.currentPrompt,
+        subs.map((s) => ({
+          submission: s,
+          ratings: ratingValues[s._id] ?? [],
+          isWinner: s._id === sorted[0]?.songId,
+        })),
+        now()
+      );
+    } catch (err) {
+      console.error(`[calculateResultsInternal] song stats skipped for ${code}:`, err);
+    }
     const advance = autoAdvancePatch(room);
     await ctx.db.patch(room._id, {
       phase: "results",
