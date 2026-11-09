@@ -16,7 +16,7 @@ export default function LiveStats() {
 
   const items = [
     { value: stats.game_started, label: "games played" },
-    { value: stats.unique_visitors, label: "visitors" },
+    { value: stats.players_this_week, label: "players this week" },
     { value: stats.rating_submitted, label: "song ratings" },
   ].filter((i) => typeof i.value === "number" && i.value > 0);
 

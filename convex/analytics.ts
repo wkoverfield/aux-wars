@@ -443,6 +443,37 @@ export const refreshLiveStats = internalMutation({
   },
 });
 
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Counts distinct people who joined a game in the last 7 days from the raw
+ * player_joined rows (kept 90 days, each carrying the joiner's visitorId) and
+ * stores it on the liveStats row. Runs hourly. A join without a visitorId
+ * (older clients) counts by its playerId. Reads one week of joins, a few
+ * thousand rows at current traffic.
+ */
+export const refreshPlayersThisWeek = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const since = Date.now() - WEEK_MS;
+    const people = new Set<string>();
+    const joins = ctx.db
+      .query("analyticsEvents")
+      .withIndex("by_type_and_timestamp", (q) => q.eq("eventType", "player_joined").gte("timestamp", since));
+    for await (const e of joins) {
+      const m = e.metadata ?? {};
+      const id = typeof m.visitorId === "string" ? `v:${m.visitorId}` : typeof m.playerId === "string" ? `p:${m.playerId}` : null;
+      if (id) people.add(id);
+    }
+    const playersThisWeek = people.size;
+    const existing = await ctx.db.query("liveStats").first();
+    if (!existing) return { playersThisWeek, action: "no-row" };
+    if (existing.playersThisWeek === playersThisWeek) return { playersThisWeek, action: "unchanged" };
+    await ctx.db.patch(existing._id, { playersThisWeek });
+    return { playersThisWeek, action: "patched" };
+  },
+});
+
 /**
  * Homepage counters. Reads the single liveStats row (see refreshLiveStats);
  * null until the first refresh has run. unique_visitors comes from the latest
@@ -458,6 +489,7 @@ export const getLiveStats = query({
       game_started: row.gameStarted,
       player_joined: row.playerJoined,
       rating_submitted: row.ratingSubmitted,
+      players_this_week: row.playersThisWeek ?? null,
       unique_visitors: snap?.metrics["uniques:visitors"] ?? null,
     };
   },
