@@ -11,9 +11,12 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
  * Callbacks report WINDOW-RELATIVE time so a progress bar built for a 30s clip
  * works unchanged: onReady(windowLength), onTimeUpdate(currentTime - startTime).
  *
- * ADS/ToS NOTE (dormant-but-real): running our OWN ads next to this embed
- * violates YouTube's API ToS. We serve no ads today (VITE_ADSENSE_CLIENT unset),
- * so it's dormant — if ads are re-enabled, gate YouTube playback to ad-free rooms.
+ * ADS/ToS NOTE: YouTube API Developer Policies III.G.1.d forbid our own ads on
+ * any screen that shows YouTube API data: this player, YouTube thumbnails, or
+ * titles from YouTube. So no AdSlot goes on a screen that can mount this
+ * component or list YouTube picks (song selection, rating, round results,
+ * game over), and none on /screen. Ads are limited to home, lobby, the
+ * waiting screen, /faq and /aux-battle (see services/ads.js).
  *
  * @param {string}   props.videoId      - YouTube video id
  * @param {number}   props.startTime    - window start (seconds into the full song)

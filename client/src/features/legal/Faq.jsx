@@ -1,20 +1,15 @@
-import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { FAQ, FAQ_PAGE } from '../../data/faq';
+import AdSlot from '../../components/AdSlot';
+import { FAQ } from '../../data/faq';
+import { usePageTitle } from '../../hooks/usePageTitle';
 
 /**
- * Answers to what newcomers ask before playing. The build also writes this
- * page as static HTML (faq.html, see vite.config.js) with the same markup,
- * so keep the two in step when changing the layout.
+ * Answers to what newcomers ask before playing. The build renders this
+ * component into faq.html (see src/prerender/), so it must render without
+ * browser APIs or Convex data.
  */
 export default function Faq() {
-  useEffect(() => {
-    const previous = document.title;
-    document.title = FAQ_PAGE.title;
-    return () => {
-      document.title = previous;
-    };
-  }, []);
+  usePageTitle('/faq');
 
   return (
     <div className="h-full w-full overflow-y-auto text-white px-6 py-12 flex justify-center">
@@ -32,6 +27,7 @@ export default function Faq() {
         <Link to="/" className="inline-block mt-10 py-3 px-6 rounded-full font-bold text-black bg-[#68d570] hover:bg-[#7de884] transition-colors">
           Play Aux Wars
         </Link>
+        <AdSlot slot="faq" className="mt-10" />
       </div>
     </div>
   );

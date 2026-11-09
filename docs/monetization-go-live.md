@@ -9,10 +9,11 @@ the switches below). This doc is the paint-by-numbers finish line.
 - **Host Pack ($5 one-time)**: Stripe Checkout → durable entitlement. Pro rooms are ad-free + cap 50
   (free = 8). Server is source of truth (webhook). Restore uses the post-purchase Pro code; email
   restore stays disabled until it is a real magic-link flow.
-- **Ads (dark)**: AdSense `<AdSlot>` on Home, Lobby, Waiting, Results, Game-over. Never on
-  song-pick/rating. Auto-suppressed in Pro rooms + behind cookie consent. Renders nothing until
-  `VITE_ADSENSE_CLIENT` and placement slot IDs are set. Game-over slot reserved for a future
-  end-game video (at scale).
+- **Ads (dark)**: AdSense `<AdSlot>` on Home, Lobby (private and public), Waiting, /faq and
+  /aux-battle. Never on a screen that shows YouTube API data (song pick, rating, round results,
+  game over) and never on /screen; the rule is in `client/src/services/ads.js`. Auto-suppressed in
+  Pro rooms. Consent comes from Google's CMP (AdSense Privacy & messaging); the app has no banner of
+  its own. Renders nothing until `VITE_ADSENSE_CLIENT` and placement slot IDs are set.
 - **Tip jar**: Buy Me a Coffee, already live on the homepage.
 - **Analytics**: pro funnel (cta→checkout→purchased), `search_no_results`+query, `vote_listen` ms,
   `game_abandoned`+phase (the 53%), `session_start` new/returning.
@@ -44,8 +45,12 @@ the switches below). This doc is the paint-by-numbers finish line.
 - [ ] On approval, set `VITE_ADSENSE_CLIENT=ca-pub-…` in Vercel prod.
 - [ ] Set placement slot IDs in Vercel prod:
       `VITE_ADSENSE_SLOT_HOME`, `VITE_ADSENSE_SLOT_LOBBY`, `VITE_ADSENSE_SLOT_WAIT`,
-      `VITE_ADSENSE_SLOT_RESULTS`, `VITE_ADSENSE_SLOT_GAMEOVER`.
-- [ ] Redeploy Vercel. Ads and the cookie banner stay dark unless the client id and placement slot ids
+      `VITE_ADSENSE_SLOT_FAQ`, `VITE_ADSENSE_SLOT_AUX_BATTLE`.
+- [ ] In AdSense > Privacy & messaging, publish the European regulations message (Google's
+      certified CMP) and the US state regulations message.
+- [ ] Keep Auto ads off: they would place ads on screens that show YouTube data.
+- [ ] Add `client/public/ads.txt` with the line AdSense gives you.
+- [ ] Redeploy Vercel. Ads stay dark unless the client id and placement slot ids
       are configured. The Pro CTA appears when AdSense is configured; Stripe remains ready but hidden
       before then.
 

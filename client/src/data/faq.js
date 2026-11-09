@@ -1,18 +1,10 @@
 /**
- * The FAQ page's content. Plain data (no JSX) because the build also reads
- * it: vite.config.js writes /faq.html with these answers already in the
- * markup and the page's own title, description and canonical URL.
+ * The FAQ page's answers. The page's title and description live in
+ * data/pages.js with the other prerendered pages.
  *
  * Facts here track the game's rules: FREE_PLAYER_CAP in
  * convex/game/rooms.ts, rating values in submitRating (convex/game/flow.ts).
  */
-export const FAQ_PAGE = {
-  path: '/faq',
-  title: 'Aux Wars FAQ: How to Play the Online Aux Battle Game',
-  description:
-    'What an aux battle is, how many people can play, how scoring works and where the songs come from. Aux Wars is free, with no account or download.',
-};
-
 export const FAQ = [
   {
     q: 'What is an aux battle?',

@@ -6,8 +6,18 @@
     <priority>1.0</priority>
   </url>
   <url>
+    <loc>https://www.aux-wars.com/aux-battle</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://www.aux-wars.com/faq</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://www.aux-wars.com/privacy</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.2</priority>
   </url>
 </urlset>
