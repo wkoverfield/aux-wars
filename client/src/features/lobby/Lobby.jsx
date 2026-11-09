@@ -407,6 +407,22 @@ function PrivateLobby() {
                       </button>
                       </HoverTip>
                     )}
+                    {/* Local Play: one tap turns it on; its card then shows the screen link. */}
+                    {isHost && !room?.isPublic && !room?.settings?.localPlay && !streamerHide && (
+                      <HoverTip label="Play on a TV (Local Play)">
+                      <button
+                        type="button"
+                        data-vital="local-play-hint"
+                        onClick={handleEnableLocalPlay}
+                        aria-label="Play on a TV (turn on Local Play)"
+                        className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 20.25h12m-7.5-3v3m3-3v3m-10.125-3h17.25c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125Z" />
+                        </svg>
+                      </button>
+                      </HoverTip>
+                    )}
                   </div>
                 </div>
                 <div className="lobby-container rounded-md lobby-count flex flex-col gap-2">
@@ -437,17 +453,6 @@ function PrivateLobby() {
                     Copy link
                   </button>
                 </div>
-              )}
-              {/* Quiet pointer to Local Play, which lives in Game Settings. */}
-              {isHost && !room?.isPublic && !room?.settings?.localPlay && !streamerHide && (
-                <button
-                  type="button"
-                  data-vital="local-play-hint"
-                  onClick={handleEnableLocalPlay}
-                  className="self-start text-xs text-gray-400 hover:text-white transition-colors"
-                >
-                  Playing in the same room? Turn on Local Play
-                </button>
               )}
               <div className="flex flex-col items-center gap-5">
                 <motion.div
