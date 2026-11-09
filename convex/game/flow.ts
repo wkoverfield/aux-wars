@@ -230,11 +230,14 @@ export const submitRating = mutation({
       submittedAt: now(),
     });
 
-    // Track rating submitted
-    await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
-      eventType: "rating_submitted",
-      metadata: { roomCode: code, roundNumber: room.currentRound },
-    });
+    // Track rating submitted. Skipping your own song (-1) is not a rating, so
+    // it stays out of the public ratings count.
+    if (rating > 0) {
+      await ctx.scheduler.runAfter(0, internal.analytics.trackEvent, {
+        eventType: "rating_submitted",
+        metadata: { roomCode: code, roundNumber: room.currentRound },
+      });
+    }
 
     // After each rating, check if all eligible voters have voted and advance
     // Use scheduler to avoid direct mutation-to-mutation call
