@@ -20,7 +20,7 @@ const HOW_IT_PLAYS = [
   },
   {
     title: 'Rating',
-    text: "Each pick plays for the group and everyone rates it from 1 to 5. You can't rate your own. The best average rating wins the round, and the most round wins takes the game.",
+    text: "Each pick plays for the group and everyone rates it from 1 to 5. You can't rate your own. The song with the highest total rating wins the round, and whoever wins the most rounds takes the game.",
   },
   {
     title: 'Local Play',
