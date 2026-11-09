@@ -119,8 +119,9 @@ function PrivateLobby() {
     if (await copyInvite(screenUrl(gameCode))) showToast("Local Play link copied", "success");
     else showToast("Couldn't copy the link.", "warning");
   };
-  // The lobby hint turns Local Play on in place, keeping every other setting.
-  const handleEnableLocalPlay = async () => {
+  // The lobby's TV icon and the Local Play card's "Turn off" switch Local Play
+  // in place, keeping every other setting.
+  const setLocalPlay = async (on) => {
     const s = room?.settings;
     if (!s || !session?.playerId || !session?.connectionId) return;
     const res = await updateSettings({
@@ -133,9 +134,11 @@ function PrivateLobby() {
       selectedPrompts: s.selectedPrompts,
       enablePromptVoting: s.enablePromptVoting,
       anonymousMode: s.anonymousMode,
-      localPlay: true,
+      localPlay: on,
     }).catch(() => null);
-    if (!res?.success) showToast("Couldn't turn on Local Play. Try Game Settings.", "warning");
+    if (!res?.success) {
+      showToast(`Couldn't turn ${on ? "on" : "off"} Local Play. Try Game Settings.`, "warning");
+    }
   };
 
   // Initialize game code once on mount
@@ -413,7 +416,7 @@ function PrivateLobby() {
                       <button
                         type="button"
                         data-vital="local-play-hint"
-                        onClick={handleEnableLocalPlay}
+                        onClick={() => setLocalPlay(true)}
                         aria-label="Play on a TV (turn on Local Play)"
                         className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
                       >
@@ -441,17 +444,27 @@ function PrivateLobby() {
                     <span className="whitespace-nowrap">{localPlayLabel.slice(localPlayLabel.indexOf("/screen/"))}</span>
                   </p>
                   <p className="text-xs text-gray-400">Open this on the TV, laptop, or a phone in the middle of the table.</p>
-                  <button
-                    type="button"
-                    data-vital="local-play-copy"
-                    onClick={handleCopyScreenLink}
-                    className="self-start flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
-                    </svg>
-                    Copy link
-                  </button>
+                  <div className="flex items-center gap-4">
+                    <button
+                      type="button"
+                      data-vital="local-play-copy"
+                      onClick={handleCopyScreenLink}
+                      className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
+                      </svg>
+                      Copy link
+                    </button>
+                    <button
+                      type="button"
+                      data-vital="local-play-off"
+                      onClick={() => setLocalPlay(false)}
+                      className="text-xs text-gray-400 hover:text-white transition-colors"
+                    >
+                      Turn off
+                    </button>
+                  </div>
                 </div>
               )}
               <div className="flex flex-col items-center gap-5">
