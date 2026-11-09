@@ -20,7 +20,7 @@ export const FAQ = [
   },
   {
     q: 'How does scoring work?',
-    a: "Everyone rates each song from 1 to 5, and you can't rate your own. The best average rating wins the round, and the most round wins takes the game.",
+    a: "Everyone rates each song from 1 to 5, and you can't rate your own. The highest total rating wins the round, and the most round wins takes the game.",
   },
   {
     q: 'Where do the songs come from?',

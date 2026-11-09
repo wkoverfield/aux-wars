@@ -32,7 +32,7 @@ const HOW_TO_PLAY = [
   { n: 2, title: "Get a prompt", text: "Like “song that makes you wanna text your ex.”" },
   { n: 3, title: "Pick a song", text: "Search and drop the perfect track for the prompt." },
   { n: 4, title: "Rate the picks", text: "Listen to everyone’s songs and vote 1–5." },
-  { n: 5, title: "Crown the winner", text: "Best average rating takes the round." },
+  { n: 5, title: "Crown the winner", text: "Highest total rating takes the round." },
 ];
 
 /**
