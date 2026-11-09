@@ -21,8 +21,13 @@ const AD_SCREENS = {
   "features/legal/AuxBattle.jsx": ["auxBattle"],
 };
 
+// Every <AdSlot> use, by its literal slot name. A computed slot or spread
+// props can't be checked, so it is reported as "<non-literal>" and fails.
 function adSlotsIn(source) {
-  return [...source.matchAll(/<AdSlot\b[^>]*\bslot="([^"]+)"/g)].map((m) => m[1]);
+  return [...source.matchAll(/<AdSlot\b([^>]*)/g)].map((m) => {
+    const literal = m[1].match(/\bslot="([^"]+)"/);
+    return literal && !/\{\s*\.\.\./.test(m[1]) ? literal[1] : "<non-literal>";
+  });
 }
 
 describe("ad placements", () => {
@@ -43,6 +48,15 @@ describe("ad placements", () => {
     for (const path of youtubeScreens) {
       expect(sources[path], fileName(path)).not.toMatch(/AdSlot/);
     }
+  });
+
+  it("only the ad-safe screens import AdSlot, so no wrapper can carry it elsewhere", () => {
+    const importers = Object.entries(sources)
+      .filter(([, source]) => /import\s+AdSlot\b|components\/AdSlot/.test(source))
+      .map(([path]) => fileName(path))
+      .filter((path) => path !== "components/AdSlot.jsx")
+      .sort();
+    expect(importers).toEqual(Object.keys(AD_SCREENS).sort());
   });
 
   it("every placement used has a slot id variable", () => {

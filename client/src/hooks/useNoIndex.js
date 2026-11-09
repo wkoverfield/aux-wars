@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { HOME_TITLE } from "../data/pages";
 
 /**
  * Keeps the current page out of search indexes while it is mounted, and sets
@@ -16,10 +17,9 @@ export function useNoIndex(title) {
       document.head.appendChild(meta);
     }
     meta.setAttribute("content", "noindex, nofollow");
-    const previousTitle = document.title;
     if (title) document.title = title;
     return () => {
-      document.title = previousTitle;
+      if (title) document.title = HOME_TITLE;
       if (created) meta.remove();
       else if (previous !== null) meta.setAttribute("content", previous);
     };

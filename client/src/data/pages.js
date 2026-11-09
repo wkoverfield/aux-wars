@@ -16,7 +16,7 @@ export const PAGES = [
     path: '/',
     file: 'index.html',
     index: true,
-    // Home keeps the head written in index.html.
+    // Home keeps the head written in index.html (HOME_TITLE).
     title: null,
     description: null,
   },
@@ -56,3 +56,6 @@ export const PAGES = [
 export function pageFor(path) {
   return PAGES.find((page) => page.path === path);
 }
+
+/** The <title> in index.html. Pages restore it when they unmount. */
+export const HOME_TITLE = 'Aux Wars - Online Aux Battle Music Party Game with Friends';

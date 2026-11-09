@@ -49,6 +49,10 @@ the switches below). This doc is the paint-by-numbers finish line.
 - [ ] In AdSense > Privacy & messaging, publish the European regulations message (Google's
       certified CMP) and the US state regulations message.
 - [ ] Keep Auto ads off: they would place ads on screens that show YouTube data.
+- [ ] Before setting `VITE_ADSENSE_CLIENT`: make PostHog follow the consent choice. The homemade
+      banner (which also opted PostHog out) is gone, and a decline in Google's message does not
+      reach PostHog on its own. Read the CMP signal (`__tcfapi` / Consent Mode) in
+      `client/src/services/posthog.js` and opt out when a European visitor declines.
 - [ ] Add `client/public/ads.txt` with the line AdSense gives you.
 - [ ] Redeploy Vercel. Ads stay dark unless the client id and placement slot ids
       are configured. The Pro CTA appears when AdSense is configured; Stripe remains ready but hidden

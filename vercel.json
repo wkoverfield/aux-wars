@@ -3,6 +3,7 @@
   "outputDirectory": "client/dist",
   "installCommand": "npm install",
   "framework": null,
+  "trailingSlash": false,
   "headers": [
     {
       "source": "/assets/(.*)",
