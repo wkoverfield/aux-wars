@@ -196,3 +196,30 @@ describe("recordRoundSongStats", () => {
     expect(overall.picks).toBe(1);
   });
 });
+
+describe("rating_submitted count", () => {
+  test("skipping your own song is not counted as a rating", async () => {
+    const t = setup();
+    const { code } = await t.mutation(api.game.rooms.hostGame, {});
+    for (const id of ["qa-a", "qa-b"]) {
+      const res = await t.mutation(api.game.rooms.joinGame, { ...as(code, id), name: id });
+      expect(res.success).toBe(true);
+    }
+    const songId = await t.run(async (ctx) => {
+      const room = await ctx.db.query("rooms").withIndex("by_code", (q) => q.eq("code", code)).unique();
+      await ctx.db.patch(room!._id, { phase: "rating", currentRound: 1, currentRatingIndex: 0, currentPrompt: PROMPT });
+      return ctx.db.insert("submissions", {
+        roomCode: code, round: 1, playerId: "qa-a", trackId: "itunes:alpha",
+        trackDetails: { name: "Alpha", artist: "Band A", albumCover: "https://example.com/a.jpg", previewUrl: "https://example.com/p.m4a" },
+        submittedAt: 1000,
+      });
+    });
+    expect((await t.mutation(api.game.flow.submitRating, { ...as(code, "qa-a"), songId, rating: -1 })).success).toBe(true);
+    expect((await t.mutation(api.game.flow.submitRating, { ...as(code, "qa-b"), songId, rating: 4 })).success).toBe(true);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const agg = await t.run((ctx) =>
+      ctx.db.query("analyticsAggregates").filter((q) => q.eq(q.field("eventType"), "rating_submitted")).collect()
+    );
+    expect(agg.reduce((s, a) => s + a.count, 0)).toBe(1);
+  });
+});

@@ -73,6 +73,7 @@ function PrivateLobby() {
   const leaveGame = useMutation(api.game.rooms.leaveGame);
   const kickPlayer = useMutation(api.game.rooms.kickPlayer);
   const startGame = useMutation(api.game.flow.startGame);
+  const updateSettings = useMutation(api.game.rooms.updateSettings);
   const startAction = usePendingAction();
   // Once the game has started the route guard moves on a render later; keep
   // the button reading "Starting..." until then instead of flashing back.
@@ -117,6 +118,24 @@ function PrivateLobby() {
   const handleCopyScreenLink = async () => {
     if (await copyInvite(screenUrl(gameCode))) showToast("Local Play link copied", "success");
     else showToast("Couldn't copy the link.", "warning");
+  };
+  // The lobby hint turns Local Play on in place, keeping every other setting.
+  const handleEnableLocalPlay = async () => {
+    const s = room?.settings;
+    if (!s || !session?.playerId || !session?.connectionId) return;
+    const res = await updateSettings({
+      code: gameCode,
+      playerId: session.playerId,
+      connectionId: session.connectionId,
+      numberOfRounds: s.numberOfRounds,
+      roundLength: s.roundLength,
+      snippetDuration: s.snippetDuration,
+      selectedPrompts: s.selectedPrompts,
+      enablePromptVoting: s.enablePromptVoting,
+      anonymousMode: s.anonymousMode,
+      localPlay: true,
+    }).catch(() => null);
+    if (!res?.success) showToast("Couldn't turn on Local Play. Try Game Settings.", "warning");
   };
 
   // Initialize game code once on mount
@@ -418,6 +437,17 @@ function PrivateLobby() {
                     Copy link
                   </button>
                 </div>
+              )}
+              {/* Quiet pointer to Local Play, which lives in Game Settings. */}
+              {isHost && !room?.isPublic && !room?.settings?.localPlay && !streamerHide && (
+                <button
+                  type="button"
+                  data-vital="local-play-hint"
+                  onClick={handleEnableLocalPlay}
+                  className="self-start text-xs text-gray-400 hover:text-white transition-colors"
+                >
+                  Playing in the same room? Turn on Local Play
+                </button>
               )}
               <div className="flex flex-col items-center gap-5">
                 <motion.div
