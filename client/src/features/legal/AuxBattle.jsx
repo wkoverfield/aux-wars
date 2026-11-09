@@ -54,7 +54,7 @@ export default function AuxBattle() {
           </p>
         </div>
 
-        <h2 className="text-xl font-bold mt-10 mb-4">How Aux Wars plays it</h2>
+        <h2 className="text-xl font-bold mt-10 mb-4">How Aux Wars does it</h2>
         <dl className="space-y-6">
           {HOW_IT_PLAYS.map(({ title, text }) => (
             <div key={title}>

@@ -17,7 +17,7 @@ const vercel = JSON.parse(readFileSync(resolve(clientDir, "../vercel.json"), "ut
 const EXPECTED_TEXT = {
   "/": ["How to Play", "Host game", "the classic"],
   "/faq": ["What is an aux battle?", "How does scoring work?"],
-  "/aux-battle": ["What is an aux battle?", "How Aux Wars plays it", "Local Play", "Play an aux battle"],
+  "/aux-battle": ["What is an aux battle?", "How Aux Wars does it", "Local Play", "Play an aux battle"],
   "/privacy": ["Privacy Policy", "What we collect"],
   "/404": ["Page not found"],
 };
