@@ -29,7 +29,7 @@
       ]
     },
     {
-      "source": "/screen/(.*)",
+      "source": "/(screen|Screen|SCREEN)/(.*)",
       "headers": [
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
       ]
@@ -58,7 +58,7 @@
     { "source": "/(lobby|LOBBY|Lobby)", "destination": "/app.html" },
     { "source": "/(lobby|LOBBY|Lobby)/(.*)", "destination": "/app.html" },
     { "source": "/(g|G)/(.*)", "destination": "/app.html" },
-    { "source": "/screen/(.*)", "destination": "/app.html" },
+    { "source": "/(screen|Screen|SCREEN)/(.*)", "destination": "/app.html" },
     { "source": "/pro/(.*)", "destination": "/app.html" },
     { "source": "/stats", "destination": "/app.html" }
   ]
