@@ -1,11 +1,23 @@
-import { useEffect, useState } from 'react';
-
 /**
- * Ads + cookie-consent plumbing.
+ * AdSense plumbing.
  *
  * Everything here is DARK until VITE_ADSENSE_CLIENT is set (post-AdSense
- * approval). With it unset, `adsConfigured()` is false, so AdSlot renders
- * nothing and the cookie banner never shows — zero visible change to the game.
+ * approval). With it unset, `adsConfigured()` is false and AdSlot renders
+ * nothing, so there is zero visible change to the game.
+ *
+ * Consent is handled by Google's certified CMP (AdSense > Privacy & messaging),
+ * which the AdSense script shows to visitors in regions that require it. The
+ * app has no cookie banner of its own.
+ *
+ * Where ads may appear (YouTube API Developer Policies III.G.1.d): never on a
+ * screen that shows YouTube API data (the player, thumbnails, video or song
+ * titles from YouTube). The placements below are the screens without it:
+ * home, lobby (private and public), the waiting screen, /faq and /aux-battle.
+ * Round results, game over, song selection and rating show YouTube data and
+ * have no slot. /screen (the shared TV display) never gets one either: an ad
+ * there is rebroadcast to a room, which AdSense counts as invalid traffic.
+ * Keep AdSense Auto ads OFF for the site, since they would place ads on any
+ * screen, including the ones above.
  */
 
 export const ADSENSE_CLIENT = import.meta.env.VITE_ADSENSE_CLIENT || '';
@@ -15,10 +27,15 @@ const AD_SLOTS = {
   home: import.meta.env.VITE_ADSENSE_SLOT_HOME || '',
   lobby: import.meta.env.VITE_ADSENSE_SLOT_LOBBY || '',
   wait: import.meta.env.VITE_ADSENSE_SLOT_WAIT || '',
-  results: import.meta.env.VITE_ADSENSE_SLOT_RESULTS || '',
-  gameover: import.meta.env.VITE_ADSENSE_SLOT_GAMEOVER || '',
+  faq: import.meta.env.VITE_ADSENSE_SLOT_FAQ || '',
+  auxBattle: import.meta.env.VITE_ADSENSE_SLOT_AUX_BATTLE || '',
 };
 
+/** The ad-safe placements AdSlot accepts. */
+export const AD_PLACEMENTS = Object.keys(AD_SLOTS);
+
+// A choice stored by the cookie banner earlier builds showed. PostHog still
+// honors a stored "rejected" (see services/posthog.js); nothing writes it now.
 export const CONSENT_KEY = 'aux-wars-cookie-consent'; // 'accepted' | 'rejected' | null
 export const CONSENT_EVENT = 'aux-wars-consent-changed';
 
@@ -37,36 +54,6 @@ export function getConsent() {
   } catch {
     return null;
   }
-}
-
-export function setConsent(value) {
-  try {
-    localStorage.setItem(CONSENT_KEY, value);
-  } catch {
-    /* ignore storage errors */
-  }
-  // Notify same-tab listeners (storage event only fires cross-tab).
-  window.dispatchEvent(new Event(CONSENT_EVENT));
-}
-
-/** Reactive consent value: re-renders consumers when consent changes. */
-export function useConsent() {
-  const [consent, setConsentState] = useState(getConsent);
-  useEffect(() => {
-    const handler = () => setConsentState(getConsent());
-    window.addEventListener(CONSENT_EVENT, handler);
-    window.addEventListener('storage', handler);
-    return () => {
-      window.removeEventListener(CONSENT_EVENT, handler);
-      window.removeEventListener('storage', handler);
-    };
-  }, []);
-  return consent;
-}
-
-/** Whether we're allowed to serve ads right now. */
-export function adsAllowed(consent) {
-  return adsConfigured() && consent === 'accepted';
 }
 
 export function loadAdSenseScript() {

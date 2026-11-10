@@ -3,6 +3,7 @@
   "outputDirectory": "client/dist",
   "installCommand": "npm install",
   "framework": null,
+  "trailingSlash": false,
   "headers": [
     {
       "source": "/assets/(.*)",
@@ -29,6 +30,12 @@
       ]
     },
     {
+      "source": "/(screen|Screen|SCREEN)/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    },
+    {
       "source": "/pro/(.*)",
       "headers": [
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
@@ -46,13 +53,14 @@
       "source": "/api/:path*",
       "destination": "https://aux-wars-production.up.railway.app/api/:path*"
     },
-    {
-      "source": "/faq",
-      "destination": "/faq.html"
-    },
-    {
-      "source": "/((?!assets/|api/).*)",
-      "destination": "/index.html"
-    }
+    { "source": "/faq", "destination": "/faq.html" },
+    { "source": "/aux-battle", "destination": "/aux-battle.html" },
+    { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/(lobby|LOBBY|Lobby)", "destination": "/app.html" },
+    { "source": "/(lobby|LOBBY|Lobby)/(.*)", "destination": "/app.html" },
+    { "source": "/(g|G)/(.*)", "destination": "/app.html" },
+    { "source": "/(screen|Screen|SCREEN)/(.*)", "destination": "/app.html" },
+    { "source": "/pro/(.*)", "destination": "/app.html" },
+    { "source": "/stats", "destination": "/app.html" }
   ]
 }

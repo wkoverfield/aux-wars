@@ -19,6 +19,7 @@ export default function AlbumRow({ albums, direction }) {
               width={250}
               height={250}
               decoding="async"
+              fetchPriority="low"
               className="block w-full h-auto aspect-square object-cover"
             />
           </div>

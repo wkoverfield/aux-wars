@@ -16,7 +16,7 @@ let convexClient = null;
 let errorsSent = 0;
 let boundarySent = 0;
 
-const STATIC_ROUTES = new Set(["/", "/privacy", "/pro/success", "/pro/restore", "/stats"]);
+const STATIC_ROUTES = new Set(["/", "/faq", "/aux-battle", "/privacy", "/pro/success", "/pro/restore", "/stats"]);
 const LOBBY_SUBROUTES = new Set(["round", "results", "gamewinner"]);
 
 /** Route pattern for a pathname, with the room code replaced by ":code". */

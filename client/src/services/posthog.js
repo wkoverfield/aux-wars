@@ -6,10 +6,10 @@
  * live in Convex, not here. No-ops when no key is
  * configured (local dev without VITE_POSTHOG_KEY) so nothing breaks or spams.
  *
- * Consent: the cookie banner is dark until AdSense is configured, so there's
- * no active consent prompt today and the app's existing analytics (Convex
- * pageviews, Vercel) already run ungated. We match that — capture by default —
- * but honor an explicit `rejected` choice if/when the banner goes live.
+ * Consent: the app has no consent prompt of its own (ad consent is Google's
+ * CMP, see services/ads.js), and the app's other analytics (Convex pageviews,
+ * Vercel) run ungated. We match that and capture by default, but still honor
+ * a `rejected` choice stored under CONSENT_KEY.
  *
  * Loading: posthog-js is fetched with a dynamic import so it stays out of the
  * main bundle. The import starts on the first of: an idle callback (3s

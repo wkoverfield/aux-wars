@@ -155,6 +155,11 @@ export default function Round() {
   const ratingIndex = room?.currentRatingIndex ?? 0;
   const totalSongs = submissionStatus?.total || 0;
   const hasSongSubmitted = mySubmission !== null && mySubmission !== undefined;
+  // A song that is already in (e.g. submitted from another tab) closes the
+  // picker, so its YouTube preview never sits beside the waiting screen's ad.
+  useEffect(() => {
+    if (hasSongSubmitted) setShowSnippetSelector(false);
+  }, [hasSongSubmitted]);
 
   // Selection timer logic
   const roundLength = room?.settings?.roundLength || 0; // 0 = no limit

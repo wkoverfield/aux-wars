@@ -77,6 +77,11 @@ function getSnapshot() {
   return currentSession;
 }
 
+// Build-time prerendering (src/prerender) has no stored session.
+function getServerSnapshot() {
+  return null;
+}
+
 // Create or update session
 function createSession(data) {
   const newSession = {
@@ -119,7 +124,7 @@ export function _resetSessionStoreForTests() {
 }
 
 export function useSession() {
-  const session = useSyncExternalStore(subscribe, getSnapshot);
+  const session = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   // Check if session is valid (not expired - 24 hour expiry)
   const isSessionValid = useCallback(() => {

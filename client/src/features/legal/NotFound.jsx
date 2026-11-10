@@ -2,9 +2,9 @@ import { Link } from 'react-router-dom';
 import { useNoIndex } from '../../hooks/useNoIndex';
 
 /**
- * Any URL the app has no route for. The host serves the app for every path
- * with a 200, so this page marks itself noindex to keep stray URLs out of
- * search results.
+ * Any URL the app has no route for. The build also renders it into 404.html,
+ * which the host serves with a 404 status for unknown paths. It marks itself
+ * noindex for client-side navigation to an unknown path.
  */
 export default function NotFound() {
   useNoIndex('Page not found | Aux Wars');

@@ -10,7 +10,6 @@ import { useToast } from '../../contexts/ToastContext';
 import PlayerResultWithHover from '../../components/PlayerResultWithHover';
 import ScrollFade from '../../components/ScrollFade';
 import AnimatedLogo from '../../components/AnimatedLogo';
-import AdSlot from '../../components/AdSlot';
 import { captureGameEvent, gameProperties } from '../../services/analytics';
 import { computeAwards } from './computeAwards';
 import { pickReel, reelSeedFor, standingsFrom, withNonSubmitters } from './resultsModel';
@@ -395,8 +394,6 @@ export default function GameWinner() {
               </svg>
               {shareAction.pending ? 'Getting the link...' : 'Share these results'}
             </button>
-
-            <AdSlot slot="gameover" className="max-w-2xl mx-auto mt-4" />
 
             {/* Buttons — pushed to the bottom when there's room, in-flow so they're always reachable */}
             {!isPublic && (

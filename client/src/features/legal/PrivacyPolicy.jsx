@@ -1,10 +1,13 @@
 import { Link } from 'react-router-dom';
+import { usePageTitle } from '../../hooks/usePageTitle';
 
 /**
  * Privacy Policy — required for AdSense approval and cookie consent.
- * Plain, honest, and accurate to how Aux Wars actually works.
+ * Plain, honest, and accurate to how Aux Wars actually works. The build
+ * renders this component into privacy.html (see src/prerender/).
  */
 export default function PrivacyPolicy() {
+  usePageTitle('/privacy');
   return (
     <div className="h-full w-full overflow-y-auto text-white px-6 py-12 flex justify-center">
       <div className="max-w-2xl w-full pb-16">

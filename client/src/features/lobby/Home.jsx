@@ -32,7 +32,7 @@ const HOW_TO_PLAY = [
   { n: 2, title: "Get a prompt", text: "Like “song that makes you wanna text your ex.”" },
   { n: 3, title: "Pick a song", text: "Search and drop the perfect track for the prompt." },
   { n: 4, title: "Rate the picks", text: "Listen to everyone’s songs and vote 1–5." },
-  { n: 5, title: "Crown the winner", text: "Best average rating takes the round." },
+  { n: 5, title: "Crown the winner", text: "Highest total rating takes the round." },
 ];
 
 /**
@@ -228,7 +228,11 @@ export default function Home() {
           <h2 className="text-xl font-bold text-white mb-3">About</h2>
           <p className="text-sm text-gray-300 leading-relaxed">
             <strong className="text-white">Aux Wars</strong> is a free online music party game:
-            the classic aux battle, playable in your browser.
+            the classic{" "}
+            <Link to="/aux-battle" className="text-white underline decoration-white/40 underline-offset-2 hover:decoration-white">
+              aux battle
+            </Link>
+            , playable in your browser.
             Get a prompt, pick the perfect song, rate everyone&rsquo;s picks, and crown the winner.
           </p>
           <p className="text-sm text-gray-400 leading-relaxed mt-3">
