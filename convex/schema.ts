@@ -410,6 +410,8 @@ export default defineSchema({
     gameStarted: v.number(),
     playerJoined: v.number(),
     ratingSubmitted: v.number(),
+    // Distinct visitors who joined a game in the last 7 days (refreshPlayersThisWeek).
+    playersThisWeek: v.optional(v.number()),
     updatedAt: v.number(),
   }),
 

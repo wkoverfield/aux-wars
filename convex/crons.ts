@@ -21,6 +21,12 @@ crons.interval(
   internal.concurrency.sampleAndRecord
 );
 
+crons.interval(
+  "refresh-players-this-week",
+  { hours: 1 }, // one week of player_joined rows -> liveStats.playersThisWeek
+  internal.analytics.refreshPlayersThisWeek
+);
+
 crons.daily(
   "rollup-daily-metrics",
   { hourUTC: 0, minuteUTC: 20 }, // yesterday's permanent row, well before the 4am raw-event prune
