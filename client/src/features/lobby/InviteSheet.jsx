@@ -4,7 +4,6 @@ const ICONS = {
   share: "M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15",
   copy: "M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244",
   qr: "M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z",
-  tv: "M6 20.25h12m-7.5-3v3m3-3v3m-10.125-3h17.25c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125Z",
 };
 
 /**
@@ -17,9 +16,8 @@ const ICONS = {
  * @param {Function} [props.onShare] - System share sheet (touch devices that have one)
  * @param {Function} props.onCopyLink - Copies the invite link
  * @param {Function} [props.onShowQr] - Shows the QR code (hidden while streaming)
- * @param {Function} [props.onLocalPlay] - Turns on Local Play (host, private room, while off)
  */
-export default function InviteSheet({ onClose, onShare, onCopyLink, onShowQr, onLocalPlay }) {
+export default function InviteSheet({ onClose, onShare, onCopyLink, onShowQr }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose();
@@ -32,7 +30,6 @@ export default function InviteSheet({ onClose, onShare, onCopyLink, onShowQr, on
     onShare && { key: "share", label: "Share invite link", icon: ICONS.share, run: onShare },
     { key: "copy", label: "Copy invite link", icon: ICONS.copy, run: onCopyLink },
     onShowQr && { key: "qr", label: "Show QR code", hint: "Friends in the room scan it to join", icon: ICONS.qr, run: onShowQr },
-    onLocalPlay && { key: "tv", label: "Play on a TV", hint: "One screen plays the music, phones vote", icon: ICONS.tv, run: onLocalPlay },
   ].filter(Boolean);
 
   return (

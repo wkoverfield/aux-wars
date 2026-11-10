@@ -132,7 +132,7 @@ function PrivateLobby() {
     if (await copyInvite(screenUrl(gameCode))) showToast("Local Play link copied", "success");
     else showToast("Couldn't copy the link.", "warning");
   };
-  // The invite sheet's "Play on a TV" and the Local Play card's "Turn off" switch Local Play
+  // The TV icon and the Local Play card's "Turn off" switch Local Play
   // in place, keeping every other setting.
   const setLocalPlay = async (on) => {
     const s = room?.settings;
@@ -392,17 +392,36 @@ function PrivateLobby() {
                         {streamerHide ? '••••••' : gameCode}
                       </button>
                     </HoverTip>
+                    {/* Share opens the invite sheet: share, copy link, QR code. */}
+                    <HoverTip label="Invite friends">
                     <button
                       type="button"
                       data-vital="invite"
                       onClick={() => setShowInvite(true)}
-                      className="flex items-center gap-1.5 rounded-full border border-white/20 px-3 py-1 text-xs text-gray-300 hover:text-white hover:border-white/40 transition-colors"
+                      aria-label="Invite friends"
+                      className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4" aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15" />
                       </svg>
-                      Invite
                     </button>
+                    </HoverTip>
+                    {/* Local Play: one tap turns it on; its card then shows the screen link. */}
+                    {isHost && !room?.isPublic && !room?.settings?.localPlay && !streamerHide && (
+                      <HoverTip label="Play on a TV (Local Play)">
+                      <button
+                        type="button"
+                        data-vital="local-play-hint"
+                        onClick={() => setLocalPlay(true)}
+                        aria-label="Play on a TV (turn on Local Play)"
+                        className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 20.25h12m-7.5-3v3m3-3v3m-10.125-3h17.25c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125Z" />
+                        </svg>
+                      </button>
+                      </HoverTip>
+                    )}
                   </div>
                 </div>
                 <div className="lobby-container rounded-md lobby-count flex flex-col gap-2">
@@ -526,7 +545,6 @@ function PrivateLobby() {
           onShare={canShare ? handleInvite : undefined}
           onCopyLink={handleCopyLink}
           onShowQr={streamerHide ? undefined : handleShowQr}
-          onLocalPlay={isHost && !room?.isPublic && !room?.settings?.localPlay ? () => setLocalPlay(true) : undefined}
         />
       )}
       {showQr && <InviteQrModal url={inviteUrl(gameCode)} onClose={() => setShowQr(false)} />}
