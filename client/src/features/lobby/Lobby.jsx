@@ -11,8 +11,9 @@ import AdSlot from "../../components/AdSlot";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 // GameContext removed - using RoomProvider's Convex queries directly
 import { usePendingAction } from "../../hooks/usePendingAction";
-import { copyInvite, inviteUrl, sendInvite } from "./invite";
+import { copyInvite, inviteUrl, isTouchDevice, sendInvite } from "./invite";
 import InviteQrModal from "./InviteQrModal";
+import InviteSheet from "./InviteSheet";
 import HoverTip from "../../components/HoverTip";
 import { screenUrl, screenUrlLabel } from "../screen/screenModel";
 import { useSession } from "../../hooks/useSession";
@@ -85,6 +86,7 @@ function PrivateLobby() {
   const locked = !!room?.locked;
   const [streamerHide, setStreamerHide] = useState(false);
   const [showQr, setShowQr] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
   const logEvent = useMutation(api.analytics.logEvent);
   const noteInvite = (method) => {
     logEvent({ eventType: "invite_shared", metadata: { reason: method } }).catch(() => {});
@@ -101,6 +103,17 @@ function PrivateLobby() {
       showToast("Couldn't copy the link. Grab the URL from the address bar.", "warning");
     }
   };
+  /** Invite sheet: copies the full invite link. */
+  const handleCopyLink = async () => {
+    if (await copyInvite(inviteUrl(gameCode))) {
+      noteInvite("copy");
+      showToast("Invite link copied", "success");
+    } else {
+      showToast("Couldn't copy the link. Grab the URL from the address bar.", "warning");
+    }
+  };
+  // The sheet offers the system share sheet only where a phone or tablet has one.
+  const canShare = isTouchDevice() && typeof navigator !== "undefined" && typeof navigator.share === "function";
   /** Tapping the room code copies just the code, to paste into a chat. */
   const handleCopyCode = async () => {
     if (await copyInvite(gameCode)) {
@@ -119,7 +132,7 @@ function PrivateLobby() {
     if (await copyInvite(screenUrl(gameCode))) showToast("Local Play link copied", "success");
     else showToast("Couldn't copy the link.", "warning");
   };
-  // The lobby's TV icon and the Local Play card's "Turn off" switch Local Play
+  // The invite sheet's "Play on a TV" and the Local Play card's "Turn off" switch Local Play
   // in place, keeping every other setting.
   const setLocalPlay = async (on) => {
     const s = room?.settings;
@@ -379,53 +392,17 @@ function PrivateLobby() {
                         {streamerHide ? '••••••' : gameCode}
                       </button>
                     </HoverTip>
-                    {/* Share sheet on a phone; copies the full invite link elsewhere. */}
-                    <HoverTip label="Share invite link">
                     <button
                       type="button"
                       data-vital="invite"
-                      onClick={handleInvite}
-                      aria-label="Share invite link"
-                      className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
+                      onClick={() => setShowInvite(true)}
+                      className="flex items-center gap-1.5 rounded-full border border-white/20 px-3 py-1 text-xs text-gray-300 hover:text-white hover:border-white/40 transition-colors"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15" />
                       </svg>
+                      Invite
                     </button>
-                    </HoverTip>
-                    {/* A QR code on screen would show the room to a stream. */}
-                    {!streamerHide && (
-                      <HoverTip label="Show QR code">
-                      <button
-                        type="button"
-                        data-vital="invite-qr"
-                        onClick={handleShowQr}
-                        aria-label="Show QR code"
-                        className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
-                        </svg>
-                      </button>
-                      </HoverTip>
-                    )}
-                    {/* Local Play: one tap turns it on; its card then shows the screen link. */}
-                    {isHost && !room?.isPublic && !room?.settings?.localPlay && !streamerHide && (
-                      <HoverTip label="Play on a TV (Local Play)">
-                      <button
-                        type="button"
-                        data-vital="local-play-hint"
-                        onClick={() => setLocalPlay(true)}
-                        aria-label="Play on a TV (turn on Local Play)"
-                        className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 20.25h12m-7.5-3v3m3-3v3m-10.125-3h17.25c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125Z" />
-                        </svg>
-                      </button>
-                      </HoverTip>
-                    )}
                   </div>
                 </div>
                 <div className="lobby-container rounded-md lobby-count flex flex-col gap-2">
@@ -510,7 +487,7 @@ function PrivateLobby() {
                 <button
                   type="button"
                   data-vital="invite"
-                  onClick={handleInvite}
+                  onClick={() => setShowInvite(true)}
                   className="mt-4 w-full rounded-md border border-dashed border-gray-600 px-4 py-3 text-left text-sm text-gray-400 hover:border-gray-400 hover:text-white transition-colors"
                 >
                   Invite a friend to get started
@@ -543,6 +520,15 @@ function PrivateLobby() {
         streamerHide={streamerHide}
         onToggleStreamerHide={() => setStreamerHide((v) => !v)}
       />
+      {showInvite && (
+        <InviteSheet
+          onClose={() => setShowInvite(false)}
+          onShare={canShare ? handleInvite : undefined}
+          onCopyLink={handleCopyLink}
+          onShowQr={streamerHide ? undefined : handleShowQr}
+          onLocalPlay={isHost && !room?.isPublic && !room?.settings?.localPlay ? () => setLocalPlay(true) : undefined}
+        />
+      )}
       {showQr && <InviteQrModal url={inviteUrl(gameCode)} onClose={() => setShowQr(false)} />}
       <SessionTakenOverModal
         show={showTakenOverModal}

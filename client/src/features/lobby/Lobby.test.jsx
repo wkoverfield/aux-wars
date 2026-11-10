@@ -185,11 +185,40 @@ describe("Lobby Local Play card", () => {
     expect(screen.queryByText("Local Play")).toBeNull();
   });
 
-  it("has no screen icon in the invite row", () => {
+  it("one Invite button opens the invite sheet", () => {
     queryResults["game/rooms:getRoomByCode"] = { room: { settings: { localPlay: true } } };
     setPlayers();
     render(ui());
-    expect(screen.queryByRole("button", { name: /big screen/i })).toBeNull();
-    expect(screen.getByRole("button", { name: "Show QR code" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Show QR code" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    expect(screen.getByRole("dialog", { name: "Invite friends" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Copy invite link/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Show QR code/ })).toBeTruthy();
+    // Local Play is already on, so the sheet does not offer it.
+    expect(screen.queryByRole("button", { name: /Play on a TV/ })).toBeNull();
+  });
+
+  it("offers the host Play on a TV while Local Play is off, and turns it on in place", async () => {
+    queryResults["game/rooms:getRoomByCode"] = {
+      room: { settings: { numberOfRounds: 3, roundLength: 60, snippetDuration: 30, selectedPrompts: ["a"] } },
+    };
+    setPlayers();
+    render(ui());
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Play on a TV/ }));
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mutations["game/rooms:updateSettings"]).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "ABC123", numberOfRounds: 3, selectedPrompts: ["a"], localPlay: true }),
+    );
+  });
+
+  it("does not offer Play on a TV to a player who is not the host", () => {
+    queryResults["game/rooms:getRoomByCode"] = { room: { settings: {} } };
+    setPlayers({ isHost: false });
+    render(ui());
+    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    expect(screen.queryByRole("button", { name: /Play on a TV/ })).toBeNull();
   });
 });
