@@ -53,6 +53,8 @@ function PrivateLobby() {
   // Latest nickname draft from NameInput, kept in a ref so typing does not
   // re-render the whole lobby.
   const nameDraftRef = useRef(session?.playerName || "");
+  // The alone-in-the-room hint shows once per lobby visit.
+  const aloneHintShownRef = useRef(false);
   const handleDraftChange = useCallback((draft) => { nameDraftRef.current = draft; }, []);
   // Optimistic Ready value from a tap, shown until the server row matches.
   const [readyOverride, setReadyOverride] = useState(null);
@@ -287,6 +289,11 @@ function PrivateLobby() {
     if (!gameCode || !session?.playerId || !session?.connectionId) return;
     const nextReady = !isReady;
     setReadyOverride(nextReady);
+    // Ready changes nothing visible while alone, so say what is missing.
+    if (nextReady && players.length === 1 && !aloneHintShownRef.current) {
+      aloneHintShownRef.current = true;
+      showToast("You're ready. A game needs at least 2 players.", "info", 4000);
+    }
     try {
       const resp = await updatePlayerName({
         code: gameCode,

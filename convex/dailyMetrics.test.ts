@@ -28,6 +28,7 @@ function setup() {
 function emptyEvents(): DayEvents {
   return {
     detail: {
+      game_created: [],
       game_started: [],
       game_completed: [],
       game_abandoned: [],
@@ -43,7 +44,6 @@ function emptyEvents(): DayEvents {
       client_error_boundary: [],
     },
     counts: {
-      game_created: 0,
       song_submitted: 0,
       rating_submitted: 0,
       pro_purchased: 0,
@@ -131,6 +131,37 @@ describe("web vitals rollup", () => {
         inputDelay: null, processing: null, presentation: null, mobileShare: 1, script: null,
       },
     ]);
+  });
+
+  test("computeDayMetrics separates solo rooms from dead ends", () => {
+    const ev = emptyEvents();
+    ev.detail.game_created = [
+      { roomCode: "PLAY", visitorId: "a" }, // started
+      { roomCode: "TOSS", visitorId: "a" }, // solo, but its host played in PLAY
+      { roomCode: "DEAD", visitorId: "b" }, // solo, host played nothing
+      { roomCode: "PAIR", visitorId: "c" }, // second player sat down, never started
+      { roomCode: "TABS", visitorId: "d" }, // same visitor twice is still one player
+      { roomCode: "QPQP", visitorId: "e", label: "quickplay" }, // not a hosted room
+    ];
+    ev.detail.game_started = [{ roomCode: "PLAY", playerCount: 2 }];
+    ev.detail.player_joined = [
+      { roomCode: "PLAY", playerId: "1", visitorId: "a" },
+      { roomCode: "PLAY", playerId: "2", visitorId: "z" },
+      { roomCode: "TOSS", playerId: "3", visitorId: "a" },
+      { roomCode: "DEAD", playerId: "4", visitorId: "b" },
+      { roomCode: "PAIR", playerId: "5", visitorId: "c" },
+      { roomCode: "PAIR", playerId: "6", visitorId: "y" },
+      { roomCode: "TABS", playerId: "7", visitorId: "d" },
+      { roomCode: "TABS", playerId: "8", visitorId: "d" },
+      { roomCode: "QPQP", playerId: "9", visitorId: "e" },
+    ];
+    expect(computeDayMetrics(inputs({ events: ev }))).toMatchObject({
+      gamesCreated: 6,
+      hostedRooms: 5,
+      soloRooms: 3,
+      deadEndSoloRooms: 2,
+    });
+    expect(computeDayMetrics(inputs())).toMatchObject({ hostedRooms: 0, soloRooms: 0, deadEndSoloRooms: 0 });
   });
 
   test("computeDayMetrics counts invites by method", () => {
@@ -256,7 +287,8 @@ describe("computeDayMetrics", () => {
 
   test("games, players, funnel and abandonment", () => {
     const ev = emptyEvents();
-    ev.counts = { ...ev.counts, game_created: 4, song_submitted: 30, rating_submitted: 90, pro_purchased: 1 };
+    ev.detail.game_created = [{ roomCode: "AAAA" }, { roomCode: "BBBB" }, { roomCode: "CCCC" }, { roomCode: "DDDD" }];
+    ev.counts = { ...ev.counts, song_submitted: 30, rating_submitted: 90, pro_purchased: 1 };
     ev.detail.game_started = [
       { roomCode: "AAAA", playerCount: 3 },
       { roomCode: "BBBB", playerCount: 5 },

@@ -7,6 +7,12 @@ export const dailyMetricsFields = {
   date: v.string(), // UTC "YYYY-MM-DD"
   computedAt: v.number(),
   gamesCreated: v.number(),
+  // Hosted (non Quick Play) rooms created that day; those that never started
+  // and never had a second player; and, of those, the ones whose host sat in
+  // no started game that day. Optional: older rows lack them.
+  hostedRooms: v.optional(v.number()),
+  soloRooms: v.optional(v.number()),
+  deadEndSoloRooms: v.optional(v.number()),
   gamesStarted: v.number(),
   gamesCompleted: v.number(),
   gamesAbandoned: v.number(),

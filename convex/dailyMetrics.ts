@@ -44,6 +44,7 @@ export type RetentionKey = (typeof RETENTION_OFFSETS)[number]["key"];
 
 // Event types whose metadata the rollup needs, and types it only counts.
 export const DETAIL_EVENT_TYPES = [
+  "game_created",
   "game_started",
   "game_completed",
   "game_abandoned",
@@ -59,7 +60,6 @@ export const DETAIL_EVENT_TYPES = [
   "client_error_boundary",
 ] as const;
 export const COUNT_EVENT_TYPES = [
-  "game_created",
   "song_submitted",
   "rating_submitted",
   "pro_purchased",
@@ -351,6 +351,31 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
     0
   );
 
+  // Hosted (non Quick Play) rooms created that day. A room is solo when it
+  // never started and fewer than two distinct players sat in it; it is a dead
+  // end when its host also sat in no room that started that day. A room
+  // created just before midnight UTC whose players arrive after it reads solo.
+  const seatsByRoom = new Map<string, Set<string>>();
+  for (const j of joins) {
+    const key = playerKey(j);
+    if (!j.roomCode || !key) continue;
+    const seats = seatsByRoom.get(j.roomCode) ?? new Set<string>();
+    seats.add(key);
+    seatsByRoom.set(j.roomCode, seats);
+  }
+  let hostedRooms = 0;
+  let soloRooms = 0;
+  let deadEndSoloRooms = 0;
+  for (const e of detail.game_created ?? []) {
+    if (e.label === "quickplay" || !e.roomCode) continue;
+    hostedRooms++;
+    if (startedRooms.has(e.roomCode)) continue;
+    if ((seatsByRoom.get(e.roomCode)?.size ?? 0) >= 2) continue;
+    soloRooms++;
+    const host = playerKey(e);
+    if (!host || !inStarted.has(host)) deadEndSoloRooms++;
+  }
+
   const abandonedByPhase: Record<string, number> = {};
   for (const e of detail.game_abandoned) {
     const k = phaseKey(e.phase);
@@ -418,7 +443,10 @@ export function computeDayMetrics(input: DayInputs): DailyMetricsRow {
   return {
     date: input.date,
     computedAt: input.computedAt,
-    gamesCreated: counts.game_created,
+    gamesCreated: (detail.game_created ?? []).length,
+    hostedRooms,
+    soloRooms,
+    deadEndSoloRooms,
     gamesStarted: started.length,
     gamesCompleted: completed.length,
     gamesAbandoned: detail.game_abandoned.length,
