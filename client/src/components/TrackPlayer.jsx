@@ -33,6 +33,7 @@ const TrackPlayer = forwardRef(function TrackPlayer(
     autoPlay = false,
     loop = false,
     showControls = true,
+    canPickAnother = false,
     onReady,
     onTimeUpdate,
     onEnded,
@@ -52,6 +53,7 @@ const TrackPlayer = forwardRef(function TrackPlayer(
         autoPlay={autoPlay}
         loop={loop}
         showControls={showControls}
+        canPickAnother={canPickAnother}
         onReady={onReady}
         onTimeUpdate={onTimeUpdate}
         onEnded={onEnded}
@@ -75,6 +77,7 @@ const TrackPlayer = forwardRef(function TrackPlayer(
         autoPlay={autoPlay}
         loop={loop}
         showControls={showControls}
+        canPickAnother={canPickAnother}
         onReady={onReady}
         onTimeUpdate={onTimeUpdate}
         onEnded={onEnded}

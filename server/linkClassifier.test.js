@@ -28,6 +28,8 @@ test('YouTube video links carry the video id', () => {
       `https://youtu.be/${VIDEO}?t=30`,
       `https://www.youtube.com/shorts/${VIDEO}`,
       `https://youtube.com/shorts/${VIDEO}?feature=share`,
+      `https://www.youtube.com/embed/${VIDEO}`,
+      `https://www.youtube.com/live/${VIDEO}?si=AbCdEfGhIjKlMnOp`,
       `https://music.youtube.com/watch?v=${VIDEO}`,
       `https://music.youtube.com/watch?v=${VIDEO}&si=AbCdEfGhIjKlMnOp`,
       `HTTPS://WWW.YOUTUBE.COM/watch?v=${VIDEO}`,

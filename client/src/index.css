@@ -281,6 +281,14 @@ body {
   color: white;
 }
 
+/* The album backdrop is wider than the screen. "clip" (unlike "hidden") is not
+   a scroll container, so focusing a field cannot scroll the app sideways.
+   "hidden" stays first for browsers without "clip". */
+.app-root {
+  overflow: hidden;
+  overflow: clip;
+}
+
 .search-bar {
   width: 100%;
   max-width: 600px;
@@ -297,6 +305,12 @@ body {
 @media screen and (max-width: 640px) {
   .search-bar {
     min-width: unset;
+  }
+}
+
+@media screen and (max-width: 359px) {
+  .search-bar input::placeholder {
+    font-size: 14px;
   }
 }
 

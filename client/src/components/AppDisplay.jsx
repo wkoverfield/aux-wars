@@ -10,7 +10,7 @@ import albums from "./albums";
  */
 export default function AppDisplay() {
   return (
-    <div className="relative w-full h-screen overflow-hidden">
+    <div className="app-root relative w-full h-screen">
       <AlbumsDisplay albums={albums} />
       <div className="relative z-20 h-full">
         <Outlet />

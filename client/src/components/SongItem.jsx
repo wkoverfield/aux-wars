@@ -29,7 +29,7 @@ export default function SongItem({ track, selected, onSelect, onSelectSong }) {
       onClick={() => onSelect(track)}
     >
       {/* Song info section */}
-      <div className="flex items-center gap-4 w-full">
+      <div className="flex items-center gap-3 sm:gap-4 w-full min-w-0">
         {/* Album cover */}
         {albumCover && (
           <img
@@ -39,7 +39,7 @@ export default function SongItem({ track, selected, onSelect, onSelectSong }) {
             height={64}
             loading="lazy"
             decoding="async"
-            className="w-16 h-16 object-cover rounded-md"
+            className="w-16 h-16 shrink-0 object-cover rounded-md"
           />
         )}
         
@@ -61,13 +61,15 @@ export default function SongItem({ track, selected, onSelect, onSelectSong }) {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 10 }}
             transition={{ type: "spring", stiffness: 300, damping: 15 }}
-            className="flex items-center gap-2 green-btn text-black font-semibold py-2 px-4 rounded-md cursor-pointer"
+            aria-label="Select Song"
+            className="flex shrink-0 items-center gap-2 whitespace-nowrap green-btn text-black font-semibold py-2 px-3 sm:px-4 rounded-md cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
               onSelectSong(track.id);
             }}
           >
-            Select Song
+            {/* "Song" is dropped on phones so the title beside it stays readable. */}
+            <span>Select<span className="hidden sm:inline"> Song</span></span>
             <img 
               src={nextIcon} 
               alt="Arrow Right" 

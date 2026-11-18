@@ -79,7 +79,9 @@ function classifyYouTube(host, segments, params) {
   let videoId = null;
   if (isShortHost) videoId = segments[0] ?? null;
   else if (segments[0] === 'watch') videoId = params.get('v');
-  else if (segments[0] === 'shorts') videoId = segments[1] ?? null;
+  else if (['shorts', 'embed', 'live'].includes(segments[0])) videoId = segments[1] ?? null;
+  // /embed/videoseries is a playlist embed whose name happens to be id-shaped.
+  if (segments[0] === 'embed' && videoId === 'videoseries') videoId = null;
 
   if (videoId) {
     return YOUTUBE_ID_PATTERN.test(videoId)

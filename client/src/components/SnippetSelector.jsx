@@ -172,6 +172,7 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
               ref={playerRef}
               videoId={videoId}
               soundcloudUrl={soundcloudUrl}
+              canPickAnother
               name={track?.name}
               artist={artist}
               artwork={albumCover}

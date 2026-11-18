@@ -5,7 +5,7 @@ import SoundCloudPlayer from "./SoundCloudPlayer";
 
 const TRACK_URL = "https://soundcloud.com/forss/flickermood";
 const API_SRC = "https://w.soundcloud.com/player/api.js";
-const ERROR_COPY = "This SoundCloud track cannot be played here. Pick another result.";
+const ERROR_COPY = "This SoundCloud track cannot be played here.";
 const EVENTS = {
   READY: "ready",
   PLAY: "play",
@@ -271,6 +271,29 @@ describe("SoundCloudPlayer", () => {
     expect(widget.paused).toBe(false);
   });
 
+  it("offers only the playable preview of a preview-only track to the clip picker", async () => {
+    const widget = installWidget({ durationMs: 177_032 });
+    widget.getCurrentSound = (cb) => cb({ duration: 30_000, full_duration: 177_032, policy: "SNIP" });
+    const { onDuration } = await mount({ startTime: 0, endTime: 0 });
+    widget.emit(EVENTS.READY);
+    expect(onDuration).toHaveBeenCalledWith(30);
+  });
+
+  it("keeps the full length when the sound's own length matches it", async () => {
+    const widget = installWidget({ durationMs: 213_890 });
+    widget.getCurrentSound = (cb) => cb({ duration: 213_890, policy: "MONETIZE" });
+    const { onDuration } = await mount({ startTime: 0, endTime: 0 });
+    widget.emit(EVENTS.READY);
+    expect(onDuration).toHaveBeenCalledWith(213.89);
+  });
+
+  it("says to pick another result only where a result can be picked", async () => {
+    const widget = installWidget();
+    await mount({ canPickAnother: true });
+    widget.emit(EVENTS.ERROR);
+    expect(screen.getByText("This SoundCloud track cannot be played here. Pick another result.")).toBeTruthy();
+  });
+
   it("shows the error copy when the widget reports an error", async () => {
     const widget = installWidget();
     await mount();
@@ -297,19 +320,17 @@ describe("SoundCloudPlayer", () => {
     expect(screen.queryByText(ERROR_COPY)).toBeNull();
   });
 
-  it("credits the uploader and links the title and the logo to the track", async () => {
+  it("shows the official logo, linking to the track and naming the uploader", async () => {
     installWidget();
     await mount();
-    expect(screen.getByText("Forss")).toBeTruthy();
-    const title = screen.getByRole("link", { name: "Flickermood" });
-    const logo = screen.getByRole("link", { name: "Listen on SoundCloud" });
-    for (const link of [title, logo]) {
-      expect(link.getAttribute("href")).toBe(TRACK_URL);
-      expect(link.getAttribute("target")).toBe("_blank");
-      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
-    }
+    const logo = screen.getByRole("link", { name: "Listen to Flickermood by Forss on SoundCloud" });
+    expect(logo.getAttribute("href")).toBe(TRACK_URL);
+    expect(logo.getAttribute("target")).toBe("_blank");
+    expect(logo.getAttribute("rel")).toBe("noopener noreferrer");
     expect(logo.querySelector('img[alt="SoundCloud"]')).toBeTruthy();
     expect(logo.className).toContain("bg-[#121212]");
+    // The title and uploader are the surrounding screen's to show, once.
+    expect(screen.queryByText("Flickermood")).toBeNull();
   });
 
   it("hides the tap overlay when the caller draws its own controls", async () => {

@@ -34,6 +34,7 @@ import soundcloudLogo from '../assets/soundcloud-logo-white.png';
  * @param {number}   props.endTime      - window end (0 = play to natural end)
  * @param {boolean}  props.autoPlay     - attempt play once ready (mobile usually blocks → tap)
  * @param {boolean}  props.loop         - loop the window
+ * @param {boolean}  props.canPickAnother - the error state also says to pick another result (song search only)
  * @param {boolean}  props.showControls - show the branded "tap to play" overlay (default true)
  * @param {Function} props.onReady      - called with window length (seconds)
  * @param {Function} props.onTimeUpdate - called with window-relative currentTime (seconds)
@@ -90,6 +91,7 @@ const SoundCloudPlayerWithRef = forwardRef(function SoundCloudPlayerWithRef(
     autoPlay = false,
     loop = false,
     showControls = true,
+    canPickAnother = false,
     onReady,
     onTimeUpdate,
     onEnded,
@@ -271,7 +273,17 @@ const SoundCloudPlayerWithRef = forwardRef(function SoundCloudPlayerWithRef(
 
       widget.bind(events.READY, () => {
         if (cancelled || !mountedRef.current) return;
-        widget.getDuration((ms) => {
+        // A preview-only track (major-label catalog) reports its full length
+        // from getDuration but streams a shorter preview: the sound's own
+        // `duration` is what can be played, so the shorter of the two is used.
+        const whenLengthKnown = (done) => widget.getDuration((ms) => {
+          if (typeof widget.getCurrentSound !== 'function') return done(ms);
+          widget.getCurrentSound((sound) => {
+            const playable = Number(sound?.duration);
+            done(Number.isFinite(playable) && playable > 0 ? Math.min(ms || playable, playable) : ms);
+          });
+        });
+        whenLengthKnown((ms) => {
           if (cancelled || !mountedRef.current || failed) return;
           clearTimeout(readyTimer);
           const start = startRef.current || 0;
@@ -427,7 +439,7 @@ const SoundCloudPlayerWithRef = forwardRef(function SoundCloudPlayerWithRef(
         />
       )}
       {artwork && (
-        <div className="absolute inset-x-0 top-[9%] flex h-[58%] justify-center">
+        <div className="absolute inset-x-0 top-[10%] flex h-[56%] justify-center">
           <img
             src={artwork}
             alt={`${name} artwork`}
@@ -440,42 +452,29 @@ const SoundCloudPlayerWithRef = forwardRef(function SoundCloudPlayerWithRef(
         <TapToPlayOverlay onClick={handleTapToPlay} disabled={!isReady} />
       )}
 
-      {/* Credit: title and uploader, and the official logo. Title and logo
-          link to the track. Only the links take taps; the rest of the strip
-          lets them through to the play overlay. */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-between gap-3 bg-linear-to-t from-black/85 to-transparent px-3 pb-3 pt-8 @lg:gap-5 @lg:px-5 @lg:pb-5 @lg:pt-12">
-        <div className="min-w-0 text-left">
-          <a
-            href={soundcloudUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="pointer-events-auto block truncate text-sm font-semibold text-white hover:underline @lg:text-xl"
-          >
-            {name}
-          </a>
-          <p className="truncate text-xs text-white/70 @lg:text-base">{artist}</p>
-        </div>
-        <a
-          href={soundcloudUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Listen on SoundCloud"
-          className="pointer-events-auto shrink-0 rounded-md bg-[#121212] px-2.5 py-2 @lg:px-3.5 @lg:py-2.5"
-        >
-          <img
-            src={soundcloudLogo}
-            alt="SoundCloud"
-            width={200}
-            height={24}
-            className="block h-auto w-[100px] @lg:w-[150px]"
-          />
-        </a>
-      </div>
+      {/* Credit: the official logo, linking to the track. The screen around
+          the box shows the title and the uploader. Only the link takes taps;
+          everything else lets them through to the play overlay. */}
+      <a
+        href={soundcloudUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Listen to ${name || 'this track'}${artist ? ` by ${artist}` : ''} on SoundCloud`}
+        className="absolute bottom-3 right-3 z-10 rounded-md bg-[#121212] px-2.5 py-2 @lg:bottom-5 @lg:right-5 @lg:px-3.5 @lg:py-2.5"
+      >
+        <img
+          src={soundcloudLogo}
+          alt="SoundCloud"
+          width={200}
+          height={24}
+          className="block h-auto w-[100px] @lg:w-[150px]"
+        />
+      </a>
 
       {playerError && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/80 px-6 text-center">
           <p className="text-sm text-red-300">
-            This SoundCloud track cannot be played here. Pick another result.
+            This SoundCloud track cannot be played here.{canPickAnother ? " Pick another result." : ""}
           </p>
         </div>
       )}

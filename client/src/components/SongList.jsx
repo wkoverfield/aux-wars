@@ -21,7 +21,7 @@ const SongList = ({
   emptyText = "No songs found. Try searching for something else.",
 }) => {
   return (
-    <div className="song-list px-4">
+    <div className="song-list sm:px-4">
       {tracks && tracks.length > 0 ? (
         tracks.map((track) => (
           <SongItem

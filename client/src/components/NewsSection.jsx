@@ -25,7 +25,7 @@ export default function NewsSection() {
     return <p className="text-gray-400 text-sm">Loading…</p>;
   }
   if (news.length === 0) {
-    return <p className="text-gray-400 text-sm">No updates yet — stay tuned!</p>;
+    return <p className="text-gray-400 text-sm">No updates yet. Stay tuned!</p>;
   }
 
   return (

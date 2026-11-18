@@ -186,9 +186,9 @@ const RatingScreen = ({
         )}
 
         {/* Track name and artist name */}
-        <div className="flex flex-col justify-center items-center mb-3">
-          <p className="text-2xl sm:text-3xl font-semibold text-white text-center max-w-[95vw] truncate">{songToRate.name}</p>
-          <p className="text-base sm:text-lg text-gray-300 text-center max-w-[95vw] truncate">
+        <div className="flex flex-col justify-center items-center mb-3 w-full min-w-0 px-4">
+          <p className="text-2xl sm:text-3xl font-semibold text-white text-center w-full truncate">{songToRate.name}</p>
+          <p className="text-base sm:text-lg text-gray-300 text-center w-full truncate">
             {songToRate.artist}
           </p>
           <p className="text-xs text-gray-400 mt-1 text-center">
