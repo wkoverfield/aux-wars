@@ -14,7 +14,9 @@
  * titles from YouTube). The placements below are the screens without it:
  * home, lobby (private and public), the waiting screen, /faq and /aux-battle.
  * Round results, game over, song selection and rating show YouTube data and
- * have no slot. /screen (the shared TV display) never gets one either: an ad
+ * have no slot. The same screens can show SoundCloud content (the SoundCloud
+ * player, artwork and titles), which carries the same rule: no ad slot on any
+ * screen that can show SoundCloud content. /screen (the shared TV display) never gets one either: an ad
  * there is rebroadcast to a room, which AdSense counts as invalid traffic.
  * Keep AdSense Auto ads OFF for the site, since they would place ads on any
  * screen, including the ones above.

@@ -11,7 +11,8 @@ const sources = import.meta.glob(["../**/*.{js,jsx}", "!../**/*.test.{js,jsx}"],
 const fileName = (path) => path.replace(/^\.\.\//, "");
 
 // YouTube API Developer Policies III.G.1.d: no ads on a screen that shows
-// YouTube API data. These are the only screens without it (see services/ads.js).
+// YouTube API data. The same holds for any screen that can show SoundCloud
+// content. These are the only screens without either (see services/ads.js).
 const AD_SCREENS = {
   "features/lobby/Home.jsx": ["home"],
   "features/lobby/Lobby.jsx": ["lobby"],

@@ -9,19 +9,23 @@ const formatTime = (seconds) => {
 };
 
 /**
- * The clip being rated: the player (a YouTube window or an audio preview)
- * with its play button and scrubber. Playback position lives here, so the
+ * The clip being rated: the player (a YouTube or SoundCloud window, or an
+ * audio preview) with its play button and scrubber. Playback position lives here, so the
  * several-times-a-second progress ticks re-render only this component, and
  * with stable props a rating tap on the screen around it does not re-render
  * the player. Give it a `key` per song to reset it.
  *
  * @param {Object} props
  * @param {string} [props.videoId] - YouTube video id (full song)
+ * @param {string} [props.soundcloudUrl] - SoundCloud track URL (full song)
  * @param {string} [props.previewUrl] - Audio preview URL (30s clip)
+ * @param {string} [props.name] - Track title (shown by the SoundCloud player)
+ * @param {string} [props.artist] - Artist or uploader (shown by the SoundCloud player)
+ * @param {string} [props.artwork] - Artwork URL (shown by the SoundCloud player)
  * @param {number} props.startTime - Clip window start, seconds
  * @param {number} props.endTime - Clip window end, seconds
  */
-function ClipPlayer({ videoId, previewUrl, startTime, endTime }) {
+function ClipPlayer({ videoId, soundcloudUrl, previewUrl, name, artist, artwork, startTime, endTime }) {
   const [progress, setProgress] = useState(0); // 0-1 playback progress
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -29,7 +33,7 @@ function ClipPlayer({ videoId, previewUrl, startTime, endTime }) {
   const playerRef = useRef(null);
   const isSeekingRef = useRef(false); // true while dragging the scrubber, so playback ticks don't fight the thumb
 
-  const hasPlayable = !!(previewUrl || videoId);
+  const hasPlayable = !!(previewUrl || videoId || soundcloudUrl);
   if (!hasPlayable) return null;
 
   const handleTogglePlayback = () => {
@@ -50,12 +54,16 @@ function ClipPlayer({ videoId, previewUrl, startTime, endTime }) {
         <TrackPlayer
           ref={playerRef}
           videoId={videoId}
+          soundcloudUrl={soundcloudUrl}
           src={previewUrl}
+          name={name}
+          artist={artist}
+          artwork={artwork}
           startTime={startTime}
           endTime={endTime}
           autoPlay
           loop
-          showControls={!videoId}
+          showControls={!(videoId || soundcloudUrl)}
           onReady={(d) => setDuration(d)}
           onTimeUpdate={(t) => {
             if (isSeekingRef.current) return; // don't yank the thumb back mid-scrub

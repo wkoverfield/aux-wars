@@ -5,7 +5,13 @@ vi.mock("convex/react", () => ({ useMutation: () => vi.fn(async () => {}) }));
 vi.mock("../../contexts/ToastContext", () => ({ useToast: () => ({ showToast: vi.fn() }) }));
 vi.mock("../../components/TrackPlayer", () => ({ default: () => null }));
 vi.mock("../../components/ScrollFade", () => ({ default: ({ children }) => <div>{children}</div> }));
-vi.mock("./ClipPlayer", () => ({ default: () => <div data-testid="clip-player" /> }));
+let clipProps = null;
+vi.mock("./ClipPlayer", () => ({
+  default: (props) => {
+    clipProps = props;
+    return <div data-testid="clip-player" />;
+  },
+}));
 
 const { default: RatingScreen } = await import("./RatingScreen");
 
@@ -101,5 +107,45 @@ describe("RatingScreen with a big screen in the room", () => {
     renderScreen({ screenAttached: true, playOnPhone: true, onTogglePlayOnPhone: vi.fn() });
     expect(screen.getByTestId("clip-player")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Mute this phone" })).toBeTruthy();
+  });
+});
+
+describe("RatingScreen sources", () => {
+  afterEach(cleanup);
+
+  const cover = "https://i1.sndcdn.com/a.jpg";
+  const soundcloudSong = { ...song("s1"), albumCover: cover, soundcloudUrl: "https://soundcloud.com/forss/flickermood", snippet: { startTime: 30, endTime: 45 } };
+  const youtubeSong = { ...song("s1"), albumCover: cover, videoId: "v1", snippet: { startTime: 10, endTime: 40 } };
+  const previewSong = { ...song("s1"), albumCover: cover, previewUrl: "https://example.com/p.m4a" };
+  const albumArt = () => screen.queryByAltText("Song s1 album art");
+
+  it("hands a SoundCloud song to the player with its credit, and no separate cover", () => {
+    renderScreen({ songToRate: soundcloudSong });
+    expect(clipProps).toMatchObject({
+      soundcloudUrl: "https://soundcloud.com/forss/flickermood",
+      name: "Song s1",
+      artist: "A",
+      artwork: cover,
+      startTime: 30,
+      endTime: 45,
+    });
+    expect(clipProps.videoId).toBeUndefined();
+    expect(albumArt()).toBeNull(); // the SoundCloud player shows the artwork itself
+  });
+
+  it("shows the cover and mounts no SoundCloud player while a big screen plays the song", () => {
+    renderScreen({ songToRate: soundcloudSong, screenAttached: true, onTogglePlayOnPhone: vi.fn() });
+    expect(screen.queryByTestId("clip-player")).toBeNull();
+    expect(albumArt()).toBeTruthy();
+  });
+
+  it("keeps the YouTube and preview layouts", () => {
+    renderScreen({ songToRate: youtubeSong });
+    expect(clipProps).toMatchObject({ videoId: "v1", startTime: 10, endTime: 40 });
+    expect(albumArt()).toBeNull();
+    cleanup();
+    renderScreen({ songToRate: previewSong });
+    expect(clipProps).toMatchObject({ previewUrl: "https://example.com/p.m4a" });
+    expect(albumArt()).toBeTruthy();
   });
 });

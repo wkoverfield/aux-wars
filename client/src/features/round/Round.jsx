@@ -326,10 +326,12 @@ export default function Round() {
           name: trackWithSnippet.name,
           artist: trackWithSnippet.artists?.[0]?.name || "Unknown Artist",
           albumCover: trackWithSnippet.album?.images?.[0]?.url || "",
-          // A track is EITHER a YouTube video (videoId, full song) OR an
-          // iTunes/Deezer preview (previewUrl). Omit — don't null — the absent
-          // one (the validator is v.optional: undefined is fine, null is not).
+          // A track is exactly ONE of: a YouTube video (videoId, full song),
+          // a SoundCloud track (soundcloudUrl, full song) or an iTunes/Deezer
+          // preview (previewUrl). Omit — don't null — the absent ones (the
+          // validator is v.optional: undefined is fine, null is not).
           ...(trackWithSnippet.videoId ? { videoId: trackWithSnippet.videoId } : {}),
+          ...(trackWithSnippet.soundcloudUrl ? { soundcloudUrl: trackWithSnippet.soundcloudUrl } : {}),
           ...(trackWithSnippet.preview_url ? { previewUrl: trackWithSnippet.preview_url } : {}),
           ...(trackWithSnippet.snippet ? { snippet: trackWithSnippet.snippet } : {}),
         },

@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import TapToPlayOverlay from './TapToPlayOverlay';
 
 /**
  * YouTubePlayerWithRef
@@ -16,9 +17,11 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
  * titles from YouTube. So no AdSlot goes on a screen that can mount this
  * component or list YouTube picks (song selection, rating, round results,
  * game over), and none on /screen. Ads are limited to home, lobby, the
- * waiting screen, /faq and /aux-battle (see services/ads.js).
+ * waiting screen, /faq and /aux-battle (see services/ads.js). The same
+ * screens can show SoundCloud content (SoundCloudPlayer.jsx), which carries
+ * the same rule: no ad slot on any screen that can show SoundCloud content.
  *
- * @param {string}   props.videoId      - YouTube video id
+ * @param {string}   props.videoId     - YouTube video id
  * @param {number}   props.startTime    - window start (seconds into the full song)
  * @param {number}   props.endTime      - window end (0 = play to natural end)
  * @param {boolean}  props.autoPlay     - attempt play once ready (mobile usually blocks → tap)
@@ -299,22 +302,7 @@ const YouTubePlayerWithRef = forwardRef(function YouTubePlayerWithRef(
           with sound is blocked. Shown until the first play, then native
           controls take over. */}
       {showControls && !hasStarted && !playerError && (
-        <button
-          type="button"
-          onClick={handleTapToPlay}
-          aria-label="Play"
-          disabled={!isReady}
-          className="absolute inset-0 flex items-center justify-center bg-black/35 disabled:cursor-wait"
-        >
-          <span className="relative flex items-center justify-center">
-            <span className="absolute h-16 w-16 rounded-full bg-[#1db954] opacity-60 animate-ping" aria-hidden="true" />
-            <span className="relative flex items-center justify-center w-16 h-16 rounded-full bg-[#1db954] text-black shadow-lg">
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M8 5.14v13.72a1 1 0 0 0 1.54.84l10.29-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14z" />
-              </svg>
-            </span>
-          </span>
-        </button>
+        <TapToPlayOverlay onClick={handleTapToPlay} disabled={!isReady} />
       )}
     </div>
   );
