@@ -92,6 +92,22 @@ describe("Lobby ready and nickname", () => {
     expect(readyButton().textContent).toBe("Ready");
   });
 
+  it("tells a host who readies up alone that a game needs 2 players, once", async () => {
+    queryResults["game/rooms:getPlayers"] = [{ playerId: "p1", name: "Wil", isHost: true, isReady: false }];
+    render(ui());
+    await act(async () => { fireEvent.click(readyButton()); });
+    await act(async () => { fireEvent.click(readyButton()); });
+    await act(async () => { fireEvent.click(readyButton()); });
+    const hints = showToast.mock.calls.filter(([message]) => /at least 2 players/.test(message));
+    expect(hints).toHaveLength(1);
+  });
+
+  it("says nothing extra on Ready when another player is in the room", async () => {
+    render(ui());
+    await act(async () => { fireEvent.click(readyButton()); });
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
   it("keeps Ready when the player types a name after tapping it", async () => {
     const { rerender } = render(ui());
     await act(async () => { fireEvent.click(readyButton()); });

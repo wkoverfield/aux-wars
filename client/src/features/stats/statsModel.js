@@ -358,6 +358,7 @@ export function normalizeDashboard(raw, windowDays, nowMs = Date.now()) {
     retention: normalizeRetention(src.retention),
     funnel: normalizeFunnel(src.funnel),
     joinSources: normalizeJoinSources(src.joinSources),
+    hostedRooms: normalizeHostedRooms(src.hostedRooms),
     noResultSearches: normalizeCounts(
       src.topNoResultSearches ?? src.noResultSearches ?? src.searchNoResults,
       ["term", "label", "query"],
@@ -384,6 +385,26 @@ export const SPEED_METRICS = ["LCP", "INP", "CLS", "FCP"];
  * out of the share. Big screens opened, and the rooms they were opened in,
  * ride along.
  */
+/**
+ * Hosted rooms over the completed days that recorded them. `solo` never
+ * started and never had a second player; `deadEnd` is the part of `solo`
+ * whose host played no game that day. Shares are of hosted rooms.
+ */
+export function normalizeHostedRooms(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const hosted = num(src.hosted) ?? 0;
+  const solo = num(src.solo) ?? 0;
+  const deadEnd = num(src.deadEnd) ?? 0;
+  return {
+    hosted,
+    solo,
+    deadEnd,
+    days: num(src.days) ?? 0,
+    soloShare: hosted > 0 ? solo / hosted : null,
+    deadEndShare: hosted > 0 ? deadEnd / hosted : null,
+  };
+}
+
 export function normalizeJoinSources(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   const byLink = num(src.byLink) ?? 0;

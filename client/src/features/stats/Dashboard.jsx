@@ -206,7 +206,7 @@ function Retention({ retention }) {
   );
 }
 
-function Funnel({ funnel, joinSources, windowDays }) {
+function Funnel({ funnel, joinSources, hostedRooms, windowDays }) {
   const rows = funnel.map((step, i) => ({
     key: step.key,
     label: step.label,
@@ -223,6 +223,14 @@ function Funnel({ funnel, joinSources, windowDays }) {
           {joinSources.linkShare !== null ? ` (${fmtPct(joinSources.linkShare)} by link)` : ""}. Local Play screens opened:{" "}
           {fmtInt(joinSources.screensOpened)}, in {fmtInt(joinSources.roomsWithScreen)} room-days. Results links:{" "}
           {fmtInt(joinSources.resultsShared)} shared, {fmtInt(joinSources.resultsViewed)} opened. Includes today.
+        </p>
+      )}
+      {hostedRooms.hosted > 0 && (
+        <p className="text-xs text-gray-500 mt-2">
+          Hosted rooms: {fmtInt(hostedRooms.hosted)}. Never got a second player: {fmtInt(hostedRooms.solo)} (
+          {fmtPct(hostedRooms.soloShare)}). Dead ends, where the host played no game that day:{" "}
+          {fmtInt(hostedRooms.deadEnd)} ({fmtPct(hostedRooms.deadEndShare)} of hosted). Completed days only (
+          {fmtInt(hostedRooms.days)}).
         </p>
       )}
     </Card>
@@ -504,7 +512,7 @@ export default function Dashboard({ adminKey }) {
           <QuickPlay qp={dashboard.quickPlay} windowDays={windowDays} />
           <Speed speed={dashboard.speed} windowDays={windowDays} />
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <Funnel funnel={dashboard.funnel} joinSources={dashboard.joinSources} windowDays={windowDays} />
+            <Funnel funnel={dashboard.funnel} joinSources={dashboard.joinSources} hostedRooms={dashboard.hostedRooms} windowDays={windowDays} />
             <Retention retention={dashboard.retention} />
             <Abandonment rows={dashboard.abandonment} />
             <Searches searches={dashboard.searches} noResultRows={dashboard.noResultSearches} windowDays={windowDays} />

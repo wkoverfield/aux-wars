@@ -98,7 +98,6 @@ export const getLive = query({
 // game; the caps only matter on an extreme day, and `truncated` says so.
 const TODAY_EVENT_CAP = 2000;
 const LIVE_COUNT_TYPES = [
-  "game_created",
   "pro_purchased",
   "quickplay_clicked",
   "quickplay_1v1_offered",
@@ -398,6 +397,16 @@ export const getDashboard = query({
       resultsViewed: joinRows.reduce((s, r) => s + (r.resultsViewed ?? 0), 0),
     };
 
+    // Hosted rooms over completed days that carry the fields (today's rooms
+    // may still fill up, and rows from before the fields existed are skipped).
+    const roomRows = rows.filter((r) => typeof r.hostedRooms === "number");
+    const hostedRooms = {
+      hosted: roomRows.reduce((s, r) => s + (r.hostedRooms ?? 0), 0),
+      solo: roomRows.reduce((s, r) => s + (r.soloRooms ?? 0), 0),
+      deadEnd: roomRows.reduce((s, r) => s + (r.deadEndSoloRooms ?? 0), 0),
+      days: roomRows.length,
+    };
+
     const searches = new Map<string, number>();
     const phases = new Map<string, number>();
     for (const r of rows) {
@@ -443,6 +452,7 @@ export const getDashboard = query({
       },
       funnel,
       joinSources,
+      hostedRooms,
       topNoResultSearches,
       searches: { noResults: searchNoResults, failed: searchFailed, failedByReason: searchFailedByReason },
       abandonmentByPhase,
