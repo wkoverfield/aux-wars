@@ -10,9 +10,9 @@ import { fallBackToOriginal, largeCoverArt } from "../../utils/coverArt";
 
 /**
  * RatingScreen component provides an interface for rating songs during the game.
- * Plays the submitted clip — a chosen window of a full YouTube song, or an
- * iTunes/Deezer 30s preview (TrackPlayer picks per source) — shows album art (or
- * the video), and a 5-star rating system. In spectator mode, shows the player
+ * Plays the submitted clip — a chosen window of a full YouTube or SoundCloud
+ * song, or an iTunes/Deezer 30s preview (TrackPlayer picks per source) — shows
+ * album art (or the video / SoundCloud player), and a 5-star rating system. In spectator mode, shows the player
  * but hides voting controls (for the player's own song).
  *
  * @param {Object} props - Component props
@@ -50,6 +50,7 @@ const RatingScreen = ({
 
   const previewUrl = songToRate?.previewUrl;
   const videoId = songToRate?.videoId;
+  const soundcloudUrl = songToRate?.soundcloudUrl;
   const snippet = songToRate?.snippet;
   const startTime = snippet?.startTime ?? 0;
   const endTime = snippet?.endTime ?? 0;
@@ -135,9 +136,10 @@ const RatingScreen = ({
           <p>Rating Song {currentIndex + 1} of {totalSongs}</p>
         </div>
 
-        {/* Album art — for preview tracks; YouTube tracks show the video instead.
-            Sizes off viewport HEIGHT so it shrinks on short/landscape screens. */}
-        {songToRate?.albumCover && (!videoId || silent) && (
+        {/* Album art — for preview tracks; YouTube tracks show the video and
+            SoundCloud tracks their own player box instead. Sizes off viewport
+            HEIGHT so it shrinks on short/landscape screens. */}
+        {songToRate?.albumCover && (!(videoId || soundcloudUrl) || silent) && (
           <div className="mb-3 flex justify-center">
             <img
               src={largeCoverArt(songToRate.albumCover)}
@@ -154,7 +156,11 @@ const RatingScreen = ({
           <ClipPlayer
             key={songToRate?.songId}
             videoId={videoId}
+            soundcloudUrl={soundcloudUrl}
             previewUrl={previewUrl}
+            name={songToRate?.name}
+            artist={songToRate?.artist}
+            artwork={songToRate?.albumCover}
             startTime={startTime}
             endTime={endTime}
           />

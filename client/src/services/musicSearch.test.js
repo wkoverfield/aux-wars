@@ -54,7 +54,7 @@ describe("searchTracks", () => {
     fetch.mockResolvedValue(jsonResponse({ tracks: [TRACK] }));
     const link = "https://youtu.be/AbCdEfGhIjk?si=XyZ_123-abc&t=42";
     await searchTracks(link);
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ query: link });
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ query: link, sources: ["soundcloud"] });
   });
 
   it("caches links that differ only in case separately, and text regardless of case", async () => {
@@ -91,6 +91,20 @@ describe("searchTracks", () => {
     await expect(searchTracks("zzzz no such song")).resolves.toEqual([]);
     await expect(searchTracks("zzzz no such song")).resolves.toEqual([]);
     expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("remembers why a pasted link has no track, until the next answer for it", async () => {
+    const { searchTracks, getUnplayableReason } = await load();
+    const link = "https://soundcloud.com/forss/flickermood";
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ tracks: [], resolvedFrom: "soundcloud", unplayable: "soundcloud_embed_off" }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [TRACK], resolvedFrom: "soundcloud" }));
+
+    expect(getUnplayableReason(link)).toBeNull();
+    await searchTracks(link);
+    expect(getUnplayableReason(link)).toBe("soundcloud_embed_off");
+    await searchTracks(link);
+    expect(getUnplayableReason(link)).toBeNull();
   });
 
   it("resolves tracks from a 200", async () => {

@@ -11,7 +11,9 @@ the switches below). This doc is the paint-by-numbers finish line.
   restore stays disabled until it is a real magic-link flow.
 - **Ads (dark)**: AdSense `<AdSlot>` on Home, Lobby (private and public), Waiting, /faq and
   /aux-battle. Never on a screen that shows YouTube API data (song pick, rating, round results,
-  game over) and never on /screen; the rule is in `client/src/services/ads.js`. Auto-suppressed in
+  game over) and never on /screen; the rule is in `client/src/services/ads.js`. The same screens
+  can show SoundCloud content, which carries the same rule: no ad slot on any screen that can show
+  SoundCloud content. Auto-suppressed in
   Pro rooms. Consent comes from Google's CMP (AdSense Privacy & messaging); the app has no banner of
   its own. Renders nothing until `VITE_ADSENSE_CLIENT` and placement slot IDs are set.
 - **Tip jar**: Buy Me a Coffee, already live on the homepage.
@@ -48,7 +50,7 @@ the switches below). This doc is the paint-by-numbers finish line.
       `VITE_ADSENSE_SLOT_FAQ`, `VITE_ADSENSE_SLOT_AUX_BATTLE`.
 - [ ] In AdSense > Privacy & messaging, publish the European regulations message (Google's
       certified CMP) and the US state regulations message.
-- [ ] Keep Auto ads off: they would place ads on screens that show YouTube data.
+- [ ] Keep Auto ads off: they would place ads on screens that show YouTube or SoundCloud content.
 - [ ] Before setting `VITE_ADSENSE_CLIENT`: make PostHog follow the consent choice. The homemade
       banner (which also opted PostHog out) is gone, and a decline in Google's message does not
       reach PostHog on its own. Read the CMP signal (`__tcfapi` / Consent Mode) in

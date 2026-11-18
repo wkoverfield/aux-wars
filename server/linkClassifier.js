@@ -26,7 +26,7 @@
 export const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 export const SPOTIFY_ID_PATTERN = /^[A-Za-z0-9]{22}$/;
 export const SHORT_CODE_PATTERN = /^[A-Za-z0-9]{1,40}$/;
-const SLUG_PATTERN = /^[A-Za-z0-9_-]{1,255}$/;
+export const SLUG_PATTERN = /^[A-Za-z0-9_-]{1,255}$/;
 
 const YOUTUBE_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com']);
 const YOUTUBE_SHORT_HOST = 'youtu.be';

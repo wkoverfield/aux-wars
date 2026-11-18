@@ -36,18 +36,43 @@ vi.mock("./SongSelection", () => ({
   default: ({ onSelectSong, onSelectionChange }) => (
     <>
       <button onClick={() => onSelectSong({ id: "t1", name: "Track", artists: [{ name: "A" }] })}>pick track</button>
+      <button onClick={() => onSelectSong(SOUNDCLOUD_TRACK)}>pick soundcloud track</button>
+      <button onClick={() => onSelectSong(YOUTUBE_TRACK)}>pick youtube track</button>
       {!onSelectionChange && <span>selection locked</span>}
     </>
   ),
 }));
 vi.mock("../../components/SnippetSelector", () => ({
   default: ({ onConfirm, track }) => (
-    <button onClick={() => onConfirm({ ...track, snippet: null })}>confirm snippet</button>
+    <>
+      <button onClick={() => onConfirm({ ...track, snippet: null })}>confirm snippet</button>
+      <button onClick={() => onConfirm({ ...track, snippet: { startTime: 30, endTime: 45 } })}>confirm clip</button>
+    </>
   ),
 }));
 vi.mock("./WaitingScreen", () => ({ default: ({ message }) => <div>{message}</div> }));
 
 const { default: Round } = await import("./Round");
+
+// Search results as the music server returns them (app track shape).
+const SOUNDCLOUD_TRACK = {
+  id: "sc:forss/flickermood",
+  soundcloudUrl: "https://soundcloud.com/forss/flickermood",
+  name: "Flickermood",
+  artists: [{ name: "Forss" }],
+  album: { name: "", images: [{ url: "https://i1.sndcdn.com/a.jpg" }] },
+  preview_url: null,
+  duration_ms: 0,
+  external_url: "https://soundcloud.com/forss/flickermood",
+};
+const YOUTUBE_TRACK = {
+  id: "yt:v1",
+  videoId: "v1",
+  name: "Video",
+  artists: [{ name: "Channel" }],
+  album: { name: "", images: [{ url: "https://i.ytimg.com/vi/v1/hqdefault.jpg" }] },
+  preview_url: null,
+};
 
 function renderRound() {
   return render(
@@ -123,7 +148,7 @@ describe("Round song submit", () => {
   beforeEach(() => mutation.mockReset());
   afterEach(cleanup);
 
-  function openSnippetSelector() {
+  function openSnippetSelector(pick = "pick track") {
     setQueries({
       "game/rooms:getRoomByCode": { phase: "songSelection", currentRound: 1, settings: {} },
       "game/flow:getCurrentRatingSong": null,
@@ -131,7 +156,7 @@ describe("Round song submit", () => {
     });
     renderRound();
     fireEvent.click(screen.getByText("round start"));
-    fireEvent.click(screen.getByText("pick track"));
+    fireEvent.click(screen.getByText(pick));
   }
 
   it("closes the snippet selector before the submit resolves and reopens it on failure", async () => {
@@ -149,6 +174,45 @@ describe("Round song submit", () => {
     openSnippetSelector();
     await act(async () => { fireEvent.click(screen.getByText("confirm snippet")); });
     expect(screen.queryByText("confirm snippet")).toBeNull();
+  });
+
+  const submittedTrack = () => mutation.mock.calls.map(([args]) => args).find((args) => args?.trackId);
+
+  it("submits a SoundCloud pick as soundcloudUrl with its clip window and no other source", async () => {
+    mutation.mockResolvedValue({ success: true });
+    openSnippetSelector("pick soundcloud track");
+    await act(async () => { fireEvent.click(screen.getByText("confirm clip")); });
+    const args = submittedTrack();
+    expect(args.trackId).toBe("sc:forss/flickermood");
+    expect(args.trackDetails).toEqual({
+      name: "Flickermood",
+      artist: "Forss",
+      albumCover: "https://i1.sndcdn.com/a.jpg",
+      soundcloudUrl: "https://soundcloud.com/forss/flickermood",
+      snippet: { startTime: 30, endTime: 45 },
+    });
+    // Absent sources are omitted, never null.
+    expect("videoId" in args.trackDetails).toBe(false);
+    expect("previewUrl" in args.trackDetails).toBe(false);
+  });
+
+  it("submits a full-song SoundCloud pick without a snippet", async () => {
+    mutation.mockResolvedValue({ success: true });
+    openSnippetSelector("pick soundcloud track");
+    await act(async () => { fireEvent.click(screen.getByText("confirm snippet")); });
+    const { trackDetails } = submittedTrack();
+    expect(trackDetails.soundcloudUrl).toBe("https://soundcloud.com/forss/flickermood");
+    expect("snippet" in trackDetails).toBe(false);
+  });
+
+  it("still submits a YouTube pick as videoId only", async () => {
+    mutation.mockResolvedValue({ success: true });
+    openSnippetSelector("pick youtube track");
+    await act(async () => { fireEvent.click(screen.getByText("confirm clip")); });
+    const { trackDetails } = submittedTrack();
+    expect(trackDetails.videoId).toBe("v1");
+    expect("soundcloudUrl" in trackDetails).toBe(false);
+    expect("previewUrl" in trackDetails).toBe(false);
   });
 });
 

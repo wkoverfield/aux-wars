@@ -11,20 +11,34 @@
  *   YouTube playlist no tracks
  *   Spotify track    title from Spotify oEmbed, artist from the public track
  *                    page, then a text search of "title artist"
- *   SoundCloud       no tracks (recognized, not resolved)
- *   any other link   no tracks
+ *   SoundCloud track that exact track as the only track, titled from
+ *                    SoundCloud oEmbed; no tracks when oEmbed has no answer
+ *                    or answers with anything but a track (a profile page, a
+ *                    set, a private or removed track)
+ *   SoundCloud short resolved as the SoundCloud track link its
+ *                    on.soundcloud.com redirect points at (the SoundCloud
+ *                    app's "Copy link" gives this form); no tracks when the
+ *                    redirect points at anything else
+ *   any other link   no tracks (SoundCloud sets and profiles included)
+ *
+ * SoundCloud oEmbed also answers an on.soundcloud.com link directly, but that
+ * answer names the track only by its numeric id, never by its
+ * soundcloud.com/<user>/<track> address, which is the form a stored track
+ * needs. The address is in the short link's redirect.
  *
  * OUTBOUND REQUESTS: the pasted URL itself is never fetched. Requests go only
  * to the fixed endpoints built below, from ids the classifier has already
  * matched against their patterns (each builder checks again). No request
- * follows a redirect; the one redirect that is read (spotify.link) is accepted
- * only when it points at an open.spotify.com track. All lookups for one search
- * share a single deadline, and a lookup that fails or runs out of time counts
- * as "nothing readable".
+ * follows a redirect. The two redirects that are read (spotify.link,
+ * on.soundcloud.com) are accepted only when they point at an https track link
+ * of their own service, and only the ids in that link are used. All lookups
+ * for one search share a single deadline, and a lookup that fails or runs out
+ * of time counts as "nothing readable".
  */
 import {
   classifyLink,
   SHORT_CODE_PATTERN,
+  SLUG_PATTERN,
   SPOTIFY_ID_PATTERN,
   YOUTUBE_ID_PATTERN,
 } from './linkClassifier.js';
@@ -35,8 +49,13 @@ export const LINK_LOOKUP_TIMEOUT_MS = 2500;
 // The track page is ~280 KB; its metadata sits in the first few KB.
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TEXT_LENGTH = 120;
+// submitSong (convex/game/flow.ts) rejects a longer soundcloudUrl, so a track
+// that could not be submitted is not offered.
+const MAX_SOUNDCLOUD_URL_LENGTH = 300;
 
 const NO_TRACKS = Object.freeze({ tracks: [], source: null });
+/** Why a recognized link has no track: its uploader does not allow embedding. */
+export const SOUNDCLOUD_EMBED_OFF = 'soundcloud_embed_off';
 
 /**
  * @param {string} term - Trimmed search query
@@ -45,11 +64,16 @@ const NO_TRACKS = Object.freeze({ tracks: [], source: null });
  *   The normal text search.
  * @param {(item: { id: string, title: string, channelTitle?: string }) => Object} deps.mapYouTubeTrack
  *   Builds the app track shape for a YouTube video.
+ * @param {string[]} [deps.sources]
+ *   Extra track sources the caller can play. A SoundCloud link answers with
+ *   its track only when this lists "soundcloud"; a client that predates
+ *   SoundCloud playback sends nothing and gets no tracks.
  * @param {typeof fetch} [deps.fetchImpl]
  * @param {number} [deps.timeoutMs]
  * @param {{ error: Function }} [deps.logger]
  * @returns {Promise<{ tracks: Array, source: string | null, resolvedFrom?: string }>}
  *   `resolvedFrom` is the link kind, present only when the query was a link.
+ *   `unplayable` names why a recognized link has no track, when that is known.
  */
 export async function resolveSearch(term, deps) {
   const link = classifyLink(term);
@@ -58,13 +82,14 @@ export async function resolveSearch(term, deps) {
   const ctx = {
     searchText: deps.searchText,
     mapYouTubeTrack: deps.mapYouTubeTrack,
+    playsSoundCloud: Array.isArray(deps.sources) && deps.sources.includes('soundcloud'),
     fetchImpl: deps.fetchImpl ?? globalThis.fetch,
     logger: deps.logger ?? console,
     signal: AbortSignal.timeout(deps.timeoutMs ?? LINK_LOOKUP_TIMEOUT_MS),
   };
 
-  const { tracks, source } = await resolveLink(link, ctx);
-  return { tracks, source, resolvedFrom: link.kind };
+  const { tracks, source, unplayable } = await resolveLink(link, ctx);
+  return { tracks, source, resolvedFrom: link.kind, ...(unplayable ? { unplayable } : {}) };
 }
 
 function resolveLink(link, ctx) {
@@ -74,9 +99,7 @@ function resolveLink(link, ctx) {
     case 'spotify':
       return resolveSpotify(link, ctx);
     case 'soundcloud':
-      // Recognized so the search answers "no tracks" instead of searching the
-      // URL as text. SoundCloud tracks are not resolved or played.
-      return NO_TRACKS;
+      return ctx.playsSoundCloud ? resolveSoundCloud(link, ctx) : NO_TRACKS;
     default:
       return NO_TRACKS;
   }
@@ -122,24 +145,114 @@ async function resolveSpotify(link, ctx) {
   return ctx.searchText(artist ? `${title} ${artist}` : title);
 }
 
+async function resolveSoundCloud(pasted, ctx) {
+  const link = pasted.shortCode
+    ? await lookup(ctx, 'on.soundcloud.com', () => followSoundCloudShortLink(pasted.shortCode, ctx))
+    : pasted;
+  if (!link) return NO_TRACKS;
+
+  const soundcloudUrl = soundCloudTrackUrl(link.user, link.track);
+  if (soundcloudUrl.length > MAX_SOUNDCLOUD_URL_LENGTH) return NO_TRACKS;
+
+  // oEmbed answers 403 for a public track whose uploader has turned off
+  // "Display embed code". The widget cannot play it, so say why.
+  let embedRefused = false;
+  const oembed = await lookup(ctx, 'SoundCloud oEmbed', async () => {
+    try {
+      return JSON.parse(await fetchText(soundCloudOEmbedUrl(soundcloudUrl), ctx));
+    } catch (error) {
+      embedRefused = error?.status === 403;
+      throw error;
+    }
+  });
+  if (embedRefused) return { ...NO_TRACKS, unplayable: SOUNDCLOUD_EMBED_OFF };
+  if (!isSoundCloudTrackEmbed(oembed)) return NO_TRACKS;
+
+  const name = soundCloudTitle(oembed.title, oembed.author_name);
+  if (!name) return NO_TRACKS;
+
+  const track = {
+    id: `sc:${link.user}/${link.track}`,
+    soundcloudUrl,
+    name,
+    artists: [{ name: plainText(oembed.author_name) || link.user }],
+    album: { name: '', images: [{ url: httpsUrl(oembed.thumbnail_url) }] },
+    preview_url: null, // plays through the SoundCloud widget, not a 30s clip
+    duration_ms: 0,
+    external_url: soundcloudUrl,
+  };
+  return { tracks: [track], source: 'soundcloud' };
+}
+
+/**
+ * Whether an oEmbed answer embeds a single track. A two-segment path can also
+ * be a profile page (soundcloud.com/<user>/tracks), which oEmbed answers with
+ * 200 and a users embed; a set answers with a playlists embed.
+ */
+function isSoundCloudTrackEmbed(oembed) {
+  return (
+    typeof oembed?.html === 'string' && /api\.soundcloud\.com(?:%2F|\/)tracks(?:%2F|\/)/i.test(oembed.html)
+  );
+}
+
+/**
+ * The track title from an oEmbed title, which reads "Title by Uploader". The
+ * " by Uploader" ending is removed only when it names the answer's own
+ * author_name, so a title that merely contains " by " keeps it.
+ */
+function soundCloudTitle(title, authorName) {
+  if (typeof title !== 'string') return '';
+  const ending = typeof authorName === 'string' && authorName ? ` by ${authorName}` : '';
+  const name = ending && title.endsWith(ending) ? title.slice(0, -ending.length) : title;
+  return plainText(name) || plainText(title);
+}
+
+/** An https URL from metadata, or '' when the value is anything else. */
+function httpsUrl(value) {
+  const url = typeof value === 'string' ? absoluteUrl(value) : null;
+  return url?.protocol === 'https:' ? url.href : '';
+}
+
 /**
  * Reads where a spotify.link short link points, without following it.
  * @returns {Promise<string | null>} A Spotify track id, or null when the link
  *   does not redirect straight to an open.spotify.com track.
  */
 async function followSpotifyShortLink(shortCode, ctx) {
-  const response = await ctx.fetchImpl(spotifyShortLinkUrl(shortCode), {
-    redirect: 'manual',
-    signal: ctx.signal,
-  });
+  const target = await redirectTarget(spotifyShortLinkUrl(shortCode), ctx);
+  if (target?.hostname !== 'open.spotify.com') return null;
+
+  const link = classifyLink(target.href);
+  return link.kind === 'spotify' && link.trackId ? link.trackId : null;
+}
+
+/**
+ * Reads where an on.soundcloud.com short link points, without following it.
+ * @returns {Promise<{ user: string, track: string } | null>} The track's
+ *   slugs, or null when the link does not redirect straight to a
+ *   soundcloud.com track (a set, a profile, a private share link, a second
+ *   short link, another site).
+ */
+async function followSoundCloudShortLink(shortCode, ctx) {
+  const target = await redirectTarget(soundCloudShortLinkUrl(shortCode), ctx);
+  if (!target) return null;
+
+  const link = classifyLink(target.href);
+  return link.kind === 'soundcloud' && link.user && link.track ? { user: link.user, track: link.track } : null;
+}
+
+/**
+ * The Location of a redirect answer, read without following it.
+ * @returns {Promise<URL | null>} Null unless the answer is a 3xx whose
+ *   Location is an absolute https URL.
+ */
+async function redirectTarget(url, ctx) {
+  const response = await ctx.fetchImpl(url, { redirect: 'manual', signal: ctx.signal });
   await response.body?.cancel();
   if (response.status < 300 || response.status >= 400) return null;
 
   const target = absoluteUrl(response.headers.get('location'));
-  if (!target || target.protocol !== 'https:' || target.hostname !== 'open.spotify.com') return null;
-
-  const link = classifyLink(target.href);
-  return link.kind === 'spotify' && link.trackId ? link.trackId : null;
+  return target?.protocol === 'https:' ? target : null;
 }
 
 function absoluteUrl(text) {
@@ -178,6 +291,20 @@ function spotifyShortLinkUrl(shortCode) {
   return `https://spotify.link/${checkedId(SHORT_CODE_PATTERN, shortCode)}`;
 }
 
+/** The track's canonical address: bare host, no query, no fragment. */
+function soundCloudTrackUrl(user, track) {
+  return `https://soundcloud.com/${checkedId(SLUG_PATTERN, user)}/${checkedId(SLUG_PATTERN, track)}`;
+}
+
+function soundCloudShortLinkUrl(shortCode) {
+  return `https://on.soundcloud.com/${checkedId(SHORT_CODE_PATTERN, shortCode)}`;
+}
+
+function soundCloudOEmbedUrl(trackUrl) {
+  const params = new URLSearchParams({ format: 'json', url: trackUrl });
+  return `https://soundcloud.com/oembed?${params.toString()}`;
+}
+
 // --- Fetching ---------------------------------------------------------------
 
 /** Runs one lookup; any failure (HTTP, parse, timeout) resolves to null. */
@@ -195,7 +322,7 @@ async function fetchText(url, ctx) {
   const response = await ctx.fetchImpl(url, { redirect: 'manual', signal: ctx.signal });
   if (response.status !== 200) {
     await response.body?.cancel();
-    throw new Error(`responded ${response.status}`);
+    throw Object.assign(new Error(`responded ${response.status}`), { status: response.status });
   }
   const reader = response.body?.getReader();
   if (!reader) return '';

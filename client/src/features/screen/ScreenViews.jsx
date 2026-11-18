@@ -252,8 +252,8 @@ export function ScreenSelection({ room, players }) {
 
 /**
  * The song being rated: plays out loud here, once (no loop: the server
- * moves on shortly after the clip ends), with its art or video and a
- * progress bar. Give it a `key` per song to reset it.
+ * moves on shortly after the clip ends), with its art, video or SoundCloud
+ * player and a progress bar. Give it a `key` per song to reset it.
  */
 const ScreenClip = memo(function ScreenClip({ song, audioOn, coverSize = 420 }) {
   const playerRef = useRef(null);
@@ -263,6 +263,9 @@ const ScreenClip = memo(function ScreenClip({ song, audioOn, coverSize = 420 }) 
   const [blocked, setBlocked] = useState(false);
   const [started, setStarted] = useState(false); // has played at least once
   const videoId = song?.videoId;
+  const soundcloudUrl = song?.soundcloudUrl;
+  // YouTube and SoundCloud draw their own box; a preview shows the cover.
+  const hasPlayerBox = !!(videoId || soundcloudUrl);
   const startTime = song?.snippet?.startTime ?? 0;
   const endTime = song?.snippet?.endTime ?? 0;
 
@@ -288,7 +291,7 @@ const ScreenClip = memo(function ScreenClip({ song, audioOn, coverSize = 420 }) 
   return (
     <div className="flex flex-col gap-5 w-full">
       <div className="relative">
-        {!videoId && song?.albumCover && (
+        {!hasPlayerBox && song?.albumCover && (
           <img
             src={largeCoverArt(song.albumCover)}
             onError={fallBackToOriginal(song.albumCover)}
@@ -297,11 +300,15 @@ const ScreenClip = memo(function ScreenClip({ song, audioOn, coverSize = 420 }) 
             style={{ width: coverSize, height: coverSize }}
           />
         )}
-        <div className={videoId ? "w-full" : "hidden"}>
+        <div className={hasPlayerBox ? "w-full" : "hidden"}>
           <TrackPlayer
             ref={playerRef}
             videoId={videoId}
+            soundcloudUrl={soundcloudUrl}
             src={song?.previewUrl}
+            name={song?.name}
+            artist={song?.artist}
+            artwork={song?.albumCover}
             startTime={startTime}
             endTime={endTime}
             autoPlay={audioOn}
@@ -362,7 +369,7 @@ export function ScreenRating({ code, room, song, audioOn }) {
       data-vital="screen-rating"
       className={`h-full w-full flex text-white ${portrait ? "flex-col justify-center gap-9 px-12 pt-20 pb-12" : "items-center gap-14 px-16 pt-16 pb-12"}`}
     >
-      <div className={portrait ? "w-full" : `${song?.videoId ? "w-[620px]" : "w-[440px]"} shrink-0`}>
+      <div className={portrait ? "w-full" : `${song?.videoId || song?.soundcloudUrl ? "w-[620px]" : "w-[440px]"} shrink-0`}>
         <ScreenClip key={song?.songId} song={song} audioOn={audioOn} coverSize={portrait ? 480 : 420} />
       </div>
       <div className={`flex flex-col ${portrait ? "gap-9" : "flex-1 min-w-0 gap-8"}`}>

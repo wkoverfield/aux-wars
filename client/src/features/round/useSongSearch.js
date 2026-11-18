@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { searchTracks, getCachedResults, SearchError } from "../../services/musicSearch";
+import { searchTracks, getCachedResults, getUnplayableReason, SearchError } from "../../services/musicSearch";
 
 // After this long without an answer, the search shows "Still searching..." and a Retry.
 export const SEARCH_SLOW_MS = 3000;
@@ -62,7 +62,11 @@ export function useSongSearch({ onNoResults, onFailed } = {}) {
 
         setSearchResults(result);
         if (result.length === 0) {
-          setSearchError("No songs found. Try different keywords.");
+          setSearchError(
+            getUnplayableReason(searchTerm) === "soundcloud_embed_off"
+              ? "This SoundCloud track can't be played here. Its uploader has embedding turned off."
+              : "No songs found. Try different keywords."
+          );
           if (searchTerm.trim().length >= 3) onNoResultsRef.current?.(searchTerm.trim());
         } else {
           setSearchError(null);

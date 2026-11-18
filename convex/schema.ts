@@ -264,11 +264,14 @@ export default defineSchema({
       name: v.string(),
       artist: v.string(),
       albumCover: v.string(),
-      // A track is EITHER a YouTube video (videoId, full song) OR an
-      // iTunes/Deezer preview (previewUrl, 30s). Both optional so either
-      // source validates; existing rows all have previewUrl.
+      // A track has exactly one source: a YouTube video (videoId, full
+      // song), a SoundCloud track (soundcloudUrl, full song) or an
+      // iTunes/Deezer preview (previewUrl, 30s). All optional so each source
+      // validates; submitSong rejects a track carrying more than one.
       previewUrl: v.optional(v.string()),
       videoId: v.optional(v.string()),
+      // Canonical https://soundcloud.com/<user>/<track>, checked by submitSong.
+      soundcloudUrl: v.optional(v.string()),
       snippet: v.optional(
         v.object({ startTime: v.number(), endTime: v.number() })
       ),

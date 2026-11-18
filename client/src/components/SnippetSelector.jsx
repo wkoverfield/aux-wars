@@ -5,16 +5,16 @@ import TrackPlayer from './TrackPlayer';
 /**
  * SnippetSelector — pick the clip to submit.
  *
- * YouTube track (full song): a window picker. Slide a fixed-length window
- * (snippetDuration; 0 = full song) to ANY point in the song and the preview
- * re-plays that window live so you HEAR the part you're choosing. Submits
- * `snippet: { startTime, endTime }`.
+ * YouTube or SoundCloud track (full song): a window picker. Slide a
+ * fixed-length window (snippetDuration; 0 = full song) to ANY point in the
+ * song and the preview re-plays that window live so you HEAR the part you're
+ * choosing. Submits `snippet: { startTime, endTime }`.
  *
  * iTunes/Deezer track (30s preview, fallback): just preview & confirm — the
  * whole clip is the snippet, so `snippet` is null.
  *
  * @param {Object}   props.ref             - React 19 ref; exposes getCurrentSelection() for auto-submit on timer expiry
- * @param {Object}   props.track           - The selected track (app shape; videoId => YouTube)
+ * @param {Object}   props.track           - The selected track (app shape; videoId => YouTube, soundcloudUrl => SoundCloud)
  * @param {Function} props.onConfirm       - Called with the track (+ snippet) to submit
  * @param {Function} props.onCancel        - Called when the player backs out
  * @param {number}   props.snippetDuration - Window length in seconds (0 = full song); default 30
@@ -22,6 +22,9 @@ import TrackPlayer from './TrackPlayer';
 export default function SnippetSelector({ track, onConfirm, onCancel, snippetDuration = 30, ref }) {
   const playerRef = useRef(null);
   const videoId = track?.videoId;
+  const soundcloudUrl = track?.soundcloudUrl;
+  // A full-song source: the clip is a window the player picks.
+  const fullSong = !!(videoId || soundcloudUrl);
   const albumCover = track?.album?.images?.[0]?.url;
   const artist = track?.artists?.[0]?.name || '';
 
@@ -38,7 +41,7 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
 
   const maxStart = len > 0 && duration > 0 ? Math.max(0, duration - len) : 0;
   const end = len > 0 ? Math.min(start + len, duration > 0 ? duration : start + len) : 0;
-  const isWindowed = !!videoId && len > 0;
+  const isWindowed = fullSong && len > 0;
   const startPercent = duration > 0 ? (Math.min(start, maxStart) / duration) * 100 : 0;
   const windowPercent = duration > 0 ? Math.min(100, (len / duration) * 100) : 0;
   const playedWindowPercent = len > 0 ? Math.min(100, (Math.min(previewTime, len) / len) * 100) : 0;
@@ -57,11 +60,11 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
 
   useEffect(() => {
     setPreviewTime(0);
-  }, [start, videoId]);
+  }, [start, videoId, soundcloudUrl]);
 
-  // Build what we submit. YouTube + a real window => snippet; otherwise null.
+  // Build what we submit. Full song + a real window => snippet; otherwise null.
   const buildSelection = () => {
-    if (!videoId || len === 0 || duration === 0) {
+    if (!fullSong || len === 0 || duration === 0) {
       return { ...track, snippet: null };
     }
     return {
@@ -74,7 +77,7 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
     ref,
     () => ({ getCurrentSelection: () => buildSelection() }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [track, start, duration, len, videoId]
+    [track, start, duration, len, fullSong]
   );
 
   // Latest handlers in refs so the keydown listener binds once but never goes stale.
@@ -162,12 +165,16 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
           {isWindowed ? 'Drag the clip to the part you want everyone to hear.' : 'Have a listen, then lock it in.'}
         </p>
 
-        {/* Media: YouTube video (windowed) OR album art + audio preview */}
-        {videoId ? (
+        {/* Media: YouTube video or SoundCloud player (windowed) OR album art + audio preview */}
+        {fullSong ? (
           <div className="mb-5">
             <TrackPlayer
               ref={playerRef}
               videoId={videoId}
+              soundcloudUrl={soundcloudUrl}
+              name={track?.name}
+              artist={artist}
+              artwork={albumCover}
               startTime={start}
               endTime={end}
               autoPlay
@@ -201,7 +208,7 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
           <p className="text-gray-400 truncate">{artist}</p>
         </div>
 
-        {/* Window picker — YouTube + a real clip length only */}
+        {/* Window picker — full-song source + a real clip length only */}
         {isWindowed && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
@@ -262,7 +269,7 @@ export default function SnippetSelector({ track, onConfirm, onCancel, snippetDur
         )}
 
         {/* Full-song mode note */}
-        {!!videoId && len === 0 && (
+        {fullSong && len === 0 && (
           <p className="text-center text-sm text-gray-400 mb-6">Playing the full song.</p>
         )}
 
