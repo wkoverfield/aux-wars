@@ -54,6 +54,8 @@ const MAX_TEXT_LENGTH = 120;
 const MAX_SOUNDCLOUD_URL_LENGTH = 300;
 
 const NO_TRACKS = Object.freeze({ tracks: [], source: null });
+/** Why a recognized link has no track: its uploader does not allow embedding. */
+export const SOUNDCLOUD_EMBED_OFF = 'soundcloud_embed_off';
 
 /**
  * @param {string} term - Trimmed search query
@@ -71,6 +73,7 @@ const NO_TRACKS = Object.freeze({ tracks: [], source: null });
  * @param {{ error: Function }} [deps.logger]
  * @returns {Promise<{ tracks: Array, source: string | null, resolvedFrom?: string }>}
  *   `resolvedFrom` is the link kind, present only when the query was a link.
+ *   `unplayable` names why a recognized link has no track, when that is known.
  */
 export async function resolveSearch(term, deps) {
   const link = classifyLink(term);
@@ -85,8 +88,8 @@ export async function resolveSearch(term, deps) {
     signal: AbortSignal.timeout(deps.timeoutMs ?? LINK_LOOKUP_TIMEOUT_MS),
   };
 
-  const { tracks, source } = await resolveLink(link, ctx);
-  return { tracks, source, resolvedFrom: link.kind };
+  const { tracks, source, unplayable } = await resolveLink(link, ctx);
+  return { tracks, source, resolvedFrom: link.kind, ...(unplayable ? { unplayable } : {}) };
 }
 
 function resolveLink(link, ctx) {
@@ -151,9 +154,18 @@ async function resolveSoundCloud(pasted, ctx) {
   const soundcloudUrl = soundCloudTrackUrl(link.user, link.track);
   if (soundcloudUrl.length > MAX_SOUNDCLOUD_URL_LENGTH) return NO_TRACKS;
 
-  const oembed = await lookup(ctx, 'SoundCloud oEmbed', async () =>
-    JSON.parse(await fetchText(soundCloudOEmbedUrl(soundcloudUrl), ctx))
-  );
+  // oEmbed answers 403 for a public track whose uploader has turned off
+  // "Display embed code". The widget cannot play it, so say why.
+  let embedRefused = false;
+  const oembed = await lookup(ctx, 'SoundCloud oEmbed', async () => {
+    try {
+      return JSON.parse(await fetchText(soundCloudOEmbedUrl(soundcloudUrl), ctx));
+    } catch (error) {
+      embedRefused = error?.status === 403;
+      throw error;
+    }
+  });
+  if (embedRefused) return { ...NO_TRACKS, unplayable: SOUNDCLOUD_EMBED_OFF };
   if (!isSoundCloudTrackEmbed(oembed)) return NO_TRACKS;
 
   const name = soundCloudTitle(oembed.title, oembed.author_name);
@@ -310,7 +322,7 @@ async function fetchText(url, ctx) {
   const response = await ctx.fetchImpl(url, { redirect: 'manual', signal: ctx.signal });
   if (response.status !== 200) {
     await response.body?.cancel();
-    throw new Error(`responded ${response.status}`);
+    throw Object.assign(new Error(`responded ${response.status}`), { status: response.status });
   }
   const reader = response.body?.getReader();
   if (!reader) return '';

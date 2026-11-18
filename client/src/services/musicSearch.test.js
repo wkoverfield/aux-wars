@@ -93,6 +93,20 @@ describe("searchTracks", () => {
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
+  it("remembers why a pasted link has no track, until the next answer for it", async () => {
+    const { searchTracks, getUnplayableReason } = await load();
+    const link = "https://soundcloud.com/forss/flickermood";
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ tracks: [], resolvedFrom: "soundcloud", unplayable: "soundcloud_embed_off" }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [TRACK], resolvedFrom: "soundcloud" }));
+
+    expect(getUnplayableReason(link)).toBeNull();
+    await searchTracks(link);
+    expect(getUnplayableReason(link)).toBe("soundcloud_embed_off");
+    await searchTracks(link);
+    expect(getUnplayableReason(link)).toBeNull();
+  });
+
   it("resolves tracks from a 200", async () => {
     const { searchTracks } = await load();
     fetch.mockResolvedValue(jsonResponse({ tracks: [TRACK] }));

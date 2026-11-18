@@ -137,8 +137,9 @@ const YT_TIMEOUT_MS = 4000;
  *
  * @route POST /api/music/search  (alias: /api/youtube/search for rollout safety)
  * @body {string} query - Search query (min 2 characters)
- * @returns {Object} { tracks: Array, resolvedFrom?: string } - Array of
- *   transformed track objects; `resolvedFrom` only when the query was a link
+ * @returns {Object} { tracks: Array, resolvedFrom?: string, unplayable?: string } -
+ *   Array of transformed track objects; `resolvedFrom` only when the query was
+ *   a link; `unplayable` when a link's track exists but cannot be played
  */
 async function handleSearch(req, res) {
   const distinctId = req.headers['x-posthog-distinct-id'] || 'anon';
@@ -151,7 +152,7 @@ async function handleSearch(req, res) {
 
     const term = query.trim();
 
-    const { tracks, source, resolvedFrom } = await resolveSearch(term, {
+    const { tracks, source, resolvedFrom, unplayable } = await resolveSearch(term, {
       searchText,
       mapYouTubeTrack,
       sources,
@@ -175,7 +176,7 @@ async function handleSearch(req, res) {
       });
     }
 
-    res.json(resolvedFrom ? { tracks, resolvedFrom } : { tracks });
+    res.json(resolvedFrom ? { tracks, resolvedFrom, ...(unplayable ? { unplayable } : {}) } : { tracks });
   } catch (error) {
     console.error('Music search failed:', error);
     posthog.captureException(error, distinctId, { endpoint: '/api/music/search' });

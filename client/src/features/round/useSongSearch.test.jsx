@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
 const searchTracks = vi.fn();
+const getUnplayableReason = vi.fn(() => null);
 class SearchError extends Error {
   constructor(reason, { fromBackoff = false } = {}) {
     super(reason);
@@ -12,6 +13,7 @@ class SearchError extends Error {
 vi.mock("../../services/musicSearch", () => ({
   searchTracks: (...args) => searchTracks(...args),
   getCachedResults: () => null,
+  getUnplayableReason: (...args) => getUnplayableReason(...args),
   SearchError,
 }));
 
@@ -77,6 +79,19 @@ describe("useSongSearch", () => {
     type(result, "abcd");
     await act(async () => { vi.advanceTimersByTime(350); });
     expect(onFailed).toHaveBeenCalledTimes(1); // skipped by the backoff: not a new failure
+  });
+
+  it("says why when a pasted SoundCloud track cannot be embedded", async () => {
+    searchTracks.mockResolvedValueOnce([]);
+    getUnplayableReason.mockReturnValueOnce("soundcloud_embed_off");
+    const { result } = renderHook(() => useSongSearch({}));
+
+    type(result, "https://soundcloud.com/forss/flickermood");
+    await act(async () => { vi.advanceTimersByTime(350); });
+
+    expect(result.current.searchError).toBe(
+      "This SoundCloud track can't be played here. Its uploader has embedding turned off."
+    );
   });
 
   it("does not restart a search when the callbacks change", async () => {

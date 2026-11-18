@@ -419,10 +419,27 @@ test('a SoundCloud track without usable artwork has an empty cover', async () =>
   }
 });
 
+test('a SoundCloud track whose uploader turned off embedding answers with no tracks and says why', async () => {
+  const fetch = fakeFetch({ 'soundcloud.com/oembed': () => new Response('Forbidden', { status: 403 }) });
+
+  const result = await resolve(SOUNDCLOUD_URL, { fetch });
+
+  assert.deepEqual(result, { tracks: [], source: null, resolvedFrom: 'soundcloud', unplayable: 'soundcloud_embed_off' });
+});
+
+test('POST /api/music/search passes the unplayable reason through', async () => {
+  const fake = fakeFetch({ 'soundcloud.com/oembed': () => new Response('Forbidden', { status: 403 }) });
+  stubOutbound(fake);
+
+  const response = await post('/api/music/search', SOUNDCLOUD_URL);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { tracks: [], resolvedFrom: 'soundcloud', unplayable: 'soundcloud_embed_off' });
+});
+
 test('a SoundCloud link that oEmbed does not answer with a track answers with no tracks', async () => {
   const answers = {
     'not found': notFound,
-    'private or embedding disabled': () => new Response('Forbidden', { status: 403 }),
     'a redirect': () => redirect('https://example.com/'),
     'a network error': () => {
       throw new TypeError('fetch failed');

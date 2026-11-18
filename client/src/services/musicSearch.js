@@ -12,6 +12,9 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 // Request queue to prevent duplicate simultaneous searches
 const pendingRequests = new Map();
 
+// Latest "this link's track cannot be played" reason per query, from the server.
+const unplayableReasons = new Map();
+
 // Failure backoff: after MAX_RETRIES consecutive failures for a query, the
 // query is not re-fetched until FAILURE_BACKOFF_MS has passed.
 const errorCounts = new Map(); // cacheKey -> { count, reason, at }
@@ -100,6 +103,9 @@ async function fetchTracks(query) {
     if (!data || typeof data !== "object" || data.error || !Array.isArray(data.tracks)) {
       throw new SearchError("bad_payload");
     }
+    // Why a pasted link has no track, when the server knows.
+    if (typeof data.unplayable === "string") unplayableReasons.set(cacheKeyFor(query), data.unplayable);
+    else unplayableReasons.delete(cacheKeyFor(query));
     return data.tracks;
   } finally {
     clearTimeout(timer);
@@ -174,6 +180,16 @@ export async function searchTracks(query, { fresh = false } = {}) {
   } finally {
     if (pendingRequests.get(cacheKey) === requestPromise) pendingRequests.delete(cacheKey);
   }
+}
+
+/**
+ * Why the latest search for this pasted link has no track, when the server
+ * said: "soundcloud_embed_off" (the uploader does not allow embedding).
+ * @param {string} query - Search query
+ * @returns {string|null}
+ */
+export function getUnplayableReason(query) {
+  return query ? unplayableReasons.get(cacheKeyFor(query)) ?? null : null;
 }
 
 /**
