@@ -35,6 +35,18 @@ export class SearchError extends Error {
   }
 }
 
+/**
+ * Cache key for a query. Text is matched case-insensitively. A pasted link
+ * (one token with a slash) keeps its case: ids in links are case-sensitive,
+ * so two links that differ only in case are different songs.
+ */
+const isLinkQuery = (trimmed) => /^\S+\/\S*$/.test(trimmed);
+
+function cacheKeyFor(query) {
+  const trimmed = query.trim();
+  return isLinkQuery(trimmed) ? trimmed : trimmed.toLowerCase();
+}
+
 function failureReason(err) {
   if (err instanceof SearchError) return err.reason;
   if (err?.name === "AbortError" || err?.name === "TimeoutError") return "timeout";
@@ -95,7 +107,11 @@ async function fetchTracks(query) {
 async function performSearch(query, cacheKey) {
   try {
     const tracks = await fetchTracks(query);
-    searchCache.set(cacheKey, { results: tracks, timestamp: Date.now() });
+    // An empty answer for a pasted link is not cached: the server answers
+    // "no tracks" when a link lookup times out, and a retry may succeed.
+    if (tracks.length > 0 || !isLinkQuery(query.trim())) {
+      searchCache.set(cacheKey, { results: tracks, timestamp: Date.now() });
+    }
     errorCounts.delete(cacheKey);
     return tracks;
   } catch (err) {
@@ -129,7 +145,7 @@ export async function searchTracks(query, { fresh = false } = {}) {
     return [];
   }
 
-  const cacheKey = query.toLowerCase().trim();
+  const cacheKey = cacheKeyFor(query);
 
   // Fresh cache first
   const cached = searchCache.get(cacheKey);
@@ -166,7 +182,7 @@ export async function searchTracks(query, { fresh = false } = {}) {
 export function getCachedResults(query) {
   if (!query) return null;
 
-  const cacheKey = query.toLowerCase().trim();
+  const cacheKey = cacheKeyFor(query);
   const cached = searchCache.get(cacheKey);
   return cached ? cached.results : null;
 }
@@ -179,7 +195,7 @@ export function getCachedResults(query) {
 export function cacheSearchResults(query, results) {
   if (!query || !Array.isArray(results)) return;
 
-  const cacheKey = query.toLowerCase().trim();
+  const cacheKey = cacheKeyFor(query);
   searchCache.set(cacheKey, {
     results: results,
     timestamp: Date.now()

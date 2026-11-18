@@ -49,6 +49,50 @@ describe("searchTracks", () => {
     await expect(shared).resolves.toEqual([]);
   });
 
+  it("sends a pasted link to the server unchanged", async () => {
+    const { searchTracks } = await load();
+    fetch.mockResolvedValue(jsonResponse({ tracks: [TRACK] }));
+    const link = "https://youtu.be/AbCdEfGhIjk?si=XyZ_123-abc&t=42";
+    await searchTracks(link);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ query: link });
+  });
+
+  it("caches links that differ only in case separately, and text regardless of case", async () => {
+    const { searchTracks, getCachedResults } = await load();
+    const OTHER = { id: "2", name: "Other", artist: "Artist" };
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ tracks: [TRACK] }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [OTHER] }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [TRACK] }));
+
+    await expect(searchTracks("https://youtu.be/AbCdEfGhIjk")).resolves.toEqual([TRACK]);
+    await expect(searchTracks("https://youtu.be/abcdefghijk")).resolves.toEqual([OTHER]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(getCachedResults(" https://youtu.be/AbCdEfGhIjk ")).toEqual([TRACK]);
+    expect(getCachedResults("https://youtu.be/abcdefghijk")).toEqual([OTHER]);
+
+    await expect(searchTracks("Some Song")).resolves.toEqual([TRACK]);
+    await expect(searchTracks("some song")).resolves.toEqual([TRACK]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(getCachedResults("SOME SONG")).toEqual([TRACK]);
+  });
+
+  it("does not cache an empty answer for a pasted link, but does for text", async () => {
+    const { searchTracks } = await load();
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ tracks: [] }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [TRACK] }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [] }));
+
+    await expect(searchTracks("https://youtu.be/AbCdEfGhIjk")).resolves.toEqual([]);
+    await expect(searchTracks("https://youtu.be/AbCdEfGhIjk")).resolves.toEqual([TRACK]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    await expect(searchTracks("zzzz no such song")).resolves.toEqual([]);
+    await expect(searchTracks("zzzz no such song")).resolves.toEqual([]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("resolves tracks from a 200", async () => {
     const { searchTracks } = await load();
     fetch.mockResolvedValue(jsonResponse({ tracks: [TRACK] }));
