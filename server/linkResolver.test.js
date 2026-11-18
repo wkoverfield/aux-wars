@@ -140,7 +140,7 @@ test('a video titled without an artist is credited to its channel', async () => 
   assert.deepEqual(tracks[0].artists, [{ name: 'Some Artist' }]);
 });
 
-test('when oEmbed has no answer, the video id is searched as text', async () => {
+test('when oEmbed has no answer, the id is searched as text and only that video is kept', async () => {
   const failures = {
     'not found': notFound,
     'not embeddable': () => new Response('Unauthorized', { status: 401 }),
@@ -160,10 +160,21 @@ test('when oEmbed has no answer, the video id is searched as text', async () => 
     const result = await resolve(`https://youtu.be/${VIDEO}`, { fetch, search });
 
     assert.deepEqual(search.terms, [VIDEO], name);
-    // The linked video leads when the search finds it.
-    assert.deepEqual(result, { tracks: [VIDEO_TRACK, other], source: 'youtube', resolvedFrom: 'youtube' }, name);
+    // Other search hits are dropped: a link never lists unrelated videos.
+    assert.deepEqual(result, { tracks: [VIDEO_TRACK], source: 'youtube', resolvedFrom: 'youtube' }, name);
     assert.deepEqual(fetch.urls(), [YOUTUBE_OEMBED], name);
   }
+});
+
+test('a YouTube link the search cannot find either answers with no tracks', async () => {
+  const fetch = fakeFetch({ 'www.youtube.com/oembed': notFound });
+  const search = fakeSearch({ tracks: [{ id: 'youtube:other000000', videoId: 'other000000' }], source: 'youtube' });
+
+  const result = await resolve(`https://youtu.be/${VIDEO}`, { fetch, search });
+
+  assert.deepEqual(search.terms, [VIDEO]);
+  assert.deepEqual(result.tracks, []);
+  assert.equal(result.resolvedFrom, 'youtube');
 });
 
 test('a playlist-only YouTube link answers with no tracks and makes no request', async () => {

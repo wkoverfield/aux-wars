@@ -40,9 +40,11 @@ export class SearchError extends Error {
  * (one token with a slash) keeps its case: ids in links are case-sensitive,
  * so two links that differ only in case are different songs.
  */
+const isLinkQuery = (trimmed) => /^\S+\/\S*$/.test(trimmed);
+
 function cacheKeyFor(query) {
   const trimmed = query.trim();
-  return /^\S+\/\S*$/.test(trimmed) ? trimmed : trimmed.toLowerCase();
+  return isLinkQuery(trimmed) ? trimmed : trimmed.toLowerCase();
 }
 
 function failureReason(err) {
@@ -105,7 +107,11 @@ async function fetchTracks(query) {
 async function performSearch(query, cacheKey) {
   try {
     const tracks = await fetchTracks(query);
-    searchCache.set(cacheKey, { results: tracks, timestamp: Date.now() });
+    // An empty answer for a pasted link is not cached: the server answers
+    // "no tracks" when a link lookup times out, and a retry may succeed.
+    if (tracks.length > 0 || !isLinkQuery(query.trim())) {
+      searchCache.set(cacheKey, { results: tracks, timestamp: Date.now() });
+    }
     errorCounts.delete(cacheKey);
     return tracks;
   } catch (err) {

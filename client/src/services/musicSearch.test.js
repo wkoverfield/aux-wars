@@ -77,6 +77,22 @@ describe("searchTracks", () => {
     expect(getCachedResults("SOME SONG")).toEqual([TRACK]);
   });
 
+  it("does not cache an empty answer for a pasted link, but does for text", async () => {
+    const { searchTracks } = await load();
+    fetch
+      .mockResolvedValueOnce(jsonResponse({ tracks: [] }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [TRACK] }))
+      .mockResolvedValueOnce(jsonResponse({ tracks: [] }));
+
+    await expect(searchTracks("https://youtu.be/AbCdEfGhIjk")).resolves.toEqual([]);
+    await expect(searchTracks("https://youtu.be/AbCdEfGhIjk")).resolves.toEqual([TRACK]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    await expect(searchTracks("zzzz no such song")).resolves.toEqual([]);
+    await expect(searchTracks("zzzz no such song")).resolves.toEqual([]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("resolves tracks from a 200", async () => {
     const { searchTracks } = await load();
     fetch.mockResolvedValue(jsonResponse({ tracks: [TRACK] }));

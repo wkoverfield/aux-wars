@@ -6,8 +6,8 @@
  * linkClassifier.js) is resolved first:
  *
  *   YouTube video    that exact video as the only track, titled from YouTube
- *                    oEmbed; if oEmbed has no answer, a text search of the
- *                    video id
+ *                    oEmbed; if oEmbed has no answer, the video id is
+ *                    searched as text and only that video is kept
  *   YouTube playlist no tracks
  *   Spotify track    title from Spotify oEmbed, artist from the public track
  *                    page, then a text search of "title artist"
@@ -99,11 +99,11 @@ async function resolveYouTube(link, ctx) {
   }
 
   // oEmbed has no answer (video not embeddable, removed, or the lookup failed):
-  // search the id as text, and put the video first if the search finds it.
+  // search the id as text and keep only that video. A pasted link answers
+  // with the linked video or with nothing, never with unrelated results.
   const found = await ctx.searchText(link.videoId);
   const exact = found.tracks.filter((track) => track.videoId === link.videoId);
-  const rest = found.tracks.filter((track) => track.videoId !== link.videoId);
-  return { tracks: [...exact, ...rest], source: found.source };
+  return exact.length > 0 ? { tracks: exact, source: found.source } : NO_TRACKS;
 }
 
 async function resolveSpotify(link, ctx) {
