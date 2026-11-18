@@ -79,7 +79,7 @@ export function SongSelectionView({
             <SearchBar
               value={searchTerm}
               onChange={onSearchChange}
-              placeholder="What do you want to play?"
+              placeholder="Search a song or paste a link"
               busy={Boolean(isSearching && searchTerm && !isSearchSlow)}
               busyLabel="Searching for songs..."
             />

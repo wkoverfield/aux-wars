@@ -26,6 +26,7 @@ import cors from "cors";
 import youtubesearchapi from "youtube-search-api";
 import { PostHog } from "posthog-node";
 import { createSearchRateLimiter } from "./rateLimit.js";
+import { resolveSearch } from "./linkResolver.js";
 
 // Only init PostHog when a token is configured (Railway env). Without it —
 // e.g. local dev or before the env var is set — fall back to a no-op stub so
@@ -127,9 +128,15 @@ const YT_TIMEOUT_MS = 4000;
  * YouTube-first (full songs); falls back to iTunes + Deezer 30s previews on
  * empty / error / timeout so the game never loses search.
  *
+ * A query that is one pasted link is resolved before it is searched (see
+ * linkResolver.js): a YouTube video link answers with that video, a Spotify
+ * track link is searched by its title and artist, and any other link answers
+ * with no tracks. The response then also carries `resolvedFrom`, the link kind.
+ *
  * @route POST /api/music/search  (alias: /api/youtube/search for rollout safety)
  * @body {string} query - Search query (min 2 characters)
- * @returns {Object} { tracks: Array } - Array of transformed track objects
+ * @returns {Object} { tracks: Array, resolvedFrom?: string } - Array of
+ *   transformed track objects; `resolvedFrom` only when the query was a link
  */
 async function handleSearch(req, res) {
   const distinctId = req.headers['x-posthog-distinct-id'] || 'anon';
@@ -142,36 +149,11 @@ async function handleSearch(req, res) {
 
     const term = query.trim();
 
-    // 1) YouTube first — full songs let players clip any moment, and the
-    //    catalog is far deeper. Fast-fail to the fallback on any problem.
-    const ytTracks = await searchYouTube(term).catch((e) => {
-      console.error('YouTube search failed:', e?.message || e);
-      return [];
+    const { tracks, source, resolvedFrom } = await resolveSearch(term, {
+      searchText,
+      mapYouTubeTrack,
+      fetchImpl: fetch,
     });
-    if (ytTracks.length > 0) {
-      const resultTracks = ytTracks.slice(0, SEARCH_LIMIT);
-      captureMusicSearched(distinctId, {
-        query_length: term.length,
-        source: 'youtube',
-        result_count: resultTracks.length,
-      });
-      return res.json({ tracks: resultTracks });
-    }
-
-    // 2) Fallback: iTunes + Deezer in parallel; a failure in one must not sink
-    //    the other. Merge + relevance-rank across both, then cap.
-    const [itunesResults, deezerResults] = await Promise.all([
-      searchITunes(term).catch((e) => {
-        console.error('iTunes search failed:', e?.message || e);
-        return [];
-      }),
-      searchDeezer(term).catch((e) => {
-        console.error('Deezer search failed:', e?.message || e);
-        return [];
-      }),
-    ]);
-
-    const tracks = mergeTracks(itunesResults, deezerResults, term).slice(0, SEARCH_LIMIT);
 
     if (tracks.length === 0) {
       posthog.capture({
@@ -185,17 +167,50 @@ async function handleSearch(req, res) {
     } else {
       captureMusicSearched(distinctId, {
         query_length: term.length,
-        source: 'itunes_deezer_fallback',
+        source,
         result_count: tracks.length,
       });
     }
 
-    res.json({ tracks });
+    res.json(resolvedFrom ? { tracks, resolvedFrom } : { tracks });
   } catch (error) {
     console.error('Music search failed:', error);
     posthog.captureException(error, distinctId, { endpoint: '/api/music/search' });
     res.status(500).json({ error: 'Search service temporarily unavailable' });
   }
+}
+
+/**
+ * Text search: YouTube first, then iTunes + Deezer.
+ * @returns {Promise<{ tracks: Array, source: 'youtube' | 'itunes_deezer_fallback' | null }>}
+ *   `source` is null when nothing was found.
+ */
+async function searchText(term) {
+  // 1) YouTube first — full songs let players clip any moment, and the
+  //    catalog is far deeper. Fast-fail to the fallback on any problem.
+  const ytTracks = await searchYouTube(term).catch((e) => {
+    console.error('YouTube search failed:', e?.message || e);
+    return [];
+  });
+  if (ytTracks.length > 0) {
+    return { tracks: ytTracks.slice(0, SEARCH_LIMIT), source: 'youtube' };
+  }
+
+  // 2) Fallback: iTunes + Deezer in parallel; a failure in one must not sink
+  //    the other. Merge + relevance-rank across both, then cap.
+  const [itunesResults, deezerResults] = await Promise.all([
+    searchITunes(term).catch((e) => {
+      console.error('iTunes search failed:', e?.message || e);
+      return [];
+    }),
+    searchDeezer(term).catch((e) => {
+      console.error('Deezer search failed:', e?.message || e);
+      return [];
+    }),
+  ]);
+
+  const tracks = mergeTracks(itunesResults, deezerResults, term).slice(0, SEARCH_LIMIT);
+  return { tracks, source: tracks.length > 0 ? 'itunes_deezer_fallback' : null };
 }
 
 const searchRateLimit = createSearchRateLimiter();
@@ -300,7 +315,7 @@ async function searchYouTube(query) {
     .filter(Boolean);
 }
 
-function mapYouTubeTrack(item) {
+export function mapYouTubeTrack(item) {
   // 320x180 (mqdefault) instead of the largest thumbnail YouTube lists
   // (often 720px, ~70 KB): results render at 64px and the larger rating
   // card upgrades the URL client side (client/src/utils/coverArt.js).
