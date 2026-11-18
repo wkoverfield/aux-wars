@@ -62,8 +62,14 @@ The response then also carries `resolvedFrom`, the link kind.
   (`https://soundcloud.com/oembed?format=json&url=`), which needs no key. The result has
   `id: "sc:<user>/<track>"`, `soundcloudUrl` (`https://soundcloud.com/<user>/<track>`, no
   query, no `www.` or `m.` host), `preview_url: null` and `duration_ms: 0`.
-- **No results**: SoundCloud sets, profiles, `on.soundcloud.com` short links, private or
-  removed tracks, and every other link.
+- **SoundCloud short link** (`on.soundcloud.com/<code>`, what the SoundCloud app's "Copy
+  link" gives): the server reads where `https://on.soundcloud.com/<code>` redirects,
+  without following it. When that is a `soundcloud.com/<user>/<track>` link, the result
+  is the same as for that track link. oEmbed answers a short link too, but names the
+  track only by numeric id (`api.soundcloud.com/tracks/<id>`), never by its
+  `<user>/<track>` address, so the address comes from the redirect.
+- **No results**: SoundCloud sets, profiles, private or removed tracks, short links that
+  point at any of those, and every other link.
 
 A stored track (`submissions.trackDetails`) carries one of `videoId`, `soundcloudUrl` or
 `previewUrl`. `submitSong` rejects a track carrying more than one, and accepts a

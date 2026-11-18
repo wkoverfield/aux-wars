@@ -12,6 +12,7 @@ const SPOTIFY_PAGE = `https://open.spotify.com/track/${TRACK}`;
 const SOUNDCLOUD_URL = 'https://soundcloud.com/forss/flickermood';
 const SOUNDCLOUD_OEMBED = 'https://soundcloud.com/oembed?format=json&url=https%3A%2F%2Fsoundcloud.com%2Fforss%2Fflickermood';
 const SOUNDCLOUD_ART = 'https://i1.sndcdn.com/artworks-000067273316-smsiqx-t500x500.jpg';
+const SOUNDCLOUD_SHORT_URL = 'https://on.soundcloud.com/AbCd1234';
 
 const SOUNDCLOUD_TRACK = {
   id: 'sc:forss/flickermood',
@@ -447,10 +448,96 @@ test('a SoundCloud link that oEmbed does not answer with a track answers with no
   }
 });
 
+test('an on.soundcloud.com short link is resolved when it redirects to a SoundCloud track', async () => {
+  const targets = [
+    // What the SoundCloud app's "Copy link" redirects to.
+    `${SOUNDCLOUD_URL}?si=SHARE_TOKEN&utm_source=clipboard&utm_medium=text&utm_campaign=social_sharing`,
+    SOUNDCLOUD_URL,
+    'https://m.soundcloud.com/forss/flickermood?ref=clipboard',
+    'https://www.soundcloud.com/forss/flickermood',
+  ];
+  for (const target of targets) {
+    for (const status of [301, 302, 307]) {
+      const fetch = fakeFetch({
+        'on.soundcloud.com/AbCd1234': () => redirect(target, status),
+        'soundcloud.com/oembed': soundCloudOEmbed,
+      });
+      const search = fakeSearch();
+
+      const result = await resolve(`${SOUNDCLOUD_SHORT_URL}?si=IGNORED`, { fetch, search });
+
+      assert.deepEqual(result, { tracks: [SOUNDCLOUD_TRACK], source: 'soundcloud', resolvedFrom: 'soundcloud' }, target);
+      assert.deepEqual(fetch.urls(), [SOUNDCLOUD_SHORT_URL, SOUNDCLOUD_OEMBED], target);
+      for (const call of fetch.calls) assert.equal(call.options.redirect, 'manual');
+      assert.deepEqual(search.terms, [], target);
+    }
+  }
+});
+
+test('an on.soundcloud.com short link that does not redirect to a SoundCloud track answers with no tracks', async () => {
+  const targets = {
+    'another host': () => redirect('https://example.com/forss/flickermood'),
+    'a look-alike host': () => redirect('https://soundcloud.com.example.com/forss/flickermood'),
+    'plain http': () => redirect('http://soundcloud.com/forss/flickermood'),
+    'the SoundCloud home page': () => redirect('https://soundcloud.com/'),
+    'a profile': () => redirect('https://soundcloud.com/forss?ref=clipboard'),
+    'a set': () => redirect('https://soundcloud.com/forss/sets/soulhack?si=SHARE_TOKEN'),
+    'a private share link': () => redirect('https://soundcloud.com/forss/flickermood/s-AbCdEfG'),
+    'a second short link': () => redirect('https://on.soundcloud.com/AnotherCode'),
+    'a relative path': () => redirect('/forss/flickermood'),
+    'no Location header': () => redirect(null),
+    'a page instead of a redirect': () => html(`<a href="${SOUNDCLOUD_URL}">Open</a>`),
+    'not found': notFound,
+    'a network error': () => {
+      throw new TypeError('fetch failed');
+    },
+  };
+  for (const [name, route] of Object.entries(targets)) {
+    const fetch = fakeFetch({ 'on.soundcloud.com/AbCd1234': route, 'soundcloud.com/oembed': soundCloudOEmbed });
+    const search = fakeSearch();
+
+    const result = await resolve(SOUNDCLOUD_SHORT_URL, { fetch, search });
+
+    assert.deepEqual(result, { tracks: [], source: null, resolvedFrom: 'soundcloud' }, name);
+    assert.deepEqual(fetch.urls(), [SOUNDCLOUD_SHORT_URL], name);
+    assert.deepEqual(search.terms, [], name);
+  }
+});
+
+test('an on.soundcloud.com short link answers with no tracks when oEmbed has no track for its target', async () => {
+  const answers = {
+    'not found': notFound,
+    'a profile page': () => soundCloudOEmbed({ title: 'Forss' }, 'users/183'),
+  };
+  for (const [name, route] of Object.entries(answers)) {
+    const fetch = fakeFetch({
+      'on.soundcloud.com/AbCd1234': () => redirect(SOUNDCLOUD_URL, 302),
+      'soundcloud.com/oembed': route,
+    });
+
+    const result = await resolve(SOUNDCLOUD_SHORT_URL, { fetch });
+
+    assert.deepEqual(result, { tracks: [], source: null, resolvedFrom: 'soundcloud' }, name);
+    assert.deepEqual(fetch.urls(), [SOUNDCLOUD_SHORT_URL, SOUNDCLOUD_OEMBED], name);
+  }
+});
+
+test('an on.soundcloud.com short link to a track too long to submit asks oEmbed nothing', async () => {
+  const fetch = fakeFetch({
+    'on.soundcloud.com/AbCd1234': () => redirect(`https://soundcloud.com/${'u'.repeat(150)}/${'t'.repeat(150)}`, 302),
+    'soundcloud.com/oembed': soundCloudOEmbed,
+  });
+
+  const result = await resolve(SOUNDCLOUD_SHORT_URL, { fetch });
+
+  assert.deepEqual(result, { tracks: [], source: null, resolvedFrom: 'soundcloud' });
+  assert.deepEqual(fetch.urls(), [SOUNDCLOUD_SHORT_URL]);
+});
+
 test('SoundCloud links that cannot name one submittable track make no request', async () => {
   const links = {
-    'https://on.soundcloud.com/AbCd1234': 'soundcloud', // short link
     [`https://soundcloud.com/${'u'.repeat(150)}/${'t'.repeat(150)}`]: 'soundcloud', // too long to submit
+    'https://on.soundcloud.com/AbCd1234/extra': 'other', // not a short link form
     'https://soundcloud.com/forss': 'other', // profile
     'https://soundcloud.com/forss/sets/soulhack': 'other', // set
     'https://soundcloud.com/forss/flickermood/s-AbCdEfG': 'other', // private share link
@@ -501,6 +588,14 @@ test('lookups that run out of time count as nothing readable', async () => {
     { tracks: [], source: null, resolvedFrom: 'spotify' }
   );
 
+  const stuckSoundCloud = fakeFetch({ 'on.soundcloud.com/AbCd1234': hang });
+  assert.deepEqual(await resolve(SOUNDCLOUD_SHORT_URL, { fetch: stuckSoundCloud, timeoutMs: 40 }), {
+    tracks: [],
+    source: null,
+    resolvedFrom: 'soundcloud',
+  });
+  assert.deepEqual(stuckSoundCloud.urls(), [SOUNDCLOUD_SHORT_URL]);
+
   // A YouTube link still answers: its id is searched as text.
   const stuckYouTube = fakeFetch({ 'www.youtube.com/oembed': hang });
   const youTubeSearch = fakeSearch();
@@ -524,6 +619,18 @@ test('one deadline covers the short link and the lookups after it', async () => 
 
   assert.deepEqual(result.tracks, []);
   assert.ok(Date.now() - started < 1000);
+
+  const soundCloud = fakeFetch({
+    'on.soundcloud.com/AbCd1234': () => new Promise((done) => setTimeout(() => done(redirect(SOUNDCLOUD_URL)), 60)),
+    'soundcloud.com/oembed': hang,
+  });
+  const soundCloudStarted = Date.now();
+
+  const soundCloudResult = await resolve(SOUNDCLOUD_SHORT_URL, { fetch: soundCloud, timeoutMs: 120 });
+
+  assert.deepEqual(soundCloudResult.tracks, []);
+  assert.deepEqual(soundCloud.urls(), [SOUNDCLOUD_SHORT_URL, SOUNDCLOUD_OEMBED]);
+  assert.ok(Date.now() - soundCloudStarted < 1000);
 });
 
 test('requests go only to the fixed lookup endpoints, never to the pasted URL', async () => {
@@ -533,6 +640,7 @@ test('requests go only to the fixed lookup endpoints, never to the pasted URL', 
     /^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]{22}$/,
     /^https:\/\/spotify\.link\/[A-Za-z0-9]{1,40}$/,
     /^https:\/\/soundcloud\.com\/oembed\?format=json&url=https%3A%2F%2Fsoundcloud\.com%2F[A-Za-z0-9_-]{1,255}%2F[A-Za-z0-9_-]{1,255}$/,
+    /^https:\/\/on\.soundcloud\.com\/[A-Za-z0-9]{1,40}$/,
   ];
   const pasted = [
     `https://www.youtube.com/watch?v=${VIDEO}&next=https://example.com/steal#frag`,
@@ -560,6 +668,10 @@ test('requests go only to the fixed lookup endpoints, never to the pasted URL', 
     'https://soundcloud.com@example.com/forss/flickermood',
     'https://soundcloud.com.example.com/forss/flickermood',
     'https://on.soundcloud.com/AbCd1234?next=https://example.com/',
+    'https://on.soundcloud.com/..%2Fadmin',
+    'https://user:pass@on.soundcloud.com/AbCd1234',
+    'https://on.soundcloud.com:8443/AbCd1234',
+    'https://on.soundcloud.com/EvilCode',
   ];
   for (const link of pasted) {
     const fetch = fakeFetch({
@@ -568,6 +680,9 @@ test('requests go only to the fixed lookup endpoints, never to the pasted URL', 
       'open.spotify.com/oembed': spotifyOEmbed,
       [`open.spotify.com/track/${TRACK}`]: spotifyPage,
       'spotify.link/AbCd1234XyZ': () => redirect(`https://open.spotify.com/track/${TRACK}`),
+      'on.soundcloud.com/AbCd1234': () => redirect(`${SOUNDCLOUD_URL}?url=https://example.com/#frag`),
+      'on.soundcloud.com/EvilCode': () =>
+        redirect('https://user:pass@soundcloud.com:8443/forss/flickermood?url=https://example.com/'),
     });
     await resolve(link, { fetch });
     for (const url of fetch.urls()) {
@@ -629,6 +744,22 @@ test('both search routes answer a SoundCloud track link with that track and reso
     assert.equal(response.status, 200, path);
     assert.deepEqual(await response.json(), { tracks: [SOUNDCLOUD_TRACK], resolvedFrom: 'soundcloud' }, path);
     assert.deepEqual(fake.urls(), [SOUNDCLOUD_OEMBED], path);
+  }
+});
+
+test('both search routes answer an on.soundcloud.com short link with the track it points at', async () => {
+  for (const path of ['/api/music/search', '/api/youtube/search']) {
+    const fake = fakeFetch({
+      'on.soundcloud.com/AbCd1234': () => redirect(`${SOUNDCLOUD_URL}?si=SHARE_TOKEN&utm_source=clipboard`, 302),
+      'soundcloud.com/oembed': soundCloudOEmbed,
+    });
+    stubOutbound(fake);
+
+    const response = await post(path, `  ${SOUNDCLOUD_SHORT_URL}  `);
+
+    assert.equal(response.status, 200, path);
+    assert.deepEqual(await response.json(), { tracks: [SOUNDCLOUD_TRACK], resolvedFrom: 'soundcloud' }, path);
+    assert.deepEqual(fake.urls(), [SOUNDCLOUD_SHORT_URL, SOUNDCLOUD_OEMBED], path);
   }
 });
 
