@@ -54,6 +54,8 @@ const COVER_SHAPES: Array<{ host: RegExp; path: RegExp }> = [
   { host: /^i\d?\.ytimg\.com$/, path: /^\/vi(_webp)?\/[A-Za-z0-9_-]{11}\/[a-z0-9_]{1,24}\.(jpg|webp)$/ },
   // iTunes artwork
   { host: /^[a-z0-9-]{1,40}\.mzstatic\.com$/, path: /^\/image\/thumb\/[A-Za-z0-9/._-]{1,300}\.(jpg|jpeg|png|webp)$/ },
+  // SoundCloud artwork and uploader avatars
+  { host: /^i\d\.sndcdn\.com$/, path: /^\/(artworks|avatars)-[A-Za-z0-9_-]{1,150}\.(jpg|jpeg|png)$/ },
   // Deezer covers
   { host: /^[a-z0-9-]{1,40}\.dzcdn\.net$/, path: /^\/images\/(cover|artist)\/[A-Za-z0-9/._-]{1,200}\.(jpg|jpeg|png)$/ },
 ];

@@ -66,7 +66,11 @@ function submitSongFailure(code: string, message: string) {
 // A stored soundcloudUrl is handed to the SoundCloud widget on every client in
 // the room, so only the canonical track address is accepted.
 export const MAX_SOUNDCLOUD_URL_LENGTH = 300;
-const SOUNDCLOUD_TRACK_URL = /^https:\/\/soundcloud\.com\/[^/?#]+\/[^/?#]+$/;
+const SOUNDCLOUD_TRACK_URL = /^https:\/\/soundcloud\.com\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/;
+// Second path segments that are a profile's own pages, not a track.
+const SOUNDCLOUD_PROFILE_PAGES = new Set([
+  "sets", "tracks", "albums", "popular-tracks", "toptracks", "reposts", "likes", "comments", "followers", "following",
+]);
 
 type TrackSources = { previewUrl?: string; videoId?: string; soundcloudUrl?: string };
 
@@ -80,7 +84,7 @@ function trackSourceFailure({ previewUrl, videoId, soundcloudUrl }: TrackSources
     if (soundcloudUrl.length > MAX_SOUNDCLOUD_URL_LENGTH) {
       return submitSongFailure("soundcloud_url_too_long", "That SoundCloud link is too long to play.");
     }
-    if (!SOUNDCLOUD_TRACK_URL.test(soundcloudUrl)) {
+    if (!SOUNDCLOUD_TRACK_URL.test(soundcloudUrl) || SOUNDCLOUD_PROFILE_PAGES.has(soundcloudUrl.split("/")[4])) {
       return submitSongFailure("soundcloud_url_invalid", "That SoundCloud link can't be played.");
     }
   }

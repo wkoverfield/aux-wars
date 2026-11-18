@@ -77,7 +77,9 @@ async function fetchTracks(query) {
           'Content-Type': 'application/json',
           'X-POSTHOG-DISTINCT-ID': getVisitorId(),
         },
-        body: JSON.stringify({ query }),
+        // `sources` names the extra track sources this client can play, so the
+        // server never hands a SoundCloud track to a bundle that predates it.
+        body: JSON.stringify({ query, sources: ["soundcloud"] }),
         signal: controller.signal,
       });
     } catch (err) {

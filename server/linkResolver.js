@@ -62,6 +62,10 @@ const NO_TRACKS = Object.freeze({ tracks: [], source: null });
  *   The normal text search.
  * @param {(item: { id: string, title: string, channelTitle?: string }) => Object} deps.mapYouTubeTrack
  *   Builds the app track shape for a YouTube video.
+ * @param {string[]} [deps.sources]
+ *   Extra track sources the caller can play. A SoundCloud link answers with
+ *   its track only when this lists "soundcloud"; a client that predates
+ *   SoundCloud playback sends nothing and gets no tracks.
  * @param {typeof fetch} [deps.fetchImpl]
  * @param {number} [deps.timeoutMs]
  * @param {{ error: Function }} [deps.logger]
@@ -75,6 +79,7 @@ export async function resolveSearch(term, deps) {
   const ctx = {
     searchText: deps.searchText,
     mapYouTubeTrack: deps.mapYouTubeTrack,
+    playsSoundCloud: Array.isArray(deps.sources) && deps.sources.includes('soundcloud'),
     fetchImpl: deps.fetchImpl ?? globalThis.fetch,
     logger: deps.logger ?? console,
     signal: AbortSignal.timeout(deps.timeoutMs ?? LINK_LOOKUP_TIMEOUT_MS),
@@ -91,7 +96,7 @@ function resolveLink(link, ctx) {
     case 'spotify':
       return resolveSpotify(link, ctx);
     case 'soundcloud':
-      return resolveSoundCloud(link, ctx);
+      return ctx.playsSoundCloud ? resolveSoundCloud(link, ctx) : NO_TRACKS;
     default:
       return NO_TRACKS;
   }

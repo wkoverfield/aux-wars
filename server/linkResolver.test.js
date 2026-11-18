@@ -99,10 +99,11 @@ function fakeSearch(result = { tracks: [{ id: 'youtube:found', videoId: 'found' 
 
 const quiet = { error() {} };
 
-function resolve(term, { fetch = fakeFetch(), search = fakeSearch(), timeoutMs } = {}) {
+function resolve(term, { fetch = fakeFetch(), search = fakeSearch(), timeoutMs, sources = ['soundcloud'] } = {}) {
   return resolveSearch(term, {
     searchText: search.searchText,
     mapYouTubeTrack,
+    sources,
     fetchImpl: fetch.fetchImpl,
     logger: quiet,
     timeoutMs,
@@ -715,11 +716,11 @@ function stubOutbound(fake) {
   );
 }
 
-function post(path, query) {
+function post(path, query, sources = ['soundcloud']) {
   return realFetch(`${baseUrl}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, sources }),
   });
 }
 
@@ -744,6 +745,19 @@ test('both search routes answer a SoundCloud track link with that track and reso
     assert.equal(response.status, 200, path);
     assert.deepEqual(await response.json(), { tracks: [SOUNDCLOUD_TRACK], resolvedFrom: 'soundcloud' }, path);
     assert.deepEqual(fake.urls(), [SOUNDCLOUD_OEMBED], path);
+  }
+});
+
+test('a SoundCloud link answers with no tracks and makes no request for a client that cannot play SoundCloud', async () => {
+  for (const sources of [null, [], ['youtube'], 'soundcloud']) {
+    const fake = fakeFetch({ 'soundcloud.com/oembed': soundCloudOEmbed });
+    stubOutbound(fake);
+
+    const response = await post('/api/music/search', SOUNDCLOUD_URL, sources);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { tracks: [], resolvedFrom: 'soundcloud' });
+    assert.deepEqual(fake.urls(), []);
   }
 });
 

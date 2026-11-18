@@ -15,6 +15,7 @@ describe("content cleaned on the way into a shared snapshot", () => {
       "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/aa/bb/cc/aabbcc-1234/cover.jpg/300x300bb.jpg",
       "https://e-cdns-images.dzcdn.net/images/cover/0123456789abcdef/250x250-000000-80-0-0.jpg",
       "https://cdn-images.dzcdn.net/images/cover/0123456789abcdef/250x250.jpg",
+      "https://i1.sndcdn.com/artworks-000067273316-smsiqx-t500x500.jpg",
     ]) {
       expect(publicCover(ok)).toBe(ok);
     }

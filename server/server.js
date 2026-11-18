@@ -143,7 +143,7 @@ const YT_TIMEOUT_MS = 4000;
 async function handleSearch(req, res) {
   const distinctId = req.headers['x-posthog-distinct-id'] || 'anon';
   try {
-    const { query } = req.body;
+    const { query, sources } = req.body;
 
     if (!query || typeof query !== 'string' || query.trim().length < 2) {
       return res.status(400).json({ error: 'Valid search query is required' });
@@ -154,6 +154,7 @@ async function handleSearch(req, res) {
     const { tracks, source, resolvedFrom } = await resolveSearch(term, {
       searchText,
       mapYouTubeTrack,
+      sources,
       fetchImpl: fetch,
     });
 

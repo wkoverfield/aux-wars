@@ -54,7 +54,7 @@ describe("searchTracks", () => {
     fetch.mockResolvedValue(jsonResponse({ tracks: [TRACK] }));
     const link = "https://youtu.be/AbCdEfGhIjk?si=XyZ_123-abc&t=42";
     await searchTracks(link);
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ query: link });
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ query: link, sources: ["soundcloud"] });
   });
 
   it("caches links that differ only in case separately, and text regardless of case", async () => {
