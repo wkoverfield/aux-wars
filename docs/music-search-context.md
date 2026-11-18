@@ -49,6 +49,27 @@ play it via `AudioPreviewPlayer`.
 - Gains: no platform pre-roll ads, faster loads, reliable mobile autoplay, and we can
   run our own ads on non-playback screens without ToS risk.
 
+## Pasted links
+
+A search query that is one pasted link is resolved on the server before any text
+search (`server/linkClassifier.js` classifies it, `server/linkResolver.js` resolves it).
+The response then also carries `resolvedFrom`, the link kind.
+
+- **YouTube video link**: that video as the only result (`videoId`).
+- **Spotify track link**: a text search of its title and artist.
+- **SoundCloud track link** (`soundcloud.com/<user>/<track>`): that track as the only
+  result. Title, uploader and artwork come from SoundCloud oEmbed
+  (`https://soundcloud.com/oembed?format=json&url=`), which needs no key. The result has
+  `id: "sc:<user>/<track>"`, `soundcloudUrl` (`https://soundcloud.com/<user>/<track>`, no
+  query, no `www.` or `m.` host), `preview_url: null` and `duration_ms: 0`.
+- **No results**: SoundCloud sets, profiles, `on.soundcloud.com` short links, private or
+  removed tracks, and every other link.
+
+A stored track (`submissions.trackDetails`) carries one of `videoId`, `soundcloudUrl` or
+`previewUrl`. `submitSong` rejects a track carrying more than one, and accepts a
+`soundcloudUrl` only when it is at most 300 characters long and matches
+`^https://soundcloud\.com/[^/?#]+/[^/?#]+$`.
+
 ## Architecture
 
 ```

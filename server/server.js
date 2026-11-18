@@ -19,6 +19,7 @@
  * content violates YouTube's API ToS. We currently serve no ads
  * (VITE_ADSENSE_CLIENT unset → AdSlot renders nothing), so this is dormant. If
  * ads are ever re-enabled, gate YouTube playback to ad-free rooms first.
+ * No ad slot goes on any screen that can show SoundCloud content either.
  */
 import express from "express";
 import http from "http";
@@ -129,9 +130,10 @@ const YT_TIMEOUT_MS = 4000;
  * empty / error / timeout so the game never loses search.
  *
  * A query that is one pasted link is resolved before it is searched (see
- * linkResolver.js): a YouTube video link answers with that video, a Spotify
- * track link is searched by its title and artist, and any other link answers
- * with no tracks. The response then also carries `resolvedFrom`, the link kind.
+ * linkResolver.js): a YouTube video link answers with that video, a SoundCloud
+ * track link answers with that track, a Spotify track link is searched by its
+ * title and artist, and any other link answers with no tracks. The response
+ * then also carries `resolvedFrom`, the link kind.
  *
  * @route POST /api/music/search  (alias: /api/youtube/search for rollout safety)
  * @body {string} query - Search query (min 2 characters)

@@ -23,7 +23,7 @@ function now() { return Date.now(); }
 
 // A song is rated for at most this long before the next one starts.
 export const RATING_TIMEOUT_MS = 60_000;
-// Length assumed for a clip with no usable YouTube window (iTunes/Deezer
+// Length assumed for a clip with no usable snippet window (iTunes/Deezer
 // previews are 30 s).
 export const DEFAULT_CLIP_MS = 30_000;
 // Slack for the shared screen to load and start the clip after the song
@@ -63,6 +63,34 @@ function submitSongFailure(code: string, message: string) {
   return { success: false, code, message };
 }
 
+// A stored soundcloudUrl is handed to the SoundCloud widget on every client in
+// the room, so only the canonical track address is accepted.
+export const MAX_SOUNDCLOUD_URL_LENGTH = 300;
+const SOUNDCLOUD_TRACK_URL = /^https:\/\/soundcloud\.com\/[^/?#]+\/[^/?#]+$/;
+
+type TrackSources = { previewUrl?: string; videoId?: string; soundcloudUrl?: string };
+
+/**
+ * Why a track's source fields cannot be stored, or null when they can. A
+ * soundcloudUrl has its length checked before its shape, and a track names at
+ * most one source.
+ */
+function trackSourceFailure({ previewUrl, videoId, soundcloudUrl }: TrackSources) {
+  if (soundcloudUrl !== undefined) {
+    if (soundcloudUrl.length > MAX_SOUNDCLOUD_URL_LENGTH) {
+      return submitSongFailure("soundcloud_url_too_long", "That SoundCloud link is too long to play.");
+    }
+    if (!SOUNDCLOUD_TRACK_URL.test(soundcloudUrl)) {
+      return submitSongFailure("soundcloud_url_invalid", "That SoundCloud link can't be played.");
+    }
+  }
+  const sources = [previewUrl, videoId, soundcloudUrl].filter((source) => source !== undefined);
+  if (sources.length > 1) {
+    return submitSongFailure("multiple_track_sources", "That song can't be submitted. Please pick it again.");
+  }
+  return null;
+}
+
 function submitRatingFailure(code: string, message: string) {
   return { success: false, code, message };
 }
@@ -94,16 +122,22 @@ export const submitSong = mutation({
       name: v.string(),
       artist: v.string(),
       albumCover: v.string(),
-      // A track is EITHER a YouTube video (videoId, full song) OR an
-      // iTunes/Deezer preview (previewUrl, 30s) — so both are optional.
+      // A track has exactly one source: a YouTube video (videoId, full
+      // song), a SoundCloud track (soundcloudUrl, full song) or an
+      // iTunes/Deezer preview (previewUrl, 30s), so all three are optional.
       previewUrl: v.optional(v.string()),
       videoId: v.optional(v.string()),
-      // For YouTube tracks the window ranges over the full song; for preview
-      // tracks it's omitted (the whole 30s clip is the snippet).
+      soundcloudUrl: v.optional(v.string()),
+      // For YouTube and SoundCloud tracks the window ranges over the full
+      // song; for preview tracks it's omitted (the whole 30s clip is the
+      // snippet).
       snippet: v.optional(v.object({ startTime: v.number(), endTime: v.number() })),
     }),
   },
   handler: async (ctx, { code, playerId, connectionId, trackId, trackDetails }) => {
+    const sourceFailure = trackSourceFailure(trackDetails);
+    if (sourceFailure) return sourceFailure;
+
     const room = await getRoom(ctx, code);
 
     if (!room || room.phase !== "songSelection") {
@@ -691,6 +725,7 @@ export const getCurrentRatingSong = query({
       albumCover: submission.trackDetails.albumCover,
       previewUrl: submission.trackDetails.previewUrl,
       videoId: submission.trackDetails.videoId,
+      soundcloudUrl: submission.trackDetails.soundcloudUrl,
       snippet: submission.trackDetails.snippet,
       player: {
         id: submission.playerId,
@@ -1071,21 +1106,22 @@ export const advanceRating = internalMutation({
 });
 
 /**
- * How long the clip for a submission plays, in ms: its YouTube window when it
- * has one, the whole rating window for a full-song YouTube track, else a
- * 30 s preview, or 0 when the track has nothing playable. Never more than
- * the rating timeout.
+ * How long the clip for a submission plays, in ms: its window when it has
+ * one, the whole rating window for a full-song (YouTube or SoundCloud) track
+ * in a room with no snippet limit, else a 30 s preview, or 0 when the track
+ * has nothing playable. Never more than the rating timeout.
  */
 export function clipLengthMs(
   trackDetails: Doc<"submissions">["trackDetails"],
   snippetDuration: number | undefined
 ): number {
-  if (!trackDetails.previewUrl && !trackDetails.videoId) return 0; // nothing to play
+  const fullSong = trackDetails.videoId || trackDetails.soundcloudUrl;
+  if (!trackDetails.previewUrl && !fullSong) return 0; // nothing to play
   const w = trackDetails.snippet;
   let ms = DEFAULT_CLIP_MS;
   if (w && Number.isFinite(w.startTime) && Number.isFinite(w.endTime) && w.endTime > w.startTime) {
     ms = (w.endTime - w.startTime) * 1000;
-  } else if (trackDetails.videoId && snippetDuration === 0) {
+  } else if (fullSong && snippetDuration === 0) {
     ms = RATING_TIMEOUT_MS;
   }
   return Math.min(ms, RATING_TIMEOUT_MS);
