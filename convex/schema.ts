@@ -127,6 +127,43 @@ export const dailyRetentionValidator = v.object({
   d30: v.optional(retentionPoint),
 });
 
+// Published content (see content.ts and contentJob.ts).
+export const publishStatusValidator = v.union(v.literal("live"), v.literal("held"));
+// One ranked chart row: a publishedSongs or publishedArtists slug and the
+// list's number (picks, average rating, rating spread or picks gained).
+const chartRow = v.object({ slug: v.string(), value: v.number() });
+export const chartListsValidator = v.object({
+  mostPickedSongs: v.array(chartRow),
+  mostPickedArtists: v.array(chartRow),
+  highestRated: v.array(chartRow),
+  mostDivisive: v.array(chartRow),
+  // null when no baseline from an earlier week existed at compute time.
+  movers: v.union(v.array(chartRow), v.null()),
+});
+export const topPromptsValidator = v.array(v.object({ prompt: v.string(), picks: v.number() }));
+export const songPageStatsFields = {
+  slug: v.string(),
+  picks: v.number(),
+  wins: v.number(),
+  ratingCount: v.number(),
+  ratingSum: v.number(),
+  ratingHist: v.array(v.number()), // counts of 1..5 ratings
+  rank: v.number(), // 1-based, by picks among every song in songStats
+  topPrompts: topPromptsValidator,
+};
+export const artistPageStatsFields = {
+  slug: v.string(),
+  picks: v.number(),
+  ratingCount: v.number(),
+  ratingSum: v.number(),
+  topPrompts: topPromptsValidator,
+};
+export const baselineSongValidator = v.object({
+  songKey: v.string(),
+  picks: v.number(),
+  ratingCount: v.number(),
+});
+
 export default defineSchema({
   rooms: defineTable({
     code: v.string(),
@@ -330,6 +367,79 @@ export default defineSchema({
   })
     .index("by_song_prompt", ["songKey", "prompt"])
     .index("by_prompt_picks", ["prompt", "picks"]),
+
+  // --- Published content ---
+  // One row per song that has reached the publishing bar. Only "live" rows are
+  // public. title, artist and year come from MusicBrainz when mbid is set;
+  // without it they are the two halves of songKey. slug is unique and never
+  // changes once written. The weekly job only inserts here.
+  publishedSongs: defineTable({
+    songKey: v.string(),
+    slug: v.string(),
+    title: v.string(),
+    artist: v.string(),
+    artistSlug: v.string(), // publishedArtists.slug, present for every row
+    year: v.optional(v.number()),
+    mbid: v.optional(v.string()), // MusicBrainz recording id
+    status: publishStatusValidator,
+    heldReason: v.optional(
+      v.union(v.literal("no_match"), v.literal("filtered"), v.literal("manual"))
+    ),
+    publishedAt: v.number(),
+  })
+    .index("by_songKey", ["songKey"])
+    .index("by_slug", ["slug"])
+    .index("by_status", ["status"])
+    .index("by_artistSlug_and_status", ["artistSlug", "status"]),
+
+  // One row per artist of a publishedSongs row. artistKey is the artist half
+  // of songKey. A row is "held" with reason "below_bar" until the artist has
+  // enough picks and a live song; the weekly job lifts only that reason.
+  publishedArtists: defineTable({
+    artistKey: v.string(),
+    slug: v.string(),
+    name: v.string(),
+    status: publishStatusValidator,
+    heldReason: v.optional(
+      v.union(v.literal("below_bar"), v.literal("filtered"), v.literal("manual"))
+    ),
+    publishedAt: v.number(),
+  })
+    .index("by_artistKey", ["artistKey"])
+    .index("by_slug", ["slug"])
+    .index("by_status", ["status"]),
+
+  // Stats shown on a song or artist page, copied from songStats by the weekly
+  // job so the public read never touches songStats. One row per published row.
+  publishedSongStats: defineTable({
+    ...songPageStatsFields,
+    computedAt: v.number(),
+  }).index("by_slug", ["slug"]),
+
+  publishedArtistStats: defineTable({
+    ...artistPageStatsFields,
+    computedAt: v.number(),
+  }).index("by_slug", ["slug"]),
+
+  // One row per ISO week ("2026-W47"). Recomputing a week replaces lists and
+  // computedAt and keeps the note. Only an approved note is public.
+  chartWeeks: defineTable({
+    week: v.string(),
+    computedAt: v.number(),
+    lists: chartListsValidator,
+    note: v.optional(v.string()),
+    noteStatus: v.union(v.literal("none"), v.literal("draft"), v.literal("approved")),
+    approvedAt: v.optional(v.number()),
+  }).index("by_week", ["week"]),
+
+  // Cumulative picks and ratingCount of every song with at least
+  // BASELINE_MIN_PICKS picks when a week was computed, split into chunks so no
+  // document nears the size limit. The next week's movers are the difference.
+  chartBaselines: defineTable({
+    week: v.string(),
+    chunk: v.number(), // 0-based
+    songs: v.array(baselineSongValidator),
+  }).index("by_week_and_chunk", ["week", "chunk"]),
 
   // A saved copy of a finished game, opened by its link after the room is
   // gone (see results.ts). Holds no player ids or submission ids, only keys

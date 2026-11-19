@@ -10,6 +10,11 @@
 
 import type * as analytics from "../analytics.js";
 import type * as concurrency from "../concurrency.js";
+import type * as content from "../content.js";
+import type * as contentBlocklist from "../contentBlocklist.js";
+import type * as contentJob from "../contentJob.js";
+import type * as contentLib from "../contentLib.js";
+import type * as contentSeed from "../contentSeed.js";
 import type * as crons from "../crons.js";
 import type * as dailyMetrics from "../dailyMetrics.js";
 import type * as feedback from "../feedback.js";
@@ -23,6 +28,7 @@ import type * as game_rooms from "../game/rooms.js";
 import type * as game_scheduler from "../game/scheduler.js";
 import type * as http from "../http.js";
 import type * as metricsRollup from "../metricsRollup.js";
+import type * as musicBrainz from "../musicBrainz.js";
 import type * as news from "../news.js";
 import type * as presence from "../presence.js";
 import type * as quickPlay from "../quickPlay.js";
@@ -43,6 +49,11 @@ import type {
 declare const fullApi: ApiFromModules<{
   analytics: typeof analytics;
   concurrency: typeof concurrency;
+  content: typeof content;
+  contentBlocklist: typeof contentBlocklist;
+  contentJob: typeof contentJob;
+  contentLib: typeof contentLib;
+  contentSeed: typeof contentSeed;
   crons: typeof crons;
   dailyMetrics: typeof dailyMetrics;
   feedback: typeof feedback;
@@ -56,6 +67,7 @@ declare const fullApi: ApiFromModules<{
   "game/scheduler": typeof game_scheduler;
   http: typeof http;
   metricsRollup: typeof metricsRollup;
+  musicBrainz: typeof musicBrainz;
   news: typeof news;
   presence: typeof presence;
   quickPlay: typeof quickPlay;
