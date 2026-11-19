@@ -5,6 +5,12 @@
  * stored in songStats. Only musicbrainz.org is called, with the User-Agent
  * MusicBrainz requires and at most one request per REQUEST_INTERVAL_MS (the
  * caller paces requests with makePacer).
+ *
+ * MusicBrainz lists one song as many recordings (single, album, clean, live,
+ * video), and credits featured artists in the artist credit: "The Weeknd
+ * feat. Daft Punk". A song key holds the lead artist only, so the recordings
+ * of one key carry different credits, scores and first release dates.
+ * pickRecording reads them as one song.
  */
 import { clean } from "./songStats";
 import { splitSongKey, type RecordingMatch } from "./contentLib";
@@ -15,7 +21,7 @@ export const MUSICBRAINZ_USER_AGENT = "AuxWars/1.0 ( https://www.aux-wars.com )"
 // MusicBrainz allows one request per second per client.
 export const REQUEST_INTERVAL_MS = 1100;
 const REQUEST_TIMEOUT_MS = 10_000;
-// A search result below this score is never accepted.
+// A song is matched only when one of its recordings scores at least this.
 export const MIN_SCORE = 90;
 const RESULT_LIMIT = 25;
 const MAX_NAME = 300;
@@ -44,43 +50,70 @@ function creditName(credit: unknown): string {
     .trim();
 }
 
-function releaseYear(date: unknown): number | undefined {
-  if (typeof date !== "string") return undefined;
+/**
+ * The artist name to publish for a credit, or "" when the credit is not the
+ * key's artist. The whole credit is used when it equals the key half under
+ * clean(). Otherwise the first credited name is used when it equals the key
+ * half, which covers "Travis Scott feat. Playboi Carti" for a "travis scott"
+ * key. Either way the returned name cleans to artistKey.
+ */
+function artistFor(credit: unknown, artistKey: string): string {
+  const whole = creditName(credit);
+  if (whole && clean(whole) === artistKey) return whole;
+  const first = Array.isArray(credit) ? (credit[0] as ArtistCredit | null)?.name : undefined;
+  const lead = typeof first === "string" ? first.trim() : "";
+  return lead && clean(lead) === artistKey ? lead : "";
+}
+
+const RELEASE_DATE = /^\d{4}(-\d{2}(-\d{2})?)?$/;
+const UNDATED = "9999-99-99";
+
+/**
+ * Year of a first release date, and a string that sorts recordings by it,
+ * earliest first. MusicBrainz dates are "2016", "2016-09" or "2016-09-22". A
+ * missing month or day sorts after every known one in the same year, and a
+ * recording without a usable date sorts last.
+ */
+function firstRelease(date: unknown): { year: number | undefined; released: string } {
+  if (typeof date !== "string" || !RELEASE_DATE.test(date)) return { year: undefined, released: UNDATED };
   const year = Number(date.slice(0, 4));
-  return Number.isInteger(year) && year >= 1000 && year <= 2100 ? year : undefined;
+  if (year < 1000 || year > 2100) return { year: undefined, released: UNDATED };
+  return { year, released: date + "-99-99".slice(date.length - 4) };
 }
 
 /**
  * Picks the recording to publish from a search response, or null.
  *
- * A recording is accepted only when its score is at least MIN_SCORE and its
- * title and artist credit, run through clean(), equal the two halves of the
- * song key. Among accepted recordings the earliest first release wins (the
- * same song is listed once per release), then the higher score.
+ * A recording belongs to the song when its title, run through clean(), equals
+ * the title half of the song key and its artist credit names the key's artist
+ * (artistFor). The song is matched when at least one of those recordings
+ * scores MIN_SCORE or more. The recording returned is the earliest first
+ * release among all of them, whatever its own score: the best scored one is
+ * often a later live or undated copy, and its date is not the song's. Equal
+ * dates go to the higher score, then to the earlier position in the response.
  */
 export function pickRecording(songKey: string, body: unknown): RecordingMatch | null {
   const recordings = (body as { recordings?: unknown } | null)?.recordings;
   if (!Array.isArray(recordings)) return null;
   const { artistKey, titleKey } = splitSongKey(songKey);
 
-  let best: (RecordingMatch & { score: number }) | null = null;
-  for (const r of recordings as Record<string, unknown>[]) {
-    const score = Number(r?.score);
-    if (!(score >= MIN_SCORE)) continue;
+  let best: (RecordingMatch & { score: number; released: string }) | null = null;
+  let matched = false;
+  for (const r of recordings as (Record<string, unknown> | null)[]) {
+    if (r === null || typeof r !== "object") continue;
     const title = typeof r.title === "string" ? r.title.trim() : "";
-    const artist = creditName(r["artist-credit"]);
     const mbid = typeof r.id === "string" ? r.id : "";
-    if (!title || !artist || !mbid) continue;
-    if (title.length > MAX_NAME || artist.length > MAX_NAME) continue;
-    if (clean(title) !== titleKey || clean(artist) !== artistKey) continue;
-    const year = releaseYear(r["first-release-date"]);
+    if (!title || !mbid || title.length > MAX_NAME || clean(title) !== titleKey) continue;
+    const artist = artistFor(r["artist-credit"], artistKey);
+    if (!artist || artist.length > MAX_NAME) continue;
+    const score = Number(r.score) || 0;
+    if (score >= MIN_SCORE) matched = true;
+    const { year, released } = firstRelease(r["first-release-date"]);
     const earlier =
-      best === null ||
-      (year ?? Infinity) < (best.year ?? Infinity) ||
-      ((year ?? Infinity) === (best.year ?? Infinity) && score > best.score);
-    if (earlier) best = { title, artist, year, mbid, score };
+      best === null || released < best.released || (released === best.released && score > best.score);
+    if (earlier) best = { title, artist, year, mbid, score, released };
   }
-  if (!best) return null;
+  if (!best || !matched) return null;
   return { title: best.title, artist: best.artist, year: best.year, mbid: best.mbid };
 }
 

@@ -371,7 +371,8 @@ export default defineSchema({
   // --- Published content ---
   // One row per song that has reached the publishing bar. Only "live" rows are
   // public. title, artist and year come from MusicBrainz when mbid is set;
-  // without it they are the two halves of songKey. slug is unique and never
+  // without it title and artist are the two halves of songKey. All three can
+  // be corrected by hand (content:setSongDetails). slug is unique and never
   // changes once written. The weekly job only inserts here.
   publishedSongs: defineTable({
     songKey: v.string(),

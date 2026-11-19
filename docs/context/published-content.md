@@ -17,6 +17,24 @@ Held reasons: `no_match` (MusicBrainz had no exact match), `filtered` (a word
 from `convex/contentBlocklist.ts`), `manual` (set by hand), and for artists
 `below_bar` (fewer than 50 picks, or no live song yet).
 
+## MusicBrainz match
+
+One search per song key returns up to 25 recordings (`pickRecording` in
+`convex/musicBrainz.ts`).
+
+- A recording belongs to the song when its title equals the title half of the
+  key under `clean()`, and either its whole artist credit or its first
+  credited name equals the artist half. `Travis Scott feat. Playboi Carti`
+  belongs to a `travis scott|...` key; it does not belong to a
+  `playboi carti|...` key.
+- The song is matched when at least one of those recordings scores 90 or
+  more. Otherwise it is held as `no_match`.
+- The published recording is the earliest first release among all of them,
+  whatever its own score. `title`, `year` and `mbid` are that recording's.
+- `artist` is the whole credit when it equals the artist half, otherwise the
+  first credited name. It always equals the artist half under `clean()`, so a
+  featured artist is never part of a published name.
+
 ## Weekly job
 
 `contentJob:runWeekly` is an internal action. A cron runs it every Monday at
@@ -48,11 +66,18 @@ production.
 ```
 npx convex run content:setSongStatus '{"slug":"hey-ya-outkast","status":"held"}'
 npx convex run content:setArtistStatus '{"slug":"outkast","status":"live"}'
+npx convex run content:setSongDetails '{"slug":"hey-ya-outkast","title":"Hey Ya!","artist":"OutKast","year":2003}'
+npx convex run content:setArtistName '{"slug":"outkast","name":"OutKast"}'
 npx convex run content:setChartNote '{"week":"2026-W47","note":"..."}'
 npx convex run content:approveChartNote '{"week":"2026-W47"}'
 npx convex run content:triggerDeploy
 ```
 
+- `setSongDetails` takes any of `title`, `artist` and `year` and changes only
+  those; `"year": null` removes the year. `artist` is the name shown with
+  the song. The name on an artist page is set with `setArtistName`. Neither
+  changes a slug, a status or `artistSlug`.
+- A changed row reaches the site at the next build (`triggerDeploy`).
 - `setChartNote` stores a draft. Saving over an approved note makes it a draft
   again. An empty note removes it.
 - `approveChartNote` makes the note public and schedules `triggerDeploy`,
@@ -123,8 +148,14 @@ earlier baseline.
 - A slug is used verbatim as a file name and a URL. It matches `[a-z0-9-]`, is
   at most 80 characters, and is permanent: changing one breaks a published URL.
 - A held `no_match` song has no MusicBrainz names; its `title` and `artist`
-  are the lower case halves of its song key. Setting it live by hand publishes
-  those strings.
+  are the lower case halves of its song key, and so is the name of an artist
+  row created for it. Setting it live by hand publishes those strings: name
+  it first with `setSongDetails` and `setArtistName`.
+- The weekly job writes `title`, `artist`, `year` and `mbid` once, when it
+  inserts the row, and never looks a song up again. A wrong value stays until
+  it is corrected by hand.
+- A newly matched song renames its artist row only while that row's `name`
+  still equals its `artistKey`.
 - Chart lists store slugs. A song or artist set to `held` after a week was
   computed drops out of that week's lists at read time, and the rows below it
   move up.

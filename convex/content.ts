@@ -5,6 +5,8 @@
  * Hand controls are internal, so only the CLI or dashboard can run them:
  *   npx convex run content:setSongStatus '{"slug":"hey-ya-outkast","status":"held"}'
  *   npx convex run content:setArtistStatus '{"slug":"outkast","status":"live"}'
+ *   npx convex run content:setSongDetails '{"slug":"hey-ya-outkast","year":2003}'
+ *   npx convex run content:setArtistName '{"slug":"outkast","name":"OutKast"}'
  *   npx convex run content:setChartNote '{"week":"2026-W47","note":"..."}'
  *   npx convex run content:approveChartNote '{"week":"2026-W47"}'
  * (add --prod for production).
@@ -27,6 +29,7 @@ const CHARTS_PAGE = 8;
 // sizes above, no call reads more than a few thousand documents.
 const MAX_ARTIST_SONGS = 100;
 const MAX_NOTE = 5000;
+const MAX_NAME = 300;
 
 const songItem = v.object({
   slug: v.string(),
@@ -315,6 +318,64 @@ export const setArtistStatus = internalMutation({
     if (row.status === status) return { slug, status, changed: false };
     await ctx.db.patch(row._id, { status, heldReason: status === "held" ? "manual" : undefined });
     return { slug, status, changed: true };
+  },
+});
+
+// A title or name typed by hand: trimmed, not empty, at most MAX_NAME long.
+function handName(field: string, value: string): string {
+  const text = value.trim();
+  if (!text) throw new Error(`${field} is empty`);
+  if (text.length > MAX_NAME) throw new Error(`${field} is longer than ${MAX_NAME} characters`);
+  return text;
+}
+
+/**
+ * Internal: correct the title, artist or year shown for a published song.
+ * Only the fields passed change; `year: null` removes the year. The slug,
+ * status and artistSlug do not change, and the weekly job never writes these
+ * fields again. `artist` is the name shown with the song; the name on the
+ * artist page is publishedArtists.name (setArtistName).
+ */
+export const setSongDetails = internalMutation({
+  args: {
+    slug: v.string(),
+    title: v.optional(v.string()),
+    artist: v.optional(v.string()),
+    year: v.optional(v.union(v.number(), v.null())),
+  },
+  handler: async (ctx, { slug, title, artist, year }) => {
+    const row = await ctx.db
+      .query("publishedSongs")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .unique();
+    if (!row) throw new Error(`No published song with slug "${slug}"`);
+    if (year !== undefined && year !== null && !(Number.isInteger(year) && year >= 1000 && year <= 2100)) {
+      throw new Error(`Not a release year: ${year}`);
+    }
+    const next = {
+      title: title === undefined ? row.title : handName("title", title),
+      artist: artist === undefined ? row.artist : handName("artist", artist),
+      year: year === undefined ? row.year : year ?? undefined,
+    };
+    const changed = next.title !== row.title || next.artist !== row.artist || next.year !== row.year;
+    if (changed) await ctx.db.patch(row._id, next);
+    return { slug, title: next.title, artist: next.artist, year: next.year ?? null, changed };
+  },
+});
+
+/** Internal: correct the name shown for a published artist. Its slug does not change. */
+export const setArtistName = internalMutation({
+  args: { slug: v.string(), name: v.string() },
+  handler: async (ctx, { slug, name }) => {
+    const row = await ctx.db
+      .query("publishedArtists")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .unique();
+    if (!row) throw new Error(`No published artist with slug "${slug}"`);
+    const text = handName("name", name);
+    if (text === row.name) return { slug, name: text, changed: false };
+    await ctx.db.patch(row._id, { name: text });
+    return { slug, name: text, changed: true };
   },
 });
 

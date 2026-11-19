@@ -73,6 +73,52 @@ function rec(title: string, artist: string, date?: string, score = 100): Recordi
   };
 }
 
+/**
+ * A recording with a multi-artist credit, written as names and join phrases
+ * in turn: credited("id", 85, "Starboy", ["The Weeknd", " feat. ", "Daft Punk"]).
+ */
+function credited(id: string, score: number, title: string, credit: string[], date?: string): Recording {
+  const artists: Recording["artist-credit"] = [];
+  for (let i = 0; i < credit.length; i += 2) artists.push({ name: credit[i], joinphrase: credit[i + 1] });
+  return { id, score, title, "artist-credit": artists, "first-release-date": date };
+}
+
+// Search responses as musicbrainz.org returned them on 2026-11-19, cut down
+// to the rows that decide the match. The featured artist is in the credit of
+// the original recordings and absent from the song key.
+const WEEKND = ["The Weeknd", " feat. ", "Daft Punk"];
+const STARBOY: Recording[] = [
+  credited("starboy-undated", 100, "Starboy", ["The Weeknd"]),
+  credited("starboy-live-clean", 100, "Starboy", ["The Weeknd"], "2023-03-03"),
+  credited("starboy-live-explicit", 100, "Starboy", ["The Weeknd"], "2023-03-03"),
+  credited("starboy-atmos", 85, "Starboy", WEEKND, "2019-11-07"),
+  credited("starboy-snl", 85, "Starboy", WEEKND, "2016-10-01"),
+  credited("starboy-single", 85, "Starboy", ["The Weeknd", " ft. ", "Daft Punk"], "2016-09-22"),
+  credited("starboy-video", 85, "Starboy", WEEKND, "2017-02"),
+  credited("starboy-album", 85, "Starboy", ["The Weeknd", " featuring ", "Daft Punk"], "2016-11-04"),
+  credited("starboy-medley", 81, "Crew Love / Starboy", ["The Weeknd"], "2022"),
+  credited("starboy-kygo", 71, "Starboy (Kygo remix)", ["The Weeknd", " & ", "Daft Punk"], "2016-11-11"),
+];
+const TRAVIS = ["Travis Scott", " feat. ", "Playboi Carti"];
+const FEIN: Recording[] = [
+  credited("fein-griz", 100, "Fe!n (GRiZ flip)", ["Travis Scott"], "2025-06-17"),
+  credited("fein-atmos", 95, "FE!N", TRAVIS, "2023-09-23"),
+  credited("fein-video", 95, "FE!N", TRAVIS, "2024-04-01"),
+  credited("fein-album", 95, "FE!N", TRAVIS, "2023-07-28"),
+  credited("fein-clean", 95, "FE!N", TRAVIS, "2023-09-21"),
+  credited("fein-v1", 86, "FE!N", [...TRAVIS, " & ", "Sheck Wes"], "2023-07-28"),
+  credited("fein-bootleg", 82, "fe!n (saka bootleg)", ["travis scott", " ft. ", "playboi carti"], "2024-11-29"),
+  credited("fein-dj-mix", 54, "All I Want for Christmas Is You / FE!N", ["Mariah Carey", " / ", ...TRAVIS], "2025-06-01"),
+];
+const ROCKSTAR: Recording[] = [
+  credited("rockstar-undated", 100, "rockstar", ["Post Malone"]),
+  credited("rockstar-remix", 89, "Rockstar (Echo3zDown Remix)", ["Post Malone"], "2018-07-10"),
+  credited("rockstar-2018", 80, "Rockstar", ["Post Malone", " featuring ", "21 Savage"], "2018-03-23"),
+  credited("rockstar-year-only", 80, "Rockstar", ["Post Malone", " feat. ", "21 Savage"], "2018"),
+  credited("rockstar-single", 80, "rockstar", ["Post Malone", " feat. ", "21 Savage"], "2017-09-15"),
+  credited("rockstar-duo", 80, "rockstar", ["Post Malone", " & ", "21 Savage"], "2017-10-13"),
+];
+
 type Call = { url: URL; at: number; userAgent: string | null; method: string };
 
 /** Replaces fetch. `catalog` maps a song key to the recordings a search returns. */
@@ -341,6 +387,66 @@ describe("MusicBrainz matching", () => {
       year: 1978,
     });
     expect(pickRecording(key, { recordings: [rec("Hey Ya!", "OutKast")] })).toMatchObject({ year: undefined });
+  });
+
+  test("a featured artist in the credit is the same song, published under the lead artist", () => {
+    // "FE!N (feat. Playboi Carti)" and "FE!N" share a key; every original
+    // recording is credited "Travis Scott feat. Playboi Carti".
+    expect(songKey("FE!N (feat. Playboi Carti)", "Travis Scott")).toBe("travis scott|fe n");
+    expect(pickRecording("travis scott|fe n", { recordings: FEIN })).toEqual({
+      title: "FE!N",
+      artist: "Travis Scott",
+      year: 2023,
+      mbid: "fein-album", // the earliest release; same day as fein-v1, higher score
+    });
+    // The featured artist's own key is not this song.
+    expect(pickRecording("playboi carti|fe n", { recordings: FEIN })).toBeNull();
+    expect(pickRecording("daft punk|starboy", { recordings: STARBOY })).toBeNull();
+  });
+
+  test("the year is the earliest release of the song, not of the best scored recording", () => {
+    // The recordings credited to The Weeknd alone score 100 and are undated
+    // or a 2023 live album; the 2016 originals credit Daft Punk and score 85.
+    expect(pickRecording("the weeknd|starboy", { recordings: STARBOY })).toEqual({
+      title: "Starboy",
+      artist: "The Weeknd",
+      year: 2016,
+      mbid: "starboy-single",
+    });
+    expect(pickRecording("post malone|rockstar", { recordings: ROCKSTAR })).toEqual({
+      title: "rockstar",
+      artist: "Post Malone",
+      year: 2017,
+      mbid: "rockstar-single",
+    });
+    // Response order does not change the pick.
+    expect(pickRecording("the weeknd|starboy", { recordings: [...STARBOY].reverse() })).toMatchObject({
+      year: 2016,
+      mbid: "starboy-single",
+    });
+  });
+
+  test("no recording of the song at score 90 or more is no match", () => {
+    const below = STARBOY.filter((r) => r.score < 90);
+    expect(below.some((r) => r.title === "Starboy")).toBe(true);
+    expect(pickRecording("the weeknd|starboy", { recordings: below })).toBeNull();
+    // A remix at 100 does not vouch for the song.
+    expect(
+      pickRecording("travis scott|fe n", { recordings: FEIN.filter((r) => r.score < 90 || r.id === "fein-griz") })
+    ).toBeNull();
+  });
+
+  test("a date with a known month or day beats the bare year, and a bad date counts as none", () => {
+    const at = (id: string, date?: string) => credited(id, 100, "Hey Ya!", ["OutKast"], date);
+    expect(pickRecording(key, { recordings: [at("year", "2003"), at("day", "2003-09-23"), at("month", "2003-09")] })).toMatchObject({
+      mbid: "day",
+      year: 2003,
+    });
+    expect(pickRecording(key, { recordings: [at("bad", "0000"), at("worse", "soon"), at("good", "2004-01-01")] })).toMatchObject({
+      mbid: "good",
+      year: 2004,
+    });
+    expect(pickRecording(key, { recordings: [at("bad", "0000")] })).toMatchObject({ mbid: "bad", year: undefined });
   });
 
   test("ignores malformed responses", () => {
@@ -648,6 +754,47 @@ describe("weekly job", () => {
     expect(await table(t, "chartWeeks")).toHaveLength(1);
   });
 
+  test("a song whose recordings credit a featured artist gets a page, the right year and its chart rows", async () => {
+    const t = setup();
+    stubFetch({ "travis scott|fe n": FEIN, "the weeknd|starboy": STARBOY });
+    await stat(t, "FE!N (feat. Playboi Carti)", "Travis Scott", { picks: 117, wins: 40, hist: [5, 10, 40, 100, 200] });
+    await stat(t, "Starboy", "The Weeknd", { picks: 30, hist: fives(60) });
+    await runWeekly(t, { week: "2026-W46" });
+
+    const songs = await table(t, "publishedSongs");
+    expect(songs.find((s) => s.songKey === "travis scott|fe n")).toMatchObject({
+      slug: "fe-n-travis-scott",
+      title: "FE!N",
+      artist: "Travis Scott",
+      artistSlug: "travis-scott",
+      year: 2023,
+      mbid: "fein-album",
+      status: "live",
+    });
+    expect(songs.find((s) => s.songKey === "the weeknd|starboy")).toMatchObject({
+      slug: "starboy-the-weeknd",
+      artist: "The Weeknd",
+      year: 2016,
+      status: "live",
+    });
+    // The artist row is named after the lead artist, never the whole credit.
+    expect((await table(t, "publishedArtists")).map((a) => [a.slug, a.name, a.status]).sort()).toEqual([
+      ["the-weeknd", "The Weeknd", "held"],
+      ["travis-scott", "Travis Scott", "live"],
+    ]);
+
+    expect((await readAll(t, "songs")).find((s) => s.slug === "fe-n-travis-scott")).toMatchObject({
+      title: "FE!N",
+      artist: "Travis Scott",
+      year: 2023,
+      picks: 117,
+      rank: 1,
+    });
+    const [chart] = await readAll(t, "charts");
+    expect(chart.lists.mostPickedSongs[0]).toMatchObject({ rank: 1, slug: "fe-n-travis-scott", value: 117 });
+    expect(chart.lists.mostPickedArtists).toEqual([{ rank: 1, slug: "travis-scott", name: "Travis Scott", value: 117 }]);
+  });
+
   test("an artist first seen through an unmatched song takes its name from a later match", async () => {
     const t = setup();
     stubFetch({});
@@ -872,6 +1019,76 @@ describe("content:published", () => {
     await t.mutation(internal.content.setSongStatus, { slug: "september-earth-wind-and-fire", status: "live" });
     expect((await readAll(t, "songs")).map((s) => s.slug)).toContain("september-earth-wind-and-fire");
     await expect(t.mutation(internal.content.setSongStatus, { slug: "nope", status: "live" })).rejects.toThrow();
+  });
+
+  test("a song's title, artist and year can be corrected by hand and stay corrected", async () => {
+    const t = await publishedBank();
+    const slug = "september-earth-wind-and-fire";
+    expect(await t.mutation(internal.content.setSongDetails, { slug, year: 1979 })).toEqual({
+      slug,
+      title: "September",
+      artist: "Earth, Wind & Fire",
+      year: 1979,
+      changed: true,
+    });
+    expect(await t.mutation(internal.content.setSongDetails, { slug, year: 1979 })).toMatchObject({ changed: false });
+    expect(await t.mutation(internal.content.setSongDetails, { slug, title: "  September (single)  ", artist: "EWF" })).toMatchObject({
+      title: "September (single)",
+      artist: "EWF",
+      year: 1979,
+      changed: true,
+    });
+
+    // A later run changes none of it, and the slug and artist link stay put.
+    await runWeekly(t, { week: "2026-W47" });
+    expect((await readAll(t, "songs")).find((s) => s.slug === slug)).toMatchObject({
+      title: "September (single)",
+      artist: "EWF",
+      artistSlug: "earth-wind-and-fire",
+      year: 1979,
+    });
+    const [chart] = await readAll(t, "charts");
+    expect(chart.lists.mostPickedSongs.find((r: any) => r.slug === slug)).toMatchObject({ title: "September (single)", artist: "EWF" });
+    expect((await table(t, "publishedSongs")).find((s) => s.slug === slug)).toMatchObject({
+      songKey: "earth wind and fire|september",
+      status: "live",
+      mbid: "mbid-September-1978-11-18",
+    });
+
+    expect(await t.mutation(internal.content.setSongDetails, { slug, year: null })).toMatchObject({ year: null, changed: true });
+    expect((await readAll(t, "songs")).find((s) => s.slug === slug)).toMatchObject({ year: null });
+
+    await expect(t.mutation(internal.content.setSongDetails, { slug: "nope", year: 2000 })).rejects.toThrow();
+    await expect(t.mutation(internal.content.setSongDetails, { slug, title: "   " })).rejects.toThrow();
+    await expect(t.mutation(internal.content.setSongDetails, { slug, artist: "x".repeat(301) })).rejects.toThrow();
+    for (const year of [999, 2101, 2016.5]) {
+      await expect(t.mutation(internal.content.setSongDetails, { slug, year })).rejects.toThrow();
+    }
+  });
+
+  test("a held song with no MusicBrainz names can be named by hand before it goes live", async () => {
+    const t = await publishedBank();
+    const slug = "unknown-jam-nobody-band";
+    await t.mutation(internal.content.setSongDetails, { slug, title: "Unknown Jam", artist: "Nobody Band", year: 2020 });
+    expect(await t.mutation(internal.content.setArtistName, { slug: "nobody-band", name: " Nobody Band " })).toEqual({
+      slug: "nobody-band",
+      name: "Nobody Band",
+      changed: true,
+    });
+    expect(await t.mutation(internal.content.setArtistName, { slug: "nobody-band", name: "Nobody Band" })).toMatchObject({ changed: false });
+    await t.mutation(internal.content.setSongStatus, { slug, status: "live" });
+    await t.mutation(internal.content.setArtistStatus, { slug: "nobody-band", status: "live" });
+
+    expect((await readAll(t, "songs")).find((s) => s.slug === slug)).toMatchObject({
+      title: "Unknown Jam",
+      artist: "Nobody Band",
+      artistSlug: "nobody-band",
+      year: 2020,
+    });
+    expect((await readAll(t, "artists")).find((a) => a.slug === "nobody-band")).toMatchObject({ name: "Nobody Band" });
+
+    await expect(t.mutation(internal.content.setArtistName, { slug: "nope", name: "X" })).rejects.toThrow();
+    await expect(t.mutation(internal.content.setArtistName, { slug: "nobody-band", name: "" })).rejects.toThrow();
   });
 
   test("an artist held by hand stays held through later runs", async () => {
