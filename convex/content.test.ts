@@ -841,7 +841,7 @@ describe("weekly job", () => {
       "unknown-jam-nobody-band",
     ]);
     const requestsFor = (songKey: string) =>
-      calls.filter((c) => c.url.searchParams.get("query")!.includes(`"${songKey.split("|")[1]}"`)).length;
+      calls.filter((c) => c.url.searchParams.get("query")!.includes(`(${songKey.split("|")[1]})`)).length;
     expect(requestsFor("earth wind and fire|september")).toBe(3);
     expect(requestsFor("outkast|ms jackson")).toBe(1 + RETRY_WAITS_MS.length);
     // Retries included, no two requests are closer than a second.
