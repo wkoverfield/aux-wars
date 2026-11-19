@@ -15,6 +15,9 @@ const DEBOUNCE_MS = 350;
  * it was skipped by the backoff). Both are read through refs, so passing new
  * functions does not restart a search.
  */
+// One token that reads as an address: optional scheme, a dotted host, a path.
+const PASTED_LINK = /^(https?:\/\/)?[^\s/]+\.[^\s/]+\/\S*$/i;
+
 export function useSongSearch({ onNoResults, onFailed } = {}) {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -65,7 +68,9 @@ export function useSongSearch({ onNoResults, onFailed } = {}) {
           setSearchError(
             getUnplayableReason(searchTerm) === "soundcloud_embed_off"
               ? "This SoundCloud track can't be played here. Its uploader has embedding turned off."
-              : "No songs found. Try different keywords."
+              : PASTED_LINK.test(searchTerm.trim())
+                ? "Couldn't find a song from that link. Try searching its name."
+                : "No songs found. Try different keywords."
           );
           if (searchTerm.trim().length >= 3) onNoResultsRef.current?.(searchTerm.trim());
         } else {

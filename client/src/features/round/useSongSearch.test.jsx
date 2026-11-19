@@ -94,6 +94,19 @@ describe("useSongSearch", () => {
     );
   });
 
+  it("words an empty answer for a pasted link as a link problem, but not for text with a slash", async () => {
+    searchTracks.mockResolvedValue([]);
+    const { result } = renderHook(() => useSongSearch({}));
+
+    type(result, "https://open.spotify.com/album/4LH4d3cOWNNsVw41Gqt2kv");
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(result.current.searchError).toBe("Couldn't find a song from that link. Try searching its name.");
+
+    type(result, "AC/DC");
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(result.current.searchError).toMatch(/No songs found/);
+  });
+
   it("does not restart a search when the callbacks change", async () => {
     searchTracks.mockResolvedValue([{ id: "t1" }]);
     const { result, rerender } = renderHook((props) => useSongSearch(props), {

@@ -480,7 +480,7 @@ export default function SettingsModal({ showModal, onClose, gameCode, playerId, 
 	                <label className="text-sm font-semibold text-white block mb-2">
 	                  Clip Length
 	                </label>
-	                <p className="text-xs text-gray-400 mb-3">How long the chosen clip plays (YouTube songs)</p>
+	                <p className="text-xs text-gray-400 mb-3">How long the chosen clip plays (YouTube and SoundCloud songs)</p>
 	                <div className="grid grid-cols-3 gap-2">
 	                  {[
 	                    { value: 15, label: "15s" },

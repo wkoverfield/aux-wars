@@ -26,6 +26,7 @@ import TapToPlayOverlay from './TapToPlayOverlay';
  * @param {number}   props.endTime      - window end (0 = play to natural end)
  * @param {boolean}  props.autoPlay     - attempt play once ready (mobile usually blocks → tap)
  * @param {boolean}  props.loop         - loop the window
+ * @param {boolean}  props.canPickAnother - the error state also says to pick another result (song search only)
  * @param {boolean}  props.showControls - show the branded "tap to play" overlay (default true)
  * @param {Function} props.onReady      - called with window length (seconds)
  * @param {Function} props.onTimeUpdate - called with window-relative currentTime (seconds)
@@ -62,6 +63,7 @@ const YouTubePlayerWithRef = forwardRef(function YouTubePlayerWithRef(
     autoPlay = false,
     loop = false,
     showControls = true,
+    canPickAnother = false,
     onReady,
     onTimeUpdate,
     onEnded,
@@ -293,7 +295,7 @@ const YouTubePlayerWithRef = forwardRef(function YouTubePlayerWithRef(
       {playerError && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80 px-6 text-center">
           <p className="text-sm text-red-300">
-            This YouTube video cannot be played here. Pick another result.
+            This YouTube video cannot be played here.{canPickAnother ? " Pick another result." : ""}
           </p>
         </div>
       )}
