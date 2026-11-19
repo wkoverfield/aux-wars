@@ -1,5 +1,5 @@
-import { readFile, rm, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build, defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
@@ -79,13 +79,24 @@ function noIndexHead(html) {
   return swap(html, /<\/head>/, '  <meta name="robots" content="noindex, nofollow" />\n  </head>')
 }
 
+/** The empty #root of index.html, replaced by a page's markup and build data. */
+const ROOT = /<div id="root"><\/div>/
+
 /**
- * After the client build, renders each page in src/data/pages.js to static
- * HTML: the built index.html with the page's own head, and the page's real
- * markup in #root, so crawlers get the text without running JS. React still
- * mounts with createRoot and replaces the markup with an identical first
- * render. Also writes app.html, the noindex shell that vercel.json serves for
- * lobby, screen, results and other app-only routes.
+ * Renders every page to static HTML: the static pages in src/data/pages.js
+ * and the content pages (charts, songs, artists) built from the published
+ * content in Convex. Each file is the built index.html with the page's own
+ * head, the page's real markup in #root, and the build data the markup was
+ * rendered from in a JSON script tag (src/data/pageData.js), so crawlers get
+ * the text without running JS. React still mounts with createRoot and
+ * replaces the markup with an identical first render from that same data.
+ * Also writes app.html, the noindex shell that vercel.json serves for lobby,
+ * screen, results and other app-only routes, and sitemap.xml, which lists
+ * every indexable page written here.
+ *
+ * The published content is read from VITE_CONVEX_URL when the build starts
+ * (src/prerender/loadContent.js). A failed read, zero songs or no chart week
+ * throws and fails the build, so a deploy never drops the published pages.
  *
  * The pages come from a separate Node build of src/prerender/entry.jsx that
  * shares this build's asset settings, so asset URLs (hashed album covers)
@@ -93,14 +104,27 @@ function noIndexHead(html) {
  */
 function prerenderPages() {
   let config
+  // { pages, home } from data/contentPages.js, set once buildStart succeeds.
+  let content
   return {
     name: 'prerender-pages',
     apply: 'build',
     configResolved(resolved) {
       config = resolved
     },
+    async buildStart() {
+      const { loadPublishedContent } = await import('./src/prerender/loadContent.js')
+      const { buildContentPages } = await import('./src/data/contentPages.js')
+      content = buildContentPages(await loadPublishedContent(config.env.VITE_CONVEX_URL))
+    },
     async closeBundle() {
+      // Rollup also runs closeBundle after a failed build. With no content the
+      // build is already failing, and there is nothing to render.
+      if (!content) return
       const { PAGES, SITE } = await import('./src/data/pages.js')
+      const { pageDataScript } = await import('./src/data/pageData.js')
+      const { sitemapXml } = await import('./src/prerender/sitemap.js')
+      const pages = [...PAGES, ...content.pages]
       const root = config.root
       const outDir = resolve(root, config.build.outDir)
       const ssrDir = resolve(root, 'node_modules/.prerender')
@@ -124,14 +148,22 @@ function prerenderPages() {
       try {
         const { render } = await import(`${pathToFileURL(join(ssrDir, 'entry.js')).href}?t=${Date.now()}`)
         const template = await readFile(join(outDir, 'index.html'), 'utf8')
-        for (const page of PAGES) {
+        for (const page of pages) {
+          const data = { home: content.home, page: page.data ?? null }
           let html = pageHead(template, page, SITE)
           if (!page.index) html = noIndexHead(html)
-          const markup = render(page.path)
-          html = swap(html, /<div id="root"><\/div>/, () => `<div id="root">${markup}</div>`)
-          await writeFile(join(outDir, page.file), html)
+          const markup = render(page.path, data)
+          html = swap(html, ROOT, () => `<div id="root">${markup}</div>${pageDataScript(data)}`)
+          const file = join(outDir, page.file)
+          await mkdir(dirname(file), { recursive: true })
+          await writeFile(file, html)
         }
-        await writeFile(join(outDir, 'app.html'), noIndexHead(template))
+        const shellData = pageDataScript({ home: content.home, page: null })
+        await writeFile(
+          join(outDir, 'app.html'),
+          swap(noIndexHead(template), ROOT, () => `<div id="root"></div>${shellData}`),
+        )
+        await writeFile(join(outDir, 'sitemap.xml'), sitemapXml(pages, SITE))
       } finally {
         await rm(ssrDir, { recursive: true, force: true })
       }

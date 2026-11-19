@@ -8,7 +8,6 @@ import { useSession } from "../../hooks/useSession";
 import { useHeartbeat } from "../../hooks/useHeartbeat";
 import { useToast } from "../../contexts/ToastContext";
 import { useRoom } from "../../services/RoomProvider";
-import AdSlot from "../../components/AdSlot";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 import logo from "../../assets/aux-wars-logo.svg";
 import { useNow } from "./useQuickPlay";
@@ -357,7 +356,6 @@ export default function PublicLobby() {
                     onKick={() => handleKick(p)}
                   />
                 ))}
-                <AdSlot slot="lobby" />
               </div>
             </section>
           </div>

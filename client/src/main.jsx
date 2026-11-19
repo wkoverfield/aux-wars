@@ -7,6 +7,7 @@ import { ConvexProvider, ConvexReactClient } from 'convex/react'
 import { MotionConfig } from 'framer-motion'
 import { initPostHog } from './services/posthog'
 import { initClientHealth } from './services/clientHealth'
+import { PageDataContext, readPageData } from './data/pageData'
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL
 const convex = convexUrl ? new ConvexReactClient(convexUrl) : null
@@ -19,21 +20,26 @@ initPostHog()
 // Sampled web vitals and uncaught-error counts, reported to Convex.
 initClientHealth(convex)
 
+// Build data the prerendered document carries (home chart line, content page model).
+const pageData = readPageData()
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    {/* Framer Motion honors the OS reduced-motion setting app-wide. */}
-    <MotionConfig reducedMotion="user">
-      {convex ? (
-        <ConvexProvider client={convex}>
-          <App />
-          <Analytics />
-        </ConvexProvider>
-      ) : (
-        <>
-          <App />
-          <Analytics />
-        </>
-      )}
-    </MotionConfig>
+    <PageDataContext.Provider value={pageData}>
+      {/* Framer Motion honors the OS reduced-motion setting app-wide. */}
+      <MotionConfig reducedMotion="user">
+        {convex ? (
+          <ConvexProvider client={convex}>
+            <App />
+            <Analytics />
+          </ConvexProvider>
+        ) : (
+          <>
+            <App />
+            <Analytics />
+          </>
+        )}
+      </MotionConfig>
+    </PageDataContext.Provider>
   </StrictMode>,
 )

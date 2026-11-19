@@ -7,7 +7,6 @@ import { motion } from "framer-motion";
 import PlayerList from "../../components/PlayerList";
 import SettingsModal from "../../components/SettingsModal";
 import SettingsPreview from "../../components/SettingsPreview";
-import AdSlot from "../../components/AdSlot";
 import SessionTakenOverModal from "../../components/SessionTakenOverModal";
 // GameContext removed - using RoomProvider's Convex queries directly
 import { usePendingAction } from "../../hooks/usePendingAction";
@@ -519,8 +518,6 @@ function PrivateLobby() {
                   Invite a friend to get started
                 </button>
               )}
-              {/* Ad-safe: lobby is a waiting surface; scrolls with the list, ad-free in pro rooms */}
-              <AdSlot slot="lobby" />
             </ScrollFade>
           </div>
           {isHost && allPlayersReady && players.length > 1 && (
