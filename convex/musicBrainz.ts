@@ -3,8 +3,9 @@
  *
  * The names shown on public pages come from here, never from the strings
  * stored in songStats. Only musicbrainz.org is called, with the User-Agent
- * MusicBrainz requires and at most one request per REQUEST_INTERVAL_MS (the
- * caller paces requests with makePacer).
+ * MusicBrainz requires and at most one request per REQUEST_INTERVAL_MS
+ * (lookupRecording waits on a pacer from makePacer before every request,
+ * retries included).
  *
  * MusicBrainz lists one song as many recordings (single, album, clean, live,
  * video), and credits featured artists in the artist credit: "The Weeknd
@@ -22,7 +23,14 @@ export const MUSICBRAINZ_USER_AGENT = "AuxWars/1.0 ( https://www.aux-wars.com )"
 export const REQUEST_INTERVAL_MS = 1100;
 const REQUEST_TIMEOUT_MS = 10_000;
 // A song is matched only when one of its recordings scores at least this.
-export const MIN_SCORE = 90;
+export const MATCH_MIN_SCORE = 90;
+// The recording whose title, artist and year are published scores at least this.
+export const PUBLISH_MIN_SCORE = 70;
+// A request answered 503 or 429, or one that never got an answer, is sent
+// again after each of these waits in turn. After the last one the lookup is
+// reported as unavailable.
+export const RETRY_WAITS_MS = [2000, 4000, 8000];
+const RETRY_STATUSES = new Set([429, 503]);
 const RESULT_LIMIT = 25;
 const MAX_NAME = 300;
 
@@ -87,17 +95,18 @@ function firstRelease(date: unknown): { year: number | undefined; released: stri
  * A recording belongs to the song when its title, run through clean(), equals
  * the title half of the song key and its artist credit names the key's artist
  * (artistFor). The song is matched when at least one of those recordings
- * scores MIN_SCORE or more. The recording returned is the earliest first
- * release among all of them, whatever its own score: the best scored one is
- * often a later live or undated copy, and its date is not the song's. Equal
- * dates go to the higher score, then to the earlier position in the response.
+ * scores MATCH_MIN_SCORE or more. The recording returned is the earliest
+ * first release among those that score PUBLISH_MIN_SCORE or more: the best
+ * scored one is often a later live or undated copy, and its date is not the
+ * song's. Equal dates go to the lowest mbid, so the pick does not depend on
+ * the order of the response.
  */
 export function pickRecording(songKey: string, body: unknown): RecordingMatch | null {
   const recordings = (body as { recordings?: unknown } | null)?.recordings;
   if (!Array.isArray(recordings)) return null;
   const { artistKey, titleKey } = splitSongKey(songKey);
 
-  let best: (RecordingMatch & { score: number; released: string }) | null = null;
+  let best: (RecordingMatch & { released: string }) | null = null;
   let matched = false;
   for (const r of recordings as (Record<string, unknown> | null)[]) {
     if (r === null || typeof r !== "object") continue;
@@ -107,11 +116,12 @@ export function pickRecording(songKey: string, body: unknown): RecordingMatch | 
     const artist = artistFor(r["artist-credit"], artistKey);
     if (!artist || artist.length > MAX_NAME) continue;
     const score = Number(r.score) || 0;
-    if (score >= MIN_SCORE) matched = true;
+    if (score >= MATCH_MIN_SCORE) matched = true;
+    if (score < PUBLISH_MIN_SCORE) continue;
     const { year, released } = firstRelease(r["first-release-date"]);
     const earlier =
-      best === null || released < best.released || (released === best.released && score > best.score);
-    if (earlier) best = { title, artist, year, mbid, score, released };
+      best === null || released < best.released || (released === best.released && mbid < best.mbid);
+    if (earlier) best = { title, artist, year, mbid, released };
   }
   if (!best || !matched) return null;
   return { title: best.title, artist: best.artist, year: best.year, mbid: best.mbid };
@@ -120,12 +130,13 @@ export function pickRecording(songKey: string, body: unknown): RecordingMatch | 
 export type LookupResult =
   | { kind: "match"; match: RecordingMatch }
   | { kind: "none" }
-  // The request failed or was refused (network error, 503 when the server is
-  // busy). Nothing is known about the song; it can be looked up again later.
+  // No answer after every retry, or an answer that is not a search result.
+  // Nothing is known about the song; it can be looked up again later.
   | { kind: "unavailable" };
 
-/** One search request. The caller is responsible for pacing. */
-export async function lookupRecording(songKey: string): Promise<LookupResult> {
+// One search request. "retry" is an answer worth asking for again: 503
+// (busy), 429 (rate limited), or no answer at all (network error, timeout).
+async function searchOnce(songKey: string): Promise<LookupResult | "retry"> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -135,13 +146,33 @@ export async function lookupRecording(songKey: string): Promise<LookupResult> {
     });
     // 400: MusicBrainz rejected the query itself, so asking again cannot help.
     if (res.status === 400) return { kind: "none" };
+    if (RETRY_STATUSES.has(res.status)) return "retry";
     if (!res.ok) return { kind: "unavailable" };
     const match = pickRecording(songKey, await res.json());
     return match ? { kind: "match", match } : { kind: "none" };
   } catch {
-    return { kind: "unavailable" };
+    return "retry";
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * Looks a song key up, sending the request again after each of
+ * RETRY_WAITS_MS while MusicBrainz answers 503 or 429 or does not answer.
+ * `pace` is awaited before every request, so share one pacer between all
+ * lookups of a run.
+ */
+export async function lookupRecording(
+  songKey: string,
+  pace: () => Promise<void> = makePacer()
+): Promise<LookupResult> {
+  for (let attempt = 0; ; attempt++) {
+    await pace();
+    const result = await searchOnce(songKey);
+    if (result !== "retry") return result;
+    if (attempt >= RETRY_WAITS_MS.length) return { kind: "unavailable" };
+    await new Promise((resolve) => setTimeout(resolve, RETRY_WAITS_MS[attempt]));
   }
 }
 

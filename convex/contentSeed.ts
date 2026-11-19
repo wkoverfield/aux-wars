@@ -1,7 +1,10 @@
 /**
- * Dev fixture for the published content pages. Internal only: never run this
- * against production, it writes made-up play counts into songStats.
+ * Dev fixture for the published content pages. It writes made-up play counts
+ * into songStats, so it runs only on a deployment whose ALLOW_CONTENT_SEED
+ * environment variable is "1" and throws everywhere else. Never set that
+ * variable on production.
  *
+ *   npx convex env set ALLOW_CONTENT_SEED 1
  *   npx convex run contentSeed:seedDevSongStats
  *
  * The first call inserts the fixture rows. Every later call adds one more
@@ -19,6 +22,7 @@ import { CURATED_PROMPTS } from "./game/promptPacks";
 import { songKey } from "./songStats";
 
 export const SEED_SOURCE = "seed:dev-content";
+export const SEED_ENV_VAR = "ALLOW_CONTENT_SEED";
 
 type Fixture = {
   name: string;
@@ -56,6 +60,12 @@ const sum = (hist: number[]) => hist.reduce((s, n, i) => s + n * (i + 1), 0);
 export const seedDevSongStats = internalMutation({
   args: {},
   handler: async (ctx) => {
+    if (process.env.ALLOW_CONTENT_SEED !== "1") {
+      throw new Error(
+        `contentSeed:seedDevSongStats is disabled: ${SEED_ENV_VAR} is not "1" on this deployment. ` +
+          "It writes made-up rows into songStats and must never run on production."
+      );
+    }
     const now = Date.now();
     const result = { inserted: 0, bumped: 0, skipped: 0 };
 

@@ -20,7 +20,7 @@ import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { internalAction, internalMutation, query, type QueryCtx } from "./_generated/server";
 import { publishStatusValidator, topPromptsValidator } from "./schema";
-import { averageOf, isWeekId, weekRange } from "./contentLib";
+import { averageOf, hidesSongs, isWeekId, weekRange } from "./contentLib";
 
 const SONGS_PAGE = 100;
 const ARTISTS_PAGE = 25;
@@ -110,18 +110,36 @@ const bySlug = <T extends "publishedSongs" | "publishedArtists" | "publishedSong
     .unique() as Promise<Doc<T> | null>;
 
 /**
- * Resolves stored chart rows against the rows that are live right now. A song
- * or artist held after the week was computed drops out, and the rows below it
- * move up.
+ * Reports whether an artist slug takes its songs off the public pages
+ * (hidesSongs), reading each artist row once.
+ */
+function songHider(ctx: QueryCtx) {
+  const hidden = new Map<string, boolean>();
+  return async (artistSlug: string): Promise<boolean> => {
+    let answer = hidden.get(artistSlug);
+    if (answer === undefined) {
+      const artist = await bySlug(ctx, "publishedArtists", artistSlug);
+      answer = artist !== null && hidesSongs(artist);
+      hidden.set(artistSlug, answer);
+    }
+    return answer;
+  };
+}
+
+/**
+ * Resolves stored chart rows against the rows that are public right now. A
+ * song or artist held after the week was computed drops out, and so does
+ * every song of an artist that hides its songs; the rows below move up.
  */
 function chartResolver(ctx: QueryCtx) {
   const songs = new Map<string, Doc<"publishedSongs"> | null>();
   const artists = new Map<string, Doc<"publishedArtists"> | null>();
+  const hiddenByArtist = songHider(ctx);
 
   const liveSong = async (slug: string) => {
     if (!songs.has(slug)) {
       const row = await bySlug(ctx, "publishedSongs", slug);
-      songs.set(slug, row?.status === "live" ? row : null);
+      songs.set(slug, row?.status === "live" && !(await hiddenByArtist(row.artistSlug)) ? row : null);
     }
     return songs.get(slug) ?? null;
   };
@@ -172,7 +190,8 @@ function chartResolver(ctx: QueryCtx) {
  * Public: one page of a section of the published content. Pass the returned
  * cursor back to read the next page; a null cursor means the last page.
  *
- *   songs    live songs with their stats.
+ *   songs    live songs with their stats, except those of an artist held
+ *            for any reason other than "below_bar".
  *   artists  live artists that have at least one live song, with those songs.
  *   charts   newest first: every week whose note is approved, plus the latest
  *            computed week (its note is null until approved).
@@ -197,8 +216,10 @@ export const published = query({
         .query("publishedSongs")
         .withIndex("by_status", (q) => q.eq("status", "live"))
         .paginate({ cursor: from, numItems: SONGS_PAGE });
+      const hiddenByArtist = songHider(ctx);
       const items: (typeof songItem.type)[] = [];
       for (const song of page.page) {
+        if (await hiddenByArtist(song.artistSlug)) continue;
         const stats = await bySlug(ctx, "publishedSongStats", song.slug);
         if (!stats) continue; // inserted by a run that has not stored stats yet
         items.push({
@@ -291,7 +312,12 @@ export const published = query({
   },
 });
 
-/** Internal: set a published song live or held. Its slug does not change. */
+/**
+ * Internal: set a published song live or held. Its slug does not change.
+ * A row without an mbid goes live only after setSongDetails has been given
+ * both its title and its artist: until then they are the halves of its song
+ * key, which must never be published.
+ */
 export const setSongStatus = internalMutation({
   args: { slug: v.string(), status: publishStatusValidator },
   handler: async (ctx, { slug, status }) => {
@@ -301,12 +327,22 @@ export const setSongStatus = internalMutation({
       .unique();
     if (!row) throw new Error(`No published song with slug "${slug}"`);
     if (row.status === status) return { slug, status, changed: false };
+    if (status === "live" && !row.mbid && !(row.titleSetByHand && row.artistSetByHand)) {
+      throw new Error(
+        `Song "${slug}" has no confirmed title and artist. Set both with content:setSongDetails first.`
+      );
+    }
     await ctx.db.patch(row._id, { status, heldReason: status === "held" ? "manual" : undefined });
     return { slug, status, changed: true };
   },
 });
 
-/** Internal: set a published artist live or held. Its slug does not change. */
+/**
+ * Internal: set a published artist live or held. Its slug does not change.
+ * Held by hand, the artist's songs leave the public read as well; their own
+ * status is not touched. A row whose name is still its artist key goes live
+ * only after setArtistName.
+ */
 export const setArtistStatus = internalMutation({
   args: { slug: v.string(), status: publishStatusValidator },
   handler: async (ctx, { slug, status }) => {
@@ -316,6 +352,9 @@ export const setArtistStatus = internalMutation({
       .unique();
     if (!row) throw new Error(`No published artist with slug "${slug}"`);
     if (row.status === status) return { slug, status, changed: false };
+    if (status === "live" && !row.nameConfirmed) {
+      throw new Error(`Artist "${slug}" has no confirmed name. Set it with content:setArtistName first.`);
+    }
     await ctx.db.patch(row._id, { status, heldReason: status === "held" ? "manual" : undefined });
     return { slug, status, changed: true };
   },
@@ -331,7 +370,8 @@ function handName(field: string, value: string): string {
 
 /**
  * Internal: correct the title, artist or year shown for a published song.
- * Only the fields passed change; `year: null` removes the year. The slug,
+ * Only the fields passed change; `year: null` removes the year. A title or
+ * artist passed here counts as confirmed (see setSongStatus). The slug,
  * status and artistSlug do not change, and the weekly job never writes these
  * fields again. `artist` is the name shown with the song; the name on the
  * artist page is publishedArtists.name (setArtistName).
@@ -358,7 +398,14 @@ export const setSongDetails = internalMutation({
       year: year === undefined ? row.year : year ?? undefined,
     };
     const changed = next.title !== row.title || next.artist !== row.artist || next.year !== row.year;
-    if (changed) await ctx.db.patch(row._id, next);
+    // A field given by hand is confirmed, also when the text did not change.
+    const confirmed = {
+      titleSetByHand: title === undefined ? row.titleSetByHand : true,
+      artistSetByHand: artist === undefined ? row.artistSetByHand : true,
+    };
+    const newlyConfirmed =
+      confirmed.titleSetByHand !== row.titleSetByHand || confirmed.artistSetByHand !== row.artistSetByHand;
+    if (changed || newlyConfirmed) await ctx.db.patch(row._id, { ...next, ...confirmed });
     return { slug, title: next.title, artist: next.artist, year: next.year ?? null, changed };
   },
 });
@@ -373,8 +420,11 @@ export const setArtistName = internalMutation({
       .unique();
     if (!row) throw new Error(`No published artist with slug "${slug}"`);
     const text = handName("name", name);
-    if (text === row.name) return { slug, name: text, changed: false };
-    await ctx.db.patch(row._id, { name: text });
+    if (text === row.name) {
+      if (!row.nameConfirmed) await ctx.db.patch(row._id, { nameConfirmed: true });
+      return { slug, name: text, changed: false };
+    }
+    await ctx.db.patch(row._id, { name: text, nameConfirmed: true });
     return { slug, name: text, changed: true };
   },
 });

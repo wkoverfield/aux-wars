@@ -374,6 +374,8 @@ export default defineSchema({
   // without it title and artist are the two halves of songKey. All three can
   // be corrected by hand (content:setSongDetails). slug is unique and never
   // changes once written. The weekly job only inserts here.
+  // titleSetByHand and artistSetByHand record that setSongDetails was given
+  // that field; a row without mbid can go live only when both are true.
   publishedSongs: defineTable({
     songKey: v.string(),
     slug: v.string(),
@@ -382,6 +384,8 @@ export default defineSchema({
     artistSlug: v.string(), // publishedArtists.slug, present for every row
     year: v.optional(v.number()),
     mbid: v.optional(v.string()), // MusicBrainz recording id
+    titleSetByHand: v.optional(v.boolean()),
+    artistSetByHand: v.optional(v.boolean()),
     status: publishStatusValidator,
     heldReason: v.optional(
       v.union(v.literal("no_match"), v.literal("filtered"), v.literal("manual"))
@@ -396,10 +400,15 @@ export default defineSchema({
   // One row per artist of a publishedSongs row. artistKey is the artist half
   // of songKey. A row is "held" with reason "below_bar" until the artist has
   // enough picks and a live song; the weekly job lifts only that reason.
+  // Held for any other reason, the artist's songs are not public either.
+  // nameConfirmed is true once name came from MusicBrainz or from
+  // content:setArtistName; without it name is artistKey and the row cannot be
+  // set live by hand.
   publishedArtists: defineTable({
     artistKey: v.string(),
     slug: v.string(),
     name: v.string(),
+    nameConfirmed: v.optional(v.boolean()),
     status: publishStatusValidator,
     heldReason: v.optional(
       v.union(v.literal("below_bar"), v.literal("filtered"), v.literal("manual"))

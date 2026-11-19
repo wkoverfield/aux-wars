@@ -17,6 +17,11 @@ Held reasons: `no_match` (MusicBrainz had no exact match), `filtered` (a word
 from `convex/contentBlocklist.ts`), `manual` (set by hand), and for artists
 `below_bar` (fewer than 50 picks, or no live song yet).
 
+A song is public when its row is `live` and its artist row is `live` or held
+as `below_bar`. An artist held as `manual` or `filtered` takes every one of
+their songs off the song pages, the chart rows and the artist lists. The
+songs' own `status` does not change.
+
 ## MusicBrainz match
 
 One search per song key returns up to 25 recordings (`pickRecording` in
@@ -28,9 +33,10 @@ One search per song key returns up to 25 recordings (`pickRecording` in
   belongs to a `travis scott|...` key; it does not belong to a
   `playboi carti|...` key.
 - The song is matched when at least one of those recordings scores 90 or
-  more. Otherwise it is held as `no_match`.
-- The published recording is the earliest first release among all of them,
-  whatever its own score. `title`, `year` and `mbid` are that recording's.
+  more (`MATCH_MIN_SCORE`). Otherwise it is held as `no_match`.
+- The published recording is the earliest first release among those that
+  score 70 or more (`PUBLISH_MIN_SCORE`). Equal dates go to the lowest
+  `mbid`. `title`, `year` and `mbid` are that recording's.
 - `artist` is the whole credit when it equals the artist half, otherwise the
   first credited name. It always equals the artist half under `clean()`, so a
   featured artist is never part of a published name.
@@ -48,6 +54,10 @@ npx convex run contentJob:runWeekly '{"week":"2026-W47"}'
 - Without `week`, a run writes the ISO week that holds the moment 24 hours
   before it. The Monday cron writes the week that just ended. A run later in
   the week writes the week in progress, and the next Monday cron replaces it.
+- A run stores the totals as they are when it runs. `week` is accepted only
+  when it is the week a run without it would write, or the ISO week in
+  progress (the two differ during the first 24 hours of a week). Any other
+  week throws and writes nothing.
 - Running a week again replaces its lists, baseline and page stats, and keeps
   its note.
 - Movers compare against the latest baseline of an earlier week. Without one,
@@ -55,6 +65,13 @@ npx convex run contentJob:runWeekly '{"week":"2026-W47"}'
 - New candidates are looked up on `musicbrainz.org`, one request every 1.1
   seconds, at most 240 per run. A run that published something and still has
   candidates left schedules itself again for the same week.
+- A request answered 503 or 429, or not answered at all, is sent again after
+  2, 4 and 8 seconds. A song whose lookup still fails gets no row, is listed
+  by song key under `unresolved` in the run's return value, and is looked up
+  again by the next run.
+- The last pass of a run schedules `content:triggerDeploy`, so new pages and
+  the new week reach the site without a note approval. A chart note is public
+  only once it is approved.
 - The job inserts rows and lifts `below_bar` artists. It never deletes a row,
   never sets one to `held`, and never changes a slug.
 
@@ -83,8 +100,20 @@ npx convex run content:triggerDeploy
 - `approveChartNote` makes the note public and schedules `triggerDeploy`,
   which POSTs the URL in the `VERCEL_DEPLOY_HOOK_URL` environment variable and
   does nothing when it is unset.
-- `contentSeed:seedDevSongStats` writes made-up rows into `songStats` for a
-  dev deployment. Never run it against production.
+- `setSongStatus` to `live` throws for a row without an `mbid` until
+  `setSongDetails` has been given both `title` and `artist` (in one call or
+  several). `setArtistStatus` to `live` throws for a row whose name did not
+  come from MusicBrainz until `setArtistName` has been run for it.
+- `contentSeed:seedDevSongStats` writes made-up rows into `songStats`. It
+  throws unless the deployment's `ALLOW_CONTENT_SEED` environment variable is
+  `1`.
+
+## Environment variables
+
+| Variable | Set on | Effect |
+| --- | --- | --- |
+| `VERCEL_DEPLOY_HOOK_URL` | production | URL that `triggerDeploy` POSTs. Unset: no rebuild is requested. |
+| `ALLOW_CONTENT_SEED` | dev only | `1` lets `contentSeed:seedDevSongStats` run. Never set on production. |
 
 ## `content:published`
 
@@ -127,8 +156,9 @@ average rating, rating spread (standard deviation of the 1 to 5 ratings) or
 picks gained, by list. `movers` is an array, or `null` when the week had no
 earlier baseline.
 
-- `average` has two decimals. `rank` is 1-based by picks among every song in
-  `songStats`, published or not. `topPrompts` holds at most 8 entries.
+- `average` has two decimals. `rank` is the song's 1-based place among the
+  public songs, in the order of `mostPickedSongs` (picks, then rating count,
+  then slug), as of the last run. `topPrompts` holds at most 8 entries.
 - `songs` on an artist lists live songs only, most picked first. `picks` on an
   artist counts all of their songs, so it can exceed the sum of the list.
 - `charts` returns, newest first, every week whose note is approved plus the
@@ -149,8 +179,9 @@ earlier baseline.
   at most 80 characters, and is permanent: changing one breaks a published URL.
 - A held `no_match` song has no MusicBrainz names; its `title` and `artist`
   are the lower case halves of its song key, and so is the name of an artist
-  row created for it. Setting it live by hand publishes those strings: name
-  it first with `setSongDetails` and `setArtistName`.
+  row created for it. Those strings must never be public. `setSongStatus` and
+  `setArtistStatus` refuse `live` until the row is named with
+  `setSongDetails` or `setArtistName`.
 - The weekly job writes `title`, `artist`, `year` and `mbid` once, when it
   inserts the row, and never looks a song up again. A wrong value stays until
   it is corrected by hand.
@@ -158,9 +189,9 @@ earlier baseline.
   still equals its `artistKey`.
 - Chart lists store slugs. A song or artist set to `held` after a week was
   computed drops out of that week's lists at read time, and the rows below it
-  move up.
+  move up. `rank` on a song page is not recomputed until the next run.
 - A song is published once and its stats are refreshed only by the weekly
   job. Pages show the numbers as of the last run, not live counts.
 - MusicBrainz allows one request per second and requires the `User-Agent` in
   `convex/musicBrainz.ts`. A 503 means busy: the song is left for a later run,
-  not held.
+  not held. Retries wait on the same pacer as first requests.

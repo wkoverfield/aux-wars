@@ -182,6 +182,14 @@ export function decideSong(songKey: string, match: RecordingMatch | null): SongD
   return blocked ? { ...named, status: "held", heldReason: "filtered" } : { ...named, status: "live" };
 }
 
+/**
+ * True when an artist row takes its songs off the public pages: the artist is
+ * held for any reason other than "below_bar". A "below_bar" artist only lacks
+ * a page of its own.
+ */
+export const hidesSongs = (artist: { status: "live" | "held"; heldReason?: string | null }) =>
+  artist.status === "held" && artist.heldReason !== "below_bar";
+
 // --- ISO weeks ---
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -232,12 +240,15 @@ export type ChartSong = { slug: string; songKey: string; totals: SongTotals };
 export type ChartArtist = { slug: string; picks: number };
 
 // `tie` breaks equal values: the larger wins, then the slug.
-type Scored = { slug: string; value: number; tie: number };
+export type Scored = { slug: string; value: number; tie: number };
 
-// Largest value first.
+/** Chart order: largest value first, then the larger tie, then the slug. */
+export const chartOrder = (a: Scored, b: Scored): number =>
+  b.value - a.value || b.tie - a.tie || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0);
+
 function ranked(rows: Scored[], size: number): ChartRow[] {
   return rows
-    .sort((a, b) => b.value - a.value || b.tie - a.tie || (a.slug < b.slug ? -1 : 1))
+    .sort(chartOrder)
     .slice(0, size)
     .map(({ slug, value }) => ({ slug, value }));
 }

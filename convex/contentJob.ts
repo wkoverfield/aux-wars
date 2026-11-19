@@ -11,7 +11,9 @@
  *      or held (publishSong);
  *   3. lift artists that now have enough picks and a live song;
  *   4. store the stats shown on every published song and artist page;
- *   5. compute and store the week's chart, then the week's baseline.
+ *   5. compute and store the week's chart, then the week's baseline;
+ *   6. schedule the next pass, or on the last pass the site rebuild
+ *      (content:triggerDeploy).
  *
  * Running a week again replaces its chart, baseline and stats and keeps its
  * note. The job only ever inserts publishedSongs and publishedArtists rows or
@@ -35,7 +37,9 @@ import {
   artistSlugBase,
   computeLists,
   decideSong,
+  chartOrder,
   firstFreeSlug,
+  hidesSongs,
   isArtistCandidate,
   isSongCandidate,
   isWeekId,
@@ -62,7 +66,9 @@ const BASELINE_CHUNK = 1000;
 
 // MusicBrainz lookups stop at whichever comes first, well inside the ten
 // minute action limit. Candidates left over stay unpublished and are picked
-// up by the follow-up pass or by next week's run.
+// up by the follow-up pass or by next week's run. A lookup that fails has
+// already been retried (musicBrainz.ts), so each one can take a minute when
+// requests time out; five in a row end the lookups of a run.
 export const MAX_LOOKUPS_PER_RUN = 240;
 const LOOKUP_BUDGET_MS = 5 * 60 * 1000;
 const MAX_CONSECUTIVE_FAILURES = 5;
@@ -199,15 +205,16 @@ export const publishSong = internalMutation({
         artistKey,
         slug: artistSlug,
         name: args.artist,
+        nameConfirmed: args.mbid ? true : undefined,
         status: "held",
         heldReason: isBlocked(artistKey) || isBlocked(args.artist) ? "filtered" : "below_bar",
         publishedAt: now,
       });
       artist = (await ctx.db.get(id))!;
-    } else if (args.mbid && artist.name === artist.artistKey && artist.name !== args.artist) {
+    } else if (args.mbid && !artist.nameConfirmed && artist.name === artist.artistKey) {
       // The row was created for an unmatched song and still shows the key
       // half; this is the first MusicBrainz name for the artist.
-      await ctx.db.patch(artist._id, { name: args.artist });
+      await ctx.db.patch(artist._id, { name: args.artist, nameConfirmed: true });
     }
 
     const slug = await firstFreeSlug(
@@ -346,22 +353,35 @@ export type WeeklySummary = {
   candidates: number; // songs past the bar with no row before this run
   published: { slug: string; status: "live" | "held"; heldReason: string | null }[];
   carriedOver: number; // candidates still without a row
+  // Song keys whose lookup got no answer after every retry. They have no row
+  // and are candidates again on the next run. Counted in carriedOver.
+  unresolved: string[];
   artistsLifted: string[];
   lists: { [K in keyof ChartLists]: number | null };
   nextPassScheduled: boolean;
+  // True on the last pass, which schedules content:triggerDeploy.
+  deployScheduled: boolean;
 };
 
 export const runWeekly = internalAction({
   args: {
     // ISO week id to write. Defaults to the week WEEK_CLOSE_GRACE_MS ago.
+    // Only that week or the week in progress is accepted: a run always writes
+    // the totals as they are now, so any other label would be wrong.
     week: v.optional(v.string()),
     // Set by the job when it schedules itself again for the same week.
     pass: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<WeeklySummary> => {
     const startedAt = Date.now();
-    const week = args.week ?? weekIdFor(startedAt - WEEK_CLOSE_GRACE_MS);
+    const defaultWeek = weekIdFor(startedAt - WEEK_CLOSE_GRACE_MS);
+    const weekInProgress = weekIdFor(startedAt);
+    const week = args.week ?? defaultWeek;
     if (!isWeekId(week)) throw new Error(`Not an ISO week id: ${week}`);
+    if (week !== defaultWeek && week !== weekInProgress) {
+      const allowed = defaultWeek === weekInProgress ? defaultWeek : `${defaultWeek} or ${weekInProgress}`;
+      throw new Error(`Cannot write ${week}: a run stores the totals as of now, so only ${allowed} can be written`);
+    }
     const pass = args.pass ?? 1;
 
     // 1. Totals. Rows are keyed as they arrive, so a row can only count once.
@@ -426,6 +446,7 @@ export const runWeekly = internalAction({
       .sort((a, b) => b[1].ratingCount - a[1].ratingCount || (a[0] < b[0] ? -1 : 1))
       .map(([songKey]) => songKey);
     const published: WeeklySummary["published"] = [];
+    const unresolved: string[] = [];
     const pace = makePacer();
     let lookups = 0;
     let failures = 0;
@@ -438,11 +459,10 @@ export const runWeekly = internalAction({
         break;
       }
       lookups++;
-      await pace();
-      const result = await lookupRecording(songKey);
+      const result = await lookupRecording(songKey, pace);
       if (result.kind === "unavailable") {
         failures++;
-        await pace(); // a refused request doubles the gap before the next one
+        unresolved.push(songKey);
         continue;
       }
       failures = 0;
@@ -462,6 +482,8 @@ export const runWeekly = internalAction({
     const carriedOver = candidates.length - published.length;
 
     // 3. Artists that now clear the bar and have a live song.
+    const artistBySlug = new Map<string, PublishedArtist>();
+    for (const artist of publishedArtists.values()) artistBySlug.set(artist.slug, artist);
     const artistsWithLiveSong = new Set<string>();
     for (const song of publishedSongs.values()) {
       if (song.status === "live") artistsWithLiveSong.add(song.artistSlug);
@@ -496,20 +518,31 @@ export const runWeekly = internalAction({
     // 4. Page stats for every published row, live or held, so a row set live
     // by hand has its numbers ready.
     const computedAt = Date.now();
-    const picksDescending = [...songs.values()].map((t) => t.picks).sort((a, b) => b - a);
-    const rankByPicks = new Map<number, number>();
-    picksDescending.forEach((picks, i) => {
-      if (!rankByPicks.has(picks)) rankByPicks.set(picks, i + 1);
+    // The songs the public read returns: live, and not hidden by their artist.
+    const publicSongs = [...publishedSongs.values()].flatMap((song) => {
+      const totals = songs.get(song.songKey);
+      const artist = artistBySlug.get(song.artistSlug);
+      return song.status === "live" && totals && !(artist && hidesSongs(artist))
+        ? [{ slug: song.slug, songKey: song.songKey, totals }]
+        : [];
     });
+    // Rank is the song's place among the public songs in the order of the
+    // most picked chart. A song that is not public gets the place it would
+    // take if it were.
+    const byPicks = publicSongs
+      .map((s) => ({ slug: s.slug, value: s.totals.picks, tie: s.totals.ratingCount }))
+      .sort(chartOrder);
+    const publicRank = new Map(byPicks.map((row, i) => [row.slug, i + 1]));
 
     const songRows = [...publishedSongs.values()].flatMap((song) => {
       const t = songs.get(song.songKey);
       if (!t) return [];
+      const self = { slug: song.slug, value: t.picks, tie: t.ratingCount };
       return [
         {
           slug: song.slug,
           ...t,
-          rank: rankByPicks.get(t.picks) ?? picksDescending.length,
+          rank: publicRank.get(song.slug) ?? byPicks.filter((row) => chartOrder(row, self) < 0).length + 1,
           topPrompts: topPrompts(songPrompts.get(song.songKey)),
         },
       ];
@@ -532,7 +565,7 @@ export const runWeekly = internalAction({
       });
     }
 
-    // 5. Chart from live rows only, against the latest earlier baseline.
+    // 5. Chart from public rows only, against the latest earlier baseline.
     let priorPicks: Map<string, number> | null = null;
     const priorWeek: string | null = await ctx.runQuery(internal.contentJob.priorBaselineWeek, { week });
     if (priorWeek !== null) {
@@ -547,10 +580,7 @@ export const runWeekly = internalAction({
       }
     }
     const lists = computeLists(
-      [...publishedSongs.values()].flatMap((song) => {
-        const totals = songs.get(song.songKey);
-        return song.status === "live" && totals ? [{ slug: song.slug, songKey: song.songKey, totals }] : [];
-      }),
+      publicSongs,
       [...publishedArtists.values()].flatMap((artist) => {
         const totals = artists.get(artist.artistKey);
         return artist.status === "live" && totals && artistsWithLiveSong.has(artist.slug)
@@ -581,6 +611,10 @@ export const runWeekly = internalAction({
         week,
         pass: pass + 1,
       });
+    } else {
+      // Last pass: rebuild the static pages so the new week and any new page
+      // reach the site. Does nothing when no deploy hook is configured.
+      await ctx.scheduler.runAfter(0, internal.content.triggerDeploy, {});
     }
 
     return {
@@ -589,6 +623,7 @@ export const runWeekly = internalAction({
       candidates: candidates.length,
       published,
       carriedOver,
+      unresolved,
       artistsLifted,
       lists: {
         mostPickedSongs: lists.mostPickedSongs.length,
@@ -598,6 +633,7 @@ export const runWeekly = internalAction({
         movers: lists.movers === null ? null : lists.movers.length,
       },
       nextPassScheduled,
+      deployScheduled: !nextPassScheduled,
     };
   },
 });

@@ -15,6 +15,7 @@ import {
   decideSong,
   firstFreeSlug,
   isArtistCandidate,
+  isWeekId,
   isSongCandidate,
   ratingSpread,
   slugPart,
@@ -24,9 +25,13 @@ import {
 } from "./contentLib";
 import { MAX_LOOKUPS_PER_RUN } from "./contentJob";
 import {
+  MATCH_MIN_SCORE,
   MUSICBRAINZ_USER_AGENT,
+  PUBLISH_MIN_SCORE,
   REQUEST_INTERVAL_MS,
+  RETRY_WAITS_MS,
   lookupRecording,
+  makePacer,
   pickRecording,
   recordingSearchUrl,
 } from "./musicBrainz";
@@ -121,9 +126,19 @@ const ROCKSTAR: Recording[] = [
 
 type Call = { url: URL; at: number; userAgent: string | null; method: string };
 
-/** Replaces fetch. `catalog` maps a song key to the recordings a search returns. */
-function stubFetch(catalog: Record<string, Recording[]> = {}, status = 200) {
+type Answer = number | "network error";
+
+/**
+ * Replaces fetch. `catalog` maps a song key to the recordings a search
+ * returns. `status` is what musicbrainz.org answers: one value for every
+ * request, or a function of the request's number (0-based) and song key.
+ */
+function stubFetch(
+  catalog: Record<string, Recording[]> = {},
+  status: Answer | ((n: number, songKey: string) => Answer) = 200
+) {
   const calls: Call[] = [];
+  let searches = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string | URL, init?: RequestInit) => {
@@ -135,9 +150,12 @@ function stubFetch(catalog: Record<string, Recording[]> = {}, status = 200) {
         method: init?.method ?? "GET",
       });
       if (url.host !== "musicbrainz.org") return new Response("", { status: 200 });
-      if (status !== 200) return new Response(JSON.stringify({ error: "busy" }), { status });
       const m = /^recording:"(.*)" AND artist:"(.*)"$/.exec(url.searchParams.get("query") ?? "");
-      const recordings = m ? catalog[`${m[2]}|${m[1]}`] ?? [] : [];
+      const key = m ? `${m[2]}|${m[1]}` : "";
+      const answer = typeof status === "function" ? status(searches++, key) : status;
+      if (answer === "network error") throw new TypeError("fetch failed");
+      if (answer !== 200) return new Response(JSON.stringify({ error: "busy" }), { status: answer });
+      const recordings = catalog[key] ?? [];
       return new Response(JSON.stringify({ count: recordings.length, recordings }), { status: 200 });
     })
   );
@@ -155,8 +173,16 @@ async function settle<T>(promise: Promise<T>): Promise<T> {
   return tracked;
 }
 
-const runWeekly = (t: T, args: { week?: string } = {}) =>
-  settle(t.action(internal.contentJob.runWeekly, args));
+/**
+ * Runs the weekly job. A run only writes the week it happens in, so naming a
+ * week first moves the clock to that week's Thursday.
+ */
+function runWeekly(t: T, args: { week?: string } = {}) {
+  if (args.week && isWeekId(args.week) && weekIdFor(Date.now()) !== args.week) {
+    vi.setSystemTime(Date.parse(`${weekRange(args.week).weekStart}T15:00:00Z`) + 3 * 24 * 60 * 60 * 1000);
+  }
+  return settle(t.action(internal.contentJob.runWeekly, args));
+}
 
 // --- songStats fixtures ---
 
@@ -397,7 +423,7 @@ describe("MusicBrainz matching", () => {
       title: "FE!N",
       artist: "Travis Scott",
       year: 2023,
-      mbid: "fein-album", // the earliest release; same day as fein-v1, higher score
+      mbid: "fein-album", // the earliest release; same day as fein-v1, lower mbid
     });
     // The featured artist's own key is not this song.
     expect(pickRecording("playboi carti|fe n", { recordings: FEIN })).toBeNull();
@@ -436,6 +462,28 @@ describe("MusicBrainz matching", () => {
     ).toBeNull();
   });
 
+  test("the published recording scores 70 or more, whatever is released earlier", () => {
+    expect(MATCH_MIN_SCORE).toBe(90);
+    expect(PUBLISH_MIN_SCORE).toBe(70);
+    const at = (id: string, score: number, date?: string) => credited(id, score, "Hey Ya!", ["OutKast"], date);
+    // The 1999 entry is the earliest but scores 69; the 2001 one scores 70.
+    const recordings = [at("album", 100, "2003-09-23"), at("demo", 69, "1999"), at("early", 70, "2001-05-01")];
+    expect(pickRecording(key, { recordings })).toEqual({ title: "Hey Ya!", artist: "OutKast", year: 2001, mbid: "early" });
+    // A low score still cannot make the match on its own.
+    expect(pickRecording(key, { recordings: [at("demo", 69, "1999"), at("early", 89, "2001")] })).toBeNull();
+    // The matching recording is published when nothing else clears the floor.
+    expect(pickRecording(key, { recordings: [at("demo", 69, "1999"), at("album", 90, "2003")] })).toMatchObject({ mbid: "album" });
+  });
+
+  test("equal release dates go to the lowest mbid, in any response order", () => {
+    const at = (id: string, score: number, date?: string) => credited(id, score, "Hey Ya!", ["OutKast"], date);
+    const recordings = [at("c", 100, "2003-09-23"), at("a", 75, "2003-09-23"), at("b", 95, "2003-09-23"), at("0", 100, "2004")];
+    const orders = [recordings, [...recordings].reverse(), [recordings[2], recordings[0], recordings[3], recordings[1]]];
+    for (const order of orders) expect(pickRecording(key, { recordings: order })).toMatchObject({ mbid: "a", year: 2003 });
+    // Undated recordings tie as well.
+    expect(pickRecording(key, { recordings: [at("z", 100), at("y", 100)] })).toMatchObject({ mbid: "y" });
+  });
+
   test("a date with a known month or day beats the bare year, and a bad date counts as none", () => {
     const at = (id: string, date?: string) => credited(id, 100, "Hey Ya!", ["OutKast"], date);
     expect(pickRecording(key, { recordings: [at("year", "2003"), at("day", "2003-09-23"), at("month", "2003-09")] })).toMatchObject({
@@ -472,8 +520,38 @@ describe("MusicBrainz matching", () => {
   });
 
   test("a busy server is not a rejection", async () => {
-    stubFetch(CATALOG, 503);
-    expect(await lookupRecording(key)).toEqual({ kind: "unavailable" });
+    const calls = stubFetch(CATALOG, 503);
+    expect(await settle(lookupRecording(key))).toEqual({ kind: "unavailable" });
+    // The first request and three retries, each after a longer wait.
+    expect(RETRY_WAITS_MS).toEqual([2000, 4000, 8000]);
+    expect(calls).toHaveLength(4);
+    expect(calls.slice(1).map((call, i) => call.at - calls[i].at)).toEqual(RETRY_WAITS_MS);
+  });
+
+  test.each([503, 429, "network error"] as const)("a %s answer is retried until the search succeeds", async (failure) => {
+    const calls = stubFetch(CATALOG, (n) => (n < 3 ? failure : 200));
+    expect(await settle(lookupRecording(key))).toMatchObject({ kind: "match", match: { title: "Hey Ya!" } });
+    expect(calls).toHaveLength(4);
+    for (let i = 1; i < calls.length; i++) expect(calls[i].at - calls[i - 1].at).toBeGreaterThanOrEqual(1000);
+  });
+
+  test("an answer that is neither busy nor rate limited is not retried", async () => {
+    const calls = stubFetch(CATALOG, 500);
+    expect(await settle(lookupRecording(key))).toEqual({ kind: "unavailable" });
+    stubFetch(CATALOG, 400);
+    expect(await settle(lookupRecording(key))).toEqual({ kind: "none" });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("retries share the pacer with the requests around them", async () => {
+    // One pacer for two lookups: the second starts a full interval after the
+    // first one's last retry, and no two requests are closer than a second.
+    const calls = stubFetch(CATALOG, (n) => (n === 0 ? 503 : 200));
+    const pace = makePacer();
+    await settle(lookupRecording(key, pace));
+    await settle(lookupRecording("outkast|ms jackson", pace));
+    expect(calls).toHaveLength(3);
+    for (let i = 1; i < calls.length; i++) expect(calls[i].at - calls[i - 1].at).toBeGreaterThanOrEqual(1000);
   });
 });
 
@@ -543,6 +621,29 @@ describe("ISO weeks", () => {
     vi.setSystemTime(Date.UTC(2026, 10, 26, 18, 0)); // Thursday of W48
     expect((await runWeekly(t)).week).toBe("2026-W48");
     await expect(runWeekly(t, { week: "next week" })).rejects.toThrow();
+  });
+
+  test("a named week must be the one a run writes now", async () => {
+    const t = setup();
+    stubFetch();
+    const run = (week: string) => settle(t.action(internal.contentJob.runWeekly, { week }));
+
+    // Thursday of W47: only W47 can be written.
+    for (const week of ["2026-W46", "2026-W48", "2025-W47"]) {
+      await expect(run(week)).rejects.toThrow(`Cannot write ${week}`);
+    }
+    expect(await table(t, "chartWeeks")).toEqual([]);
+    expect((await run("2026-W47")).week).toBe("2026-W47");
+    expect((await run("2026-W47")).week).toBe("2026-W47");
+    expect(await table(t, "chartWeeks")).toHaveLength(1);
+
+    // Monday of W48, when the cron closes W47: both weeks can be written.
+    vi.setSystemTime(Date.UTC(2026, 10, 23, 10, 0));
+    await expect(run("2026-W46")).rejects.toThrow("only 2026-W47 or 2026-W48");
+    expect((await run("2026-W47")).week).toBe("2026-W47");
+    expect((await run("2026-W48")).week).toBe("2026-W48");
+    await expect(run("2026-W49")).rejects.toThrow();
+    expect((await table(t, "chartWeeks")).map((c) => c.week).sort()).toEqual(["2026-W47", "2026-W48"]);
   });
 });
 
@@ -709,13 +810,83 @@ describe("weekly job", () => {
     await seedBank(t);
     const first = await runWeekly(t, { week: "2026-W46" });
     expect(first).toMatchObject({ candidates: 5, published: [], carriedOver: 5, nextPassScheduled: false });
+    expect(first.unresolved).toHaveLength(5);
     expect(await table(t, "publishedSongs")).toEqual([]);
     expect(await table(t, "chartWeeks")).toHaveLength(1);
 
     stubFetch(CATALOG);
     const second = await runWeekly(t, { week: "2026-W46" });
     expect(second.published).toHaveLength(5);
+    expect(second.unresolved).toEqual([]);
     expect(await table(t, "chartWeeks")).toHaveLength(1);
+  });
+
+  test("a lookup that fails is retried, and one that keeps failing is reported and left for the next run", async () => {
+    const t = setup();
+    await seedBank(t);
+    // Ms. Jackson never gets an answer; September is busy twice, then answers.
+    const busy = { "earth wind and fire|september": 2 };
+    const calls = stubFetch(CATALOG, (_n, songKey) => {
+      if (songKey === "outkast|ms jackson") return 503;
+      if (songKey in busy && busy[songKey as keyof typeof busy]-- > 0) return 429;
+      return 200;
+    });
+
+    const first = await runWeekly(t, { week: "2026-W46" });
+    expect(first).toMatchObject({ candidates: 5, carriedOver: 1, unresolved: ["outkast|ms jackson"] });
+    expect(first.published.map((p) => p.slug).sort()).toEqual([
+      "friday-rebecca-black",
+      "hey-ya-outkast",
+      "september-earth-wind-and-fire",
+      "unknown-jam-nobody-band",
+    ]);
+    const requestsFor = (songKey: string) =>
+      calls.filter((c) => c.url.searchParams.get("query")!.includes(`"${songKey.split("|")[1]}"`)).length;
+    expect(requestsFor("earth wind and fire|september")).toBe(3);
+    expect(requestsFor("outkast|ms jackson")).toBe(1 + RETRY_WAITS_MS.length);
+    // Retries included, no two requests are closer than a second.
+    for (let i = 1; i < calls.length; i++) expect(calls[i].at - calls[i - 1].at).toBeGreaterThanOrEqual(1000);
+    // No row at all: the song is neither published nor held.
+    expect((await table(t, "publishedSongs")).map((s) => s.songKey)).not.toContain("outkast|ms jackson");
+
+    // The next run looks only that song up again.
+    const before = calls.length;
+    stubFetch(CATALOG);
+    const second = await runWeekly(t, { week: "2026-W46" });
+    expect(second).toMatchObject({ candidates: 1, carriedOver: 0, unresolved: [] });
+    expect(second.published).toEqual([{ slug: "ms-jackson-outkast", status: "live", heldReason: null }]);
+    expect(calls).toHaveLength(before);
+  });
+
+  test("the last pass schedules the site rebuild, with or without a chart note", async () => {
+    const t = setup();
+    vi.stubEnv("VERCEL_DEPLOY_HOOK_URL", "https://hooks.example/deploy/abc");
+    const calls = stubFetch(CATALOG);
+    await seedBank(t);
+    const hookCalls = () => calls.filter((c) => c.url.host === "hooks.example");
+
+    const summary = await runWeekly(t, { week: "2026-W46" });
+    expect(summary).toMatchObject({ nextPassScheduled: false, deployScheduled: true });
+    await settle(t.finishAllScheduledFunctions(vi.runAllTimers));
+    expect(hookCalls().map((c) => [c.url.href, c.method])).toEqual([["https://hooks.example/deploy/abc", "POST"]]);
+
+    // The note stays private until it is approved; the rebuild does not publish it.
+    await t.mutation(internal.content.setChartNote, { week: "2026-W46", note: "Still a draft." });
+    await runWeekly(t, { week: "2026-W46" });
+    await settle(t.finishAllScheduledFunctions(vi.runAllTimers));
+    expect(hookCalls()).toHaveLength(2);
+    expect((await readAll(t, "charts"))[0]).toMatchObject({ note: null, approvedAt: null });
+    expect((await table(t, "chartWeeks"))[0]).toMatchObject({ note: "Still a draft.", noteStatus: "draft" });
+  });
+
+  test("without a deploy hook the last pass requests nothing", async () => {
+    const t = setup();
+    vi.stubEnv("VERCEL_DEPLOY_HOOK_URL", "");
+    const calls = stubFetch(CATALOG);
+    await seedBank(t);
+    expect(await runWeekly(t, { week: "2026-W46" })).toMatchObject({ deployScheduled: true });
+    await settle(t.finishAllScheduledFunctions(vi.runAllTimers));
+    expect(calls.filter((c) => c.url.host !== "musicbrainz.org")).toEqual([]);
   });
 
   test("lookups are capped per run and a follow-up pass finishes the rest", async () => {
@@ -742,7 +913,7 @@ describe("weekly job", () => {
     });
 
     const first = await runWeekly(t, { week: "2026-W46" });
-    expect(first).toMatchObject({ candidates: total, carriedOver: 5, nextPassScheduled: true });
+    expect(first).toMatchObject({ candidates: total, carriedOver: 5, unresolved: [], nextPassScheduled: true, deployScheduled: false });
     expect(first.published).toHaveLength(MAX_LOOKUPS_PER_RUN);
     expect(calls).toHaveLength(MAX_LOOKUPS_PER_RUN);
     // Paced the whole way: the run took at least a second per lookup.
@@ -828,6 +999,7 @@ describe("weekly job", () => {
       ...known("Sex on Fire", "Kings of Leon"),
     });
 
+    vi.stubEnv("ALLOW_CONTENT_SEED", "1");
     const seeded = await t.mutation(internal.contentSeed.seedDevSongStats, {});
     expect(seeded.inserted).toBeGreaterThan(14);
     expect((await runWeekly(t, { week: "2026-W46" })).lists.movers).toBeNull();
@@ -849,6 +1021,7 @@ describe("weekly job", () => {
   test("the dev seed never overwrites a row it did not create", async () => {
     const t = setup();
     await stat(t, "Blinding Lights", "The Weeknd", { picks: 3, hist: fives(9) });
+    vi.stubEnv("ALLOW_CONTENT_SEED", "1");
     const seeded = await t.mutation(internal.contentSeed.seedDevSongStats, {});
     expect(seeded.skipped).toBe(1);
     const row = await t.run((ctx) =>
@@ -858,6 +1031,15 @@ describe("weekly job", () => {
         .unique()
     );
     expect(row).toMatchObject({ picks: 3, sources: ["yt:leak-source"] });
+  });
+});
+
+describe("dev seed guard", () => {
+  test.each([undefined, "", "0", "true"])("refuses to run when ALLOW_CONTENT_SEED is %j", async (value) => {
+    const t = setup();
+    if (value !== undefined) vi.stubEnv("ALLOW_CONTENT_SEED", value);
+    await expect(t.mutation(internal.contentSeed.seedDevSongStats, {})).rejects.toThrow("ALLOW_CONTENT_SEED");
+    expect(await t.run((ctx) => ctx.db.query("songStats").collect())).toEqual([]);
   });
 });
 
@@ -908,11 +1090,37 @@ describe("content:published", () => {
         { prompt: CURATED_PROMPTS[0], picks: 9 },
       ],
     });
-    // Rank counts every song in the bank, held and unpublished included:
-    // 40, 30, 20, then the held song at 15 and the unpublished one at 14.
-    expect(songs.find((s) => s.slug === "ms-jackson-outkast")).toMatchObject({ rank: 6, topPrompts: [{ prompt: CURATED_PROMPTS[1], picks: 4 }] });
+    // Rank counts public songs only: 40, 30, 20, then this one at 12. The
+    // held song at 15 and the unpublished one at 14 take no place.
+    expect(songs.find((s) => s.slug === "ms-jackson-outkast")).toMatchObject({ rank: 4, topPrompts: [{ prompt: CURATED_PROMPTS[1], picks: 4 }] });
     // artistSlug is present even though that artist has no page.
     expect(songs.find((s) => s.slug === "september-earth-wind-and-fire")).toMatchObject({ artistSlug: "earth-wind-and-fire", year: 1978 });
+  });
+
+  test("a song's rank is its row on the most picked chart, ties included", async () => {
+    const t = setup();
+    const names = ["Alpha", "Bravo", "Charlie", "Delta"];
+    stubFetch(Object.fromEntries(names.map((n) => [songKey(n, `${n} Band`)!, [rec(n, `${n} Band`, "2001")]])));
+    await stat(t, "Alpha", "Alpha Band", { picks: 20, hist: fives(50) });
+    await stat(t, "Bravo", "Bravo Band", { picks: 20, hist: fives(70) }); // same picks, more ratings
+    await stat(t, "Charlie", "Charlie Band", { picks: 20, hist: fives(50) }); // same as Alpha: slug decides
+    await stat(t, "Delta", "Delta Band", { picks: 5, hist: fives(50) });
+    await stat(t, "Unmatched", "Nobody", { picks: 25, hist: fives(50) }); // held, takes no place
+    await stat(t, "Unrated", "Nobody", { picks: 99, hist: fives(1) }); // never published
+    await runWeekly(t);
+
+    const [chart] = await readAll(t, "charts");
+    const rows = chart.lists.mostPickedSongs.map((r: any) => [r.slug, r.rank]);
+    expect(rows).toEqual([
+      ["bravo-bravo-band", 1],
+      ["alpha-alpha-band", 2],
+      ["charlie-charlie-band", 3],
+      ["delta-delta-band", 4],
+    ]);
+    expect((await readAll(t, "songs")).map((s) => [s.slug, s.rank]).sort((a, b) => a[1] - b[1])).toEqual(rows);
+    // A held song stores the place it would take if it were public.
+    const held = (await table(t, "publishedSongStats")).find((s) => s.slug === "unmatched-nobody");
+    expect(held).toMatchObject({ rank: 1 });
   });
 
   test("artists: only live artists, with their live songs by picks", async () => {
@@ -1098,8 +1306,94 @@ describe("content:published", () => {
     await runWeekly(t, { week: "2026-W47" });
     expect(await readAll(t, "artists")).toEqual([]);
     expect((await readAll(t, "charts"))[0].lists.mostPickedArtists).toEqual([]);
-    // Its songs stay public and keep their artistSlug.
-    expect((await readAll(t, "songs")).find((s) => s.slug === "hey-ya-outkast")).toMatchObject({ artistSlug: "outkast" });
+  });
+
+  test("holding an artist takes their songs off every page and list without holding the songs", async () => {
+    const t = await publishedBank();
+    await t.mutation(internal.content.setArtistStatus, { slug: "outkast", status: "held" });
+
+    const expectHidden = async () => {
+      const all = { songs: await readAll(t, "songs"), artists: await readAll(t, "artists"), charts: await readAll(t, "charts") };
+      expect(all.songs.map((s) => s.slug).sort()).toEqual(["friday-rebecca-black", "september-earth-wind-and-fire"]);
+      expect(all.artists).toEqual([]);
+      const text = JSON.stringify(all);
+      for (const gone of ["OutKast", "outkast", "Hey Ya", "Ms. Jackson"]) expect(text).not.toContain(gone);
+      return all.charts[0].lists;
+    };
+
+    // Stored lists still hold the songs; they drop out at read time and the rows below move up.
+    let lists = await expectHidden();
+    expect(lists.mostPickedSongs.map((r: any) => [r.rank, r.slug])).toEqual([
+      [1, "september-earth-wind-and-fire"],
+      [2, "friday-rebecca-black"],
+    ]);
+    expect(lists.highestRated.map((r: any) => r.slug)).toEqual(["september-earth-wind-and-fire", "friday-rebecca-black"]);
+    expect(lists.mostDivisive.map((r: any) => r.slug)).toEqual(["friday-rebecca-black", "september-earth-wind-and-fire"]);
+
+    // The songs' own rows are untouched.
+    const rows = (await table(t, "publishedSongs")).filter((s) => s.artistSlug === "outkast");
+    expect(rows.map((s) => [s.slug, s.status, s.heldReason]).sort()).toEqual([
+      ["hey-ya-outkast", "live", undefined],
+      ["ms-jackson-outkast", "live", undefined],
+    ]);
+
+    // The next run leaves them out of the stored lists and of the ranks, and counts no movers for them.
+    await setPicks(t, "Hey Ya!", "OutKast", 80);
+    await runWeekly(t, { week: "2026-W47" });
+    lists = await expectHidden();
+    expect(lists.movers).toEqual([]);
+    const stored = (await table(t, "chartWeeks")).find((c) => c.week === "2026-W47")!.lists;
+    expect(stored.mostPickedSongs.map((r) => r.slug)).toEqual(["september-earth-wind-and-fire", "friday-rebecca-black"]);
+    expect((await readAll(t, "songs")).map((s) => [s.slug, s.rank]).sort()).toEqual([
+      ["friday-rebecca-black", 2],
+      ["september-earth-wind-and-fire", 1],
+    ]);
+    expect((await table(t, "publishedSongs")).filter((s) => s.artistSlug === "outkast").map((s) => s.status)).toEqual(["live", "live"]);
+
+    // Lifting the hold brings the artist and the songs back.
+    await t.mutation(internal.content.setArtistStatus, { slug: "outkast", status: "live" });
+    expect((await readAll(t, "songs")).map((s) => s.slug)).toContain("hey-ya-outkast");
+    expect((await readAll(t, "artists")).map((a) => a.slug)).toEqual(["outkast"]);
+  });
+
+  test("an artist below the bar has no page but their songs stay public", async () => {
+    const t = await publishedBank();
+    expect((await table(t, "publishedArtists")).find((a) => a.slug === "rebecca-black")).toMatchObject({
+      status: "held",
+      heldReason: "below_bar",
+    });
+    expect((await readAll(t, "songs")).find((s) => s.slug === "friday-rebecca-black")).toMatchObject({ artistSlug: "rebecca-black" });
+    expect((await readAll(t, "charts"))[0].lists.mostPickedSongs.map((r: any) => r.slug)).toContain("friday-rebecca-black");
+  });
+
+  test("a song or artist whose name was never confirmed cannot be set live by hand", async () => {
+    const t = await publishedBank();
+    const slug = "unknown-jam-nobody-band";
+    const live = (s: string) => t.mutation(internal.content.setSongStatus, { slug: s, status: "live" });
+    const artistLive = () => t.mutation(internal.content.setArtistStatus, { slug: "nobody-band", status: "live" });
+
+    await expect(live(slug)).rejects.toThrow("setSongDetails");
+    // A year, or one name alone, is not enough.
+    await t.mutation(internal.content.setSongDetails, { slug, year: 2020 });
+    await expect(live(slug)).rejects.toThrow("setSongDetails");
+    await t.mutation(internal.content.setSongDetails, { slug, title: "Unknown Jam" });
+    await expect(live(slug)).rejects.toThrow("setSongDetails");
+    expect((await table(t, "publishedSongs")).find((s) => s.slug === slug)).toMatchObject({ status: "held", heldReason: "no_match" });
+    expect(JSON.stringify(await readAll(t, "songs"))).not.toContain("nobody");
+
+    // Typing the same text as the key half still confirms it.
+    expect(await t.mutation(internal.content.setSongDetails, { slug, artist: "nobody band" })).toMatchObject({ changed: false });
+    expect(await live(slug)).toMatchObject({ changed: true });
+    expect((await readAll(t, "songs")).find((s) => s.slug === slug)).toMatchObject({ title: "Unknown Jam", artist: "nobody band" });
+
+    await expect(artistLive()).rejects.toThrow("setArtistName");
+    expect(await t.mutation(internal.content.setArtistName, { slug: "nobody-band", name: "nobody band" })).toMatchObject({ changed: false });
+    expect(await artistLive()).toMatchObject({ changed: true });
+
+    // Rows named by MusicBrainz need nothing: hold and lift freely.
+    await t.mutation(internal.content.setSongStatus, { slug: "hey-ya-outkast", status: "held" });
+    expect(await live("hey-ya-outkast")).toMatchObject({ changed: true });
+    await t.mutation(internal.content.setArtistStatus, { slug: "earth-wind-and-fire", status: "live" });
   });
 
   test("returns no held row, no unapproved note and none of the internal fields", async () => {
@@ -1185,6 +1479,8 @@ describe("note approval and the deploy hook", () => {
     stubFetch(CATALOG);
     await seedBank(t);
     await runWeekly(t, { week: "2026-W46" });
+    // The run's own rebuild is out of the way before a test sets the hook URL.
+    await settle(t.finishAllScheduledFunctions(vi.runAllTimers));
     await t.mutation(internal.content.setChartNote, { week: "2026-W46", note: "Ready." });
     return t;
   }
