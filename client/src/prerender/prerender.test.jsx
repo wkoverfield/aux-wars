@@ -39,8 +39,14 @@ describe("prerendered pages", () => {
     expect(render("/")).toContain('href="/aux-battle"');
   });
 
-  it("the homepage footer links to /charts", () => {
-    expect(render("/")).toMatch(/<a href="\/charts" class="dev-btn[^>]*>.*?Charts<\/p><\/a>/);
+  it("the homepage footer has no Charts button: the most picked line is the link to /charts", () => {
+    const footer = (html) => /<footer[\s\S]*<\/footer>/.exec(html)[0];
+    const withLine = render("/", { home: content.home, page: null });
+    expect(footer(withLine)).toContain("Privacy");
+    expect(footer(withLine)).not.toContain("Charts");
+    expect(footer(withLine)).not.toContain('href="/charts"');
+    expect(withLine.match(/href="\/charts"/g)).toHaveLength(1);
+    expect(render("/")).not.toContain('href="/charts"');
   });
 
   it("vercel.json serves each prerendered page from its own file", () => {
@@ -129,7 +135,7 @@ describe("prerendered content pages", () => {
       "53 picks",
       "1 pick<",
       "More by Travis Scott",
-      "Start a game",
+      "Start a game on Aux Wars",
     ]) {
       expect(html, text).toContain(text);
     }

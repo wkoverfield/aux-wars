@@ -6,13 +6,19 @@ const LINK = 'underline decoration-white/30 underline-offset-2 hover:decoration-
  * Page frame for the content pages (charts, song, artist): the same column as
  * /faq, a path line at the top and the site links at the bottom.
  *
+ * The column is sized by its content (self-start), not stretched to the
+ * scroller's height, so its bottom padding stays below the last link when the
+ * page scrolls. Titles and names come from outside and can hold one very long
+ * word: wrap-anywhere lets them break inside the word instead of widening
+ * the page.
+ *
  * Content pages are static documents. Every link on them is a plain <a href>,
  * so each one loads its own HTML file and that file's build data.
  */
 export default function ContentShell({ trail = [], children }) {
   return (
     <div className="h-full w-full overflow-y-auto text-white px-6 py-12 flex justify-center">
-      <div className="max-w-2xl w-full pb-16">
+      <div className="max-w-2xl w-full min-w-0 self-start pb-16 wrap-anywhere">
         <nav aria-label="Breadcrumb" className="text-sm text-gray-400">
           <a href="/" className="hover:text-white underline underline-offset-2">Aux Wars</a>
           {trail.map(({ label, href }) => (

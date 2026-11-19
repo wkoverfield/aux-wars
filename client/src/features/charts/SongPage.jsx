@@ -4,7 +4,12 @@ import ContentShell, { PageLink, PromptList, SongRow, Stat } from './ContentShel
 
 const RATINGS = [5, 4, 3, 2, 1];
 
-/** How many times players gave each rating, as five bars sized against the largest. */
+/**
+ * How many times players gave each rating, as five bars sized against the
+ * largest. A count of zero draws no bar. Any other count draws at least a
+ * full dot (min-w-2.5, the bar's height), so a share of a percent or two does
+ * not render as a clipped sliver of the rounded end.
+ */
 function RatingSpread({ hist, ratingCount }) {
   const largest = Math.max(...hist, 0);
   return (
@@ -24,7 +29,9 @@ function RatingSpread({ hist, ratingCount }) {
                 {rating}
               </span>
               <span className="h-2.5 flex-1 rounded-full bg-white/10 overflow-hidden">
-                <span className="block h-full rounded-full bg-white/70" style={{ width: `${width}%` }} />
+                {count > 0 && (
+                  <span className="block h-full min-w-2.5 rounded-full bg-white/70" style={{ width: `${width}%` }} />
+                )}
               </span>
               <span className="w-12 shrink-0 text-right text-gray-300 tabular-nums">{formatCount(count)}</span>
             </li>
@@ -78,12 +85,9 @@ export default function SongPage({ data }) {
         </section>
       )}
 
-      <a
-        href="/"
-        className="inline-block mt-10 py-3 px-6 rounded-full font-bold text-black bg-[#68d570] hover:bg-[#7de884] transition-colors"
-      >
-        Start a game
-      </a>
+      <p className="mt-10 text-sm text-gray-300">
+        <PageLink href="/">Start a game on Aux Wars</PageLink>
+      </p>
     </ContentShell>
   );
 }

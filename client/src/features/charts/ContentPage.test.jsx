@@ -97,12 +97,67 @@ describe("ContentPage", () => {
     }
   });
 
-  it("puts a start-a-game link on the song page only", () => {
+  it("puts a start-a-game link on the song page only, styled like the page's other links", () => {
     for (const page of content.pages) {
       const { container, unmount } = render(tree({ home: null, page: page.data }, page.path));
-      const cta = [...container.querySelectorAll("a")].filter((link) => link.textContent === "Start a game");
+      const cta = [...container.querySelectorAll("a")].filter((link) => link.textContent.startsWith("Start a game"));
       expect(cta.length, page.path).toBe(page.data.kind === "song" ? 1 : 0);
+      if (cta.length) {
+        expect(cta[0].textContent).toBe("Start a game on Aux Wars");
+        expect(cta[0].getAttribute("href")).toBe("/");
+        // The same classes as the artist link under the title, when the
+        // artist has a page: no filled button.
+        const artistLink = container.querySelector('a[href^="/artist/"]');
+        if (artistLink) expect(cta[0].className.trim()).toBe(artistLink.className.trim());
+        expect(cta[0].className).toContain("underline");
+        expect(cta[0].className).not.toMatch(/bg-|rounded|font-bold/);
+      }
+      expect(container.querySelector('[class*="bg-[#68d570]"]'), page.path).toBeNull();
       unmount();
     }
+  });
+
+  it("has no em dash in any page's text", () => {
+    for (const page of content.pages) {
+      const { container, unmount } = render(tree({ home: null, page: page.data }, page.path));
+      expect(container.textContent, page.path).not.toContain("\u2014");
+      unmount();
+    }
+  });
+
+  it("wraps long words and keeps its bottom padding: one content-sized column holds the whole page", () => {
+    for (const page of content.pages) {
+      const { container, unmount } = render(tree({ home: null, page: page.data }, page.path));
+      const column = container.querySelector("h1").parentElement;
+      // overflow-wrap is inherited, so every title, name and row inside wraps.
+      for (const cls of ["wrap-anywhere", "min-w-0", "self-start", "pb-16"]) {
+        expect(column.classList.contains(cls), `${page.path} ${cls}`).toBe(true);
+      }
+      for (const node of container.querySelectorAll("h1, h2, li, footer")) {
+        expect(column.contains(node), page.path).toBe(true);
+      }
+      unmount();
+    }
+  });
+
+  it("draws a rating bar for every count above zero, never thinner than a dot, and none for zero", () => {
+    const [first, ...others] = CONTENT.songs;
+    // 5 stars: 1000, 4: 0, 3: 1 (0.1 percent of the largest), 2: 20, 1: 0.
+    const hist = [0, 20, 1, 0, 1000];
+    const built = buildContentPages({ ...CONTENT, songs: [{ ...first, ratingHist: hist }, ...others] });
+    const page = built.pages.find((p) => p.path === song.path);
+    const { container } = render(tree({ home: null, page: page.data }, page.path));
+
+    const rows = [...container.querySelectorAll("ol > li")].filter((li) => li.querySelector(".sr-only"));
+    expect(rows.map((li) => li.querySelector(".sr-only").nextSibling.textContent)).toEqual(["5", "4", "3", "2", "1"]);
+    const fills = rows.map((li) => li.querySelector("span.rounded-full > span"));
+    expect(fills.map((fill) => fill?.style.width ?? null)).toEqual(["100%", null, "0.1%", "2%", null]);
+    for (const fill of fills.filter(Boolean)) {
+      // min-w-2.5 equals the track height (h-2.5): a full dot at the least.
+      expect(fill.classList.contains("min-w-2.5")).toBe(true);
+      expect(fill.parentElement.classList.contains("h-2.5")).toBe(true);
+    }
+    // The track itself is always drawn.
+    expect(rows.every((li) => li.querySelector("span.rounded-full"))).toBe(true);
   });
 });
