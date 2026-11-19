@@ -150,7 +150,7 @@ function stubFetch(
         method: init?.method ?? "GET",
       });
       if (url.host !== "musicbrainz.org") return new Response("", { status: 200 });
-      const m = /^recording:"(.*)" AND artist:"(.*)"$/.exec(url.searchParams.get("query") ?? "");
+      const m = /^recording:\((.*)\) AND artist:\((.*)\)$/.exec(url.searchParams.get("query") ?? "");
       const key = m ? `${m[2]}|${m[1]}` : "";
       const answer = typeof status === "function" ? status(searches++, key) : status;
       if (answer === "network error") throw new TypeError("fetch failed");
@@ -516,7 +516,7 @@ describe("MusicBrainz matching", () => {
     }
     expect(MUSICBRAINZ_USER_AGENT).toContain("AuxWars");
     expect(MUSICBRAINZ_USER_AGENT).toContain("https://www.aux-wars.com");
-    expect(new URL(recordingSearchUrl('a"b|c\\d')).searchParams.get("query")).toBe('recording:"c d" AND artist:"a b"');
+    expect(new URL(recordingSearchUrl('a"b|c\\d')).searchParams.get("query")).toBe("recording:(c d) AND artist:(a b)");
   });
 
   test("a busy server is not a rejection", async () => {

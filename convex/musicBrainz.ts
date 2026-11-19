@@ -37,9 +37,12 @@ const MAX_NAME = 300;
 /** Search URL for the recording a song key names. */
 export function recordingSearchUrl(songKey: string): string {
   const { artistKey, titleKey } = splitSongKey(songKey);
-  // Key halves hold only letters, digits and spaces; quotes and backslashes
-  // are stripped anyway so the value can never leave its Lucene phrase.
-  const phrase = (s: string) => `"${s.replace(/["\\]/g, " ")}"`;
+  // A grouped term query, not a quoted phrase: a key half has lost its
+  // punctuation ("can t tell me nothing"), and a phrase of those tokens does
+  // not find "Can't Tell Me Nothing". pickRecording still requires the exact
+  // title and artist. Anything but letters, digits and spaces is stripped so
+  // the value can never leave its group.
+  const phrase = (s: string) => `(${s.replace(/[^\p{L}\p{N} ]/gu, " ")})`;
   const url = new URL(RECORDING_ENDPOINT);
   url.searchParams.set("query", `recording:${phrase(titleKey)} AND artist:${phrase(artistKey)}`);
   url.searchParams.set("fmt", "json");
