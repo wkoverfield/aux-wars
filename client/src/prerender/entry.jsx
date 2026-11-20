@@ -8,14 +8,21 @@ import Faq from '../features/legal/Faq';
 import AuxBattle from '../features/legal/AuxBattle';
 import PrivacyPolicy from '../features/legal/PrivacyPolicy';
 import NotFound from '../features/legal/NotFound';
+import ContentPage from '../features/charts/ContentPage';
+import { PageDataContext } from '../data/pageData';
 import { ToastProvider } from '../contexts/ToastContext';
 
 /**
- * Build-time entry: renders the static pages listed in data/pages.js to HTML
- * with the same layout and route wrappers as App.jsx, so the markup in #root
- * matches the app's first render. The prerender plugin in vite.config.js
- * builds this for Node with convex/react swapped for ./convexStub.js
- * (queries read as loading, mutations never run).
+ * Build-time entry: renders the static pages listed in data/pages.js and the
+ * content pages built by data/contentPages.js to HTML with the same layout
+ * and route wrappers as App.jsx, so the markup in #root matches the app's
+ * first render. The prerender plugin in vite.config.js builds this for Node
+ * with convex/react swapped for ./convexStub.js (queries read as loading,
+ * mutations never run).
+ *
+ * `data` is the document's build data, `{ home, page }` (data/pageData.js):
+ * the same object the plugin writes into the HTML for the app to read back.
+ * A path with a `data.page` model renders as a content page.
  */
 const ELEMENTS = {
   '/': <Home />,
@@ -25,20 +32,22 @@ const ELEMENTS = {
   '/404': <NotFound />,
 };
 
-export function render(path) {
-  const element = ELEMENTS[path];
+export function render(path, data = null) {
+  const element = ELEMENTS[path] ?? (data?.page?.path === path ? <ContentPage /> : null);
   if (!element) throw new Error(`prerender: no element for ${path}`);
   return renderToString(
-    <MotionConfig reducedMotion="user">
-      <StaticRouter location={path}>
-        <ToastProvider>
-          <Routes>
-            <Route element={<AppDisplay />}>
-              <Route path="*" element={<PageTransition>{element}</PageTransition>} />
-            </Route>
-          </Routes>
-        </ToastProvider>
-      </StaticRouter>
-    </MotionConfig>,
+    <PageDataContext.Provider value={data}>
+      <MotionConfig reducedMotion="user">
+        <StaticRouter location={path}>
+          <ToastProvider>
+            <Routes>
+              <Route element={<AppDisplay />}>
+                <Route path="*" element={<PageTransition>{element}</PageTransition>} />
+              </Route>
+            </Routes>
+          </ToastProvider>
+        </StaticRouter>
+      </MotionConfig>
+    </PageDataContext.Provider>,
   );
 }

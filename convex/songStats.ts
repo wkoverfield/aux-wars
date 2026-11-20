@@ -33,7 +33,11 @@ const TRAILING_FEAT = /\s+(?:feat|ft|featuring)\.?\s.*$/i;
 const MAX_KEY = 200;
 const MAX_FIELD = 300;
 
-function clean(s: string): string {
+/**
+ * Normalizes one half of a song key: accents folded, lower case, "&" read as
+ * "and", every run of non letters and non digits collapsed to one space.
+ */
+export function clean(s: string): string {
   return s
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")

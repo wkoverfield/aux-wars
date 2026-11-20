@@ -9,16 +9,29 @@
  * which the AdSense script shows to visitors in regions that require it. The
  * app has no cookie banner of its own.
  *
- * Where ads may appear (YouTube API Developer Policies III.G.1.d): never on a
- * screen that shows YouTube API data (the player, thumbnails, video or song
- * titles from YouTube). The placements below are the screens without it:
- * home, lobby (private and public), the waiting screen, /faq and /aux-battle.
- * Round results, game over, song selection and rating show YouTube data and
- * have no slot. The same screens can show SoundCloud content (the SoundCloud
- * player, artwork and titles), which carries the same rule: no ad slot on any
- * screen that can show SoundCloud content. /screen (the shared TV display) never gets one either: an ad
- * there is rebroadcast to a room, which AdSense counts as invalid traffic.
- * Keep AdSense Auto ads OFF for the site, since they would place ads on any
+ * Where ads may appear. The placements below are the only ones: home, /faq,
+ * /aux-battle, and the content pages (charts, song, artist), one slot each.
+ * Two rules decide it:
+ *
+ * - AdSense program policies: no ads on a screen without publisher content.
+ *   The lobby (private and public) and the waiting screen are game screens
+ *   with no content of their own, so they have no slot.
+ * - YouTube API Developer Policies III.G.1.d: no ads on a screen that shows
+ *   YouTube API data (the player, thumbnails, video or song titles from
+ *   YouTube). Round results, game over, song selection and rating show it and
+ *   have no slot. The same screens can show SoundCloud content (the
+ *   SoundCloud player, artwork and titles), which carries the same rule.
+ *
+ * The content pages qualify under both: they show Aux Wars' own statistics
+ * with song and artist names from MusicBrainz. A song page can show the
+ * song's cover from the Cover Art Archive, and an artist page a credited
+ * photo from Wikimedia Commons or that cover; both are served from Convex
+ * file storage. Chart pages have no image. A content page must never render
+ * a name, title or image that came from YouTube or SoundCloud.
+ *
+ * /screen (the shared TV display) never gets a slot either: an ad there is
+ * rebroadcast to a room, which AdSense counts as invalid traffic. Keep
+ * AdSense Auto ads OFF for the site, since they would place ads on any
  * screen, including the ones above.
  */
 
@@ -27,10 +40,11 @@ const ADSENSE_SCRIPT_ID = 'aux-wars-adsense-script';
 
 const AD_SLOTS = {
   home: import.meta.env.VITE_ADSENSE_SLOT_HOME || '',
-  lobby: import.meta.env.VITE_ADSENSE_SLOT_LOBBY || '',
-  wait: import.meta.env.VITE_ADSENSE_SLOT_WAIT || '',
   faq: import.meta.env.VITE_ADSENSE_SLOT_FAQ || '',
   auxBattle: import.meta.env.VITE_ADSENSE_SLOT_AUX_BATTLE || '',
+  charts: import.meta.env.VITE_ADSENSE_SLOT_CHARTS || '',
+  song: import.meta.env.VITE_ADSENSE_SLOT_SONG || '',
+  artist: import.meta.env.VITE_ADSENSE_SLOT_ARTIST || '',
 };
 
 /** The ad-safe placements AdSlot accepts. */

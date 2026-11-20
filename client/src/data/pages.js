@@ -1,13 +1,17 @@
 /**
- * Search metadata for the pages the build writes as static HTML (see
+ * Search metadata for the fixed pages the build writes as static HTML (see
  * src/prerender/ and the prerender plugin in vite.config.js). Plain data so
  * the build can read it. Each entry becomes <file> in dist with this title,
  * description and canonical URL, and the page's markup already in #root.
  *
- * Every page listed with `index: true` must also be in public/sitemap.xml.
- * Routes not listed here (lobby, screen, /g/ results, /pro, /stats) are served
- * from the noindex app shell, and unknown paths get 404.html with a 404 status
- * (see vercel.json).
+ * The build adds the content pages (/charts, /charts/<week>, /song/<slug>,
+ * /artist/<slug>) from published data; contentPages.js builds those entries
+ * in this same shape. sitemap.xml is generated from both lists and holds
+ * every page with `index: true`.
+ *
+ * Routes in neither list (lobby, screen, /g/ results, /pro, /stats) are
+ * served from the noindex app shell, and unknown paths get 404.html with a
+ * 404 status (see vercel.json).
  */
 export const SITE = 'https://www.aux-wars.com';
 

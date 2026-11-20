@@ -9,12 +9,17 @@ the switches below). This doc is the paint-by-numbers finish line.
 - **Host Pack ($5 one-time)**: Stripe Checkout → durable entitlement. Pro rooms are ad-free + cap 50
   (free = 8). Server is source of truth (webhook). Restore uses the post-purchase Pro code; email
   restore stays disabled until it is a real magic-link flow.
-- **Ads (dark)**: AdSense `<AdSlot>` on Home, Lobby (private and public), Waiting, /faq and
-  /aux-battle. Never on a screen that shows YouTube API data (song pick, rating, round results,
-  game over) and never on /screen; the rule is in `client/src/services/ads.js`. The same screens
-  can show SoundCloud content, which carries the same rule: no ad slot on any screen that can show
-  SoundCloud content. Auto-suppressed in
-  Pro rooms. Consent comes from Google's CMP (AdSense Privacy & messaging); the app has no banner of
+- **Ads (dark)**: AdSense `<AdSlot>` on Home, /faq, /aux-battle and the content pages (/charts,
+  /charts/<week>, /song/<slug>, /artist/<slug>), one slot per page. Never on a screen without
+  publisher content (lobby, private and public, and the waiting screen), never on a screen that
+  shows YouTube API data (song pick, rating, round results, game over) and never on /screen; the
+  rules are in `client/src/services/ads.js`. The same screens can show SoundCloud content, which
+  carries the same rule: no ad slot on any screen that can show SoundCloud content. The content
+  pages show Aux Wars statistics with song and artist names from MusicBrainz. A song page can
+  show a cover from the Cover Art Archive and an artist page a credited Wikimedia Commons photo
+  or that cover; chart pages have no image. No content page shows a YouTube or SoundCloud image.
+  `client/src/services/adPlacements.test.js` fails if any other file renders an `<AdSlot>`.
+  Consent comes from Google's CMP (AdSense Privacy & messaging); the app has no banner of
   its own. Renders nothing until `VITE_ADSENSE_CLIENT` and placement slot IDs are set.
 - **Tip jar**: Buy Me a Coffee, already live on the homepage.
 - **Analytics**: pro funnel (cta→checkout→purchased), `search_no_results`+query, `vote_listen` ms,
@@ -46,8 +51,8 @@ the switches below). This doc is the paint-by-numbers finish line.
 - [ ] Apply to AdSense with `aux-wars.com` (the `/privacy` page is live for this)
 - [ ] On approval, set `VITE_ADSENSE_CLIENT=ca-pub-…` in Vercel prod.
 - [ ] Set placement slot IDs in Vercel prod:
-      `VITE_ADSENSE_SLOT_HOME`, `VITE_ADSENSE_SLOT_LOBBY`, `VITE_ADSENSE_SLOT_WAIT`,
-      `VITE_ADSENSE_SLOT_FAQ`, `VITE_ADSENSE_SLOT_AUX_BATTLE`.
+      `VITE_ADSENSE_SLOT_HOME`, `VITE_ADSENSE_SLOT_FAQ`, `VITE_ADSENSE_SLOT_AUX_BATTLE`,
+      `VITE_ADSENSE_SLOT_CHARTS`, `VITE_ADSENSE_SLOT_SONG`, `VITE_ADSENSE_SLOT_ARTIST`.
 - [ ] In AdSense > Privacy & messaging, publish the European regulations message (Google's
       certified CMP) and the US state regulations message.
 - [ ] Keep Auto ads off: they would place ads on screens that show YouTube or SoundCloud content.

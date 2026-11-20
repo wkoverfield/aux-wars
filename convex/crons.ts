@@ -70,6 +70,15 @@ crons.daily(
   internal.results.pruneExpired
 );
 
+crons.weekly(
+  "compute-weekly-charts",
+  // Monday morning UTC is Sunday night in the Americas, after the weekend's
+  // games. The run labels the ISO week that just ended (see contentJob.ts).
+  { dayOfWeek: "monday", hourUTC: 10, minuteUTC: 0 },
+  internal.contentJob.runWeekly,
+  {}
+);
+
 export default crons;
 
 

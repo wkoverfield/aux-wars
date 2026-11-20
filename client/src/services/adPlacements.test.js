@@ -10,16 +10,16 @@ const sources = import.meta.glob(["../**/*.{js,jsx}", "!../**/*.test.{js,jsx}"],
 
 const fileName = (path) => path.replace(/^\.\.\//, "");
 
-// YouTube API Developer Policies III.G.1.d: no ads on a screen that shows
-// YouTube API data. The same holds for any screen that can show SoundCloud
-// content. These are the only screens without either (see services/ads.js).
+// The only screens allowed an ad (see services/ads.js): pages with publisher
+// content (AdSense program policies) that show no YouTube API data (YouTube
+// API Developer Policies III.G.1.d) and no SoundCloud content.
 const AD_SCREENS = {
   "features/lobby/Home.jsx": ["home"],
-  "features/lobby/Lobby.jsx": ["lobby"],
-  "features/quickplay/PublicLobby.jsx": ["lobby"],
-  "features/round/WaitingScreen.jsx": ["wait"],
   "features/legal/Faq.jsx": ["faq"],
   "features/legal/AuxBattle.jsx": ["auxBattle"],
+  "features/charts/ChartsPage.jsx": ["charts"],
+  "features/charts/SongPage.jsx": ["song"],
+  "features/charts/ArtistPage.jsx": ["artist"],
 };
 
 // Every <AdSlot> use, by its literal slot name. A computed slot or spread
@@ -49,6 +49,31 @@ describe("ad placements", () => {
     for (const path of youtubeScreens) {
       expect(sources[path], fileName(path)).not.toMatch(/AdSlot/);
     }
+  });
+
+  it("the lobby and the waiting screen have no AdSlot", () => {
+    const gameScreens = Object.keys(sources).filter((path) =>
+      /features\/lobby\/Lobby\.jsx$|features\/quickplay\/|features\/round\/WaitingScreen\.jsx$/.test(path),
+    );
+    expect(gameScreens.length).toBeGreaterThan(2);
+    for (const path of gameScreens) {
+      expect(sources[path], fileName(path)).not.toMatch(/AdSlot/);
+    }
+  });
+
+  it("the content pages link to no player and embed no media but the one stored image", () => {
+    const contentPages = Object.keys(sources).filter((path) => /features\/charts\//.test(path));
+    expect(contentPages.length).toBeGreaterThan(0);
+    for (const path of contentPages) {
+      expect(sources[path], fileName(path)).not.toMatch(/<iframe\b|<audio\b|<video\b|youtube|youtu\.be|soundcloud|albumCover/i);
+    }
+    // The only <img> is PageHeader's: a cover from the Cover Art Archive or a
+    // Wikimedia Commons photo, served from Convex file storage. Song and
+    // artist pages render it; chart pages do not.
+    const withImg = contentPages.filter((path) => /<img\b/.test(sources[path])).map(fileName);
+    expect(withImg).toEqual(["features/charts/ContentShell.jsx"]);
+    expect(sources[contentPages.find((path) => path.endsWith("ContentShell.jsx"))].match(/<img\b/g)).toHaveLength(1);
+    expect(sources[contentPages.find((path) => path.endsWith("ChartsPage.jsx"))]).not.toMatch(/PageHeader/);
   });
 
   it("only the ad-safe screens import AdSlot, so no wrapper can carry it elsewhere", () => {

@@ -18,6 +18,7 @@ import Faq from "./features/legal/Faq";
 import AuxBattle from "./features/legal/AuxBattle";
 import ProSuccess from "./features/legal/ProSuccess";
 import ProRestore from "./features/legal/ProRestore";
+import ContentPage from "./features/charts/ContentPage";
 import { ToastProvider } from "./contexts/ToastContext";
 import { RoomProvider } from "./services/RoomProvider";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -90,6 +91,11 @@ export default function App() {
                 <Route path="privacy" element={<PageTransition><PrivacyPolicy /></PageTransition>} />
                 <Route path="faq" element={<PageTransition><Faq /></PageTransition>} />
                 <Route path="aux-battle" element={<PageTransition><AuxBattle /></PageTransition>} />
+                {/* Static documents with their data inline; see features/charts/ContentPage. */}
+                <Route path="charts" element={<PageTransition><ContentPage /></PageTransition>} />
+                <Route path="charts/:week" element={<PageTransition><ContentPage /></PageTransition>} />
+                <Route path="song/:slug" element={<PageTransition><ContentPage /></PageTransition>} />
+                <Route path="artist/:slug" element={<PageTransition><ContentPage /></PageTransition>} />
                 <Route path="pro/success" element={<PageTransition><ProSuccess /></PageTransition>} />
                 <Route path="pro/restore" element={<PageTransition><ProRestore /></PageTransition>} />
                 <Route path="g/:shareId" element={<PageTransition><SharedResults /></PageTransition>} />

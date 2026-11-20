@@ -33,7 +33,6 @@ vi.mock("../../services/RoomProvider", () => ({
   useRoom: () => ({ room: { isPublic: false }, loading: false }),
 }));
 vi.mock("../../components/ScrollFade", () => ({ default: ({ children }) => <div>{children}</div> }));
-vi.mock("../../components/AdSlot", () => ({ default: () => null }));
 vi.mock("../../components/SettingsModal", () => ({ default: () => null }));
 vi.mock("../../components/SettingsPreview", () => ({ default: () => null }));
 vi.mock("../../components/SessionTakenOverModal", () => ({ default: () => null }));

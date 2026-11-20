@@ -9,11 +9,12 @@ import { useRoomOptional } from '../services/RoomProvider';
  *   3. the current room is NOT a pro (ad-free) room.
  * Consent is collected by Google's CMP, which the AdSense script loads.
  *
- * Only place this on screens with no YouTube API data (player, thumbnails,
- * titles) and never on /screen. The allowed placements and the reasons are in
+ * Only place this on a page with publisher content and no YouTube or
+ * SoundCloud data (player, thumbnails, titles), never on a game screen and
+ * never on /screen. The allowed placements and the rules are in
  * services/ads.js.
  *
- * @param {string} props.slot   - placement name from services/ads.js (home, lobby, wait, faq, auxBattle)
+ * @param {string} props.slot   - placement name from services/ads.js (home, faq, auxBattle, charts, song, artist)
  * @param {string} props.format - AdSense format (default "auto")
  * @param {string} props.className
  */

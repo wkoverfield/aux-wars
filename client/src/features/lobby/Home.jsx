@@ -18,6 +18,7 @@ import { captureGameEvent, hashRoomCode } from "../../services/analytics";
 import { getVisitorId } from "../../utils/visitorId";
 import { makeSeatKey } from "../quickplay/quickPlayModel";
 import QuickPlayLine from "../quickplay/QuickPlayLine";
+import MostPickedLine from "../charts/MostPickedLine";
 
 // Opaque visitor id sent on host/join so retention can link a visit to a play.
 // getVisitorId() falls back to a shared "anon" when storage is unavailable;
@@ -271,6 +272,8 @@ export default function Home() {
 
       {/* Ad-safe surface (dark until AdSense is live) */}
       <AdSlot slot="home" className="max-w-xl" />
+
+      <MostPickedLine />
 
       {/* Footer — one consolidated row */}
       <footer className="dev-links flex items-center gap-4 flex-wrap justify-center py-8">

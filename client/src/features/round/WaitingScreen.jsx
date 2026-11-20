@@ -1,6 +1,4 @@
 
-import AdSlot from '../../components/AdSlot';
-
 /**
  * WaitingScreen component displays a loading state while waiting for other players
  * to complete their actions in the game.
@@ -57,9 +55,6 @@ export default function WaitingScreen({ completedCount, totalCount, message }) {
         <p className="text-white text-sm md:text-base">
           {message || defaultMessage}
         </p>
-
-        {/* Ad-safe surface: players are idle here waiting on others */}
-        <AdSlot slot="wait" className="mt-8 max-w-md" />
       </div>
     </div>
   );
