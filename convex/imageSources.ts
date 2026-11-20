@@ -138,7 +138,9 @@ async function requestOnce(
     if (res.url && res.url !== url.toString() && !redirectAllowed(first, allowedUrl(res.url))) {
       return { kind: "rejected", reason: "redirected off the allowed hosts" };
     }
-    if (res.status >= 400 && res.status < 500) return { kind: "none" };
+    // Only "not found" and "gone" say the host has nothing for this key. A
+    // 403 or any other 4xx says nothing about the key, so it is not a miss.
+    if (res.status === 404 || res.status === 410) return { kind: "none" };
     if (!res.ok) return { kind: "unavailable" };
     const bytes = await readCapped(res, maxBytes);
     if (bytes === null) return { kind: "rejected", reason: `larger than ${maxBytes} bytes` };
@@ -290,7 +292,7 @@ export function acceptedLicense(shortName: string): boolean {
   return (
     name === "public domain" ||
     /^cc0( 1\.0)?$/.test(name) ||
-    /^cc by(-sa)?( \d(\.\d)?)?( [a-z]{2,5})?$/.test(name)
+    (/^cc by(-sa)?( \d(\.\d)?)?( [a-z]{2,5})?$/.test(name) && !/\b(nc|nd)\b/.test(name))
   );
 }
 

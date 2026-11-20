@@ -1716,7 +1716,7 @@ describe("image sources", () => {
     for (const name of ["CC0", "CC0 1.0", "Public domain", "CC BY 2.0", "CC BY 4.0", "CC BY-SA 3.0", "CC BY-SA 4.0", "CC BY-SA 2.0 de", "cc by-sa 2.5", "CC BY"]) {
       expect(acceptedLicense(name), name).toBe(true);
     }
-    for (const name of ["CC BY-NC 2.0", "CC BY-NC-SA 4.0", "CC BY-ND 2.0", "CC BY-NC-ND 4.0", "Fair use", "GFDL", "Copyrighted", "", "CC BY-SA 4.0 or later, all rights reserved"]) {
+    for (const name of ["CC BY-NC 2.0", "CC BY-NC-SA 4.0", "CC BY-ND 2.0", "CC BY-NC-ND 4.0", "CC BY NC", "Cc By Nd", "CC BY 4.0 NC", "CC BY-SA 4.0 nd", "Fair use", "GFDL", "Copyrighted", "", "CC BY-SA 4.0 or later, all rights reserved"]) {
       expect(acceptedLicense(name), name).toBe(false);
     }
   });
