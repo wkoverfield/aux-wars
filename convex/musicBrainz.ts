@@ -37,14 +37,19 @@ const MAX_NAME = 300;
 /** Search URL for the recording a song key names. */
 export function recordingSearchUrl(songKey: string): string {
   const { artistKey, titleKey } = splitSongKey(songKey);
-  // A grouped term query, not a quoted phrase: a key half has lost its
-  // punctuation ("can t tell me nothing"), and a phrase of those tokens does
-  // not find "Can't Tell Me Nothing". pickRecording still requires the exact
-  // title and artist. Anything but letters, digits and spaces is stripped so
-  // the value can never leave its group.
-  const phrase = (s: string) => `(${s.replace(/[^\p{L}\p{N} ]/gu, " ")})`;
+  // The title is searched both as a quoted phrase and as grouped terms. A
+  // key half has lost its punctuation ("can t tell me nothing"), and a phrase
+  // of those tokens does not find "Can't Tell Me Nothing"; terms alone rank a
+  // short title ("fe n") below unrelated recordings. pickRecording still
+  // requires the exact title and artist. Anything but letters, digits and
+  // spaces is stripped so a value can never leave its phrase or group.
+  const plain = (s: string) => s.replace(/[^\p{L}\p{N} ]/gu, " ");
+  const title = plain(titleKey);
   const url = new URL(RECORDING_ENDPOINT);
-  url.searchParams.set("query", `recording:${phrase(titleKey)} AND artist:${phrase(artistKey)}`);
+  url.searchParams.set(
+    "query",
+    `(recording:"${title}" OR recording:(${title})) AND artist:(${plain(artistKey)})`
+  );
   url.searchParams.set("fmt", "json");
   url.searchParams.set("limit", String(RESULT_LIMIT));
   return url.toString();
