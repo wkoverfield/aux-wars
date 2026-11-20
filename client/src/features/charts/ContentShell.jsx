@@ -66,7 +66,7 @@ export function PageHeader({ image, children }) {
         alt={image.alt}
         loading="eager"
         decoding="async"
-        className="h-24 w-24 sm:h-40 sm:w-40 shrink-0 rounded-xl object-cover bg-white/10"
+        className="h-24 w-24 sm:h-40 sm:w-40 shrink-0 rounded-xl object-cover object-top bg-white/10"
       />
       <div className="min-w-0">{children}</div>
     </div>

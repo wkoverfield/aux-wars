@@ -127,7 +127,7 @@ describe("ContentPage", () => {
         alt: "Cover of FE!N by Travis Scott",
         loading: "eager",
         decoding: "async",
-        class: "h-24 w-24 sm:h-40 sm:w-40 shrink-0 rounded-xl object-cover bg-white/10",
+        class: "h-24 w-24 sm:h-40 sm:w-40 shrink-0 rounded-xl object-cover object-top bg-white/10",
       });
       const header = img.parentElement;
       expect(header.className).toBe("mt-6 flex items-center gap-4 sm:gap-6");
