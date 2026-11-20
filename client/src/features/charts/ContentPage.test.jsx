@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { buildContentPages } from "../../data/contentPages";
 import { PAGE_DATA_ID, PageDataContext, pageDataScript, readPageData, serializePageData } from "../../data/pageData";
-import { CONTENT } from "../../prerender/content.fixture";
+import { CONTENT, COVER, PHOTO } from "../../prerender/content.fixture";
 import ContentPage from "./ContentPage";
 
 const content = buildContentPages(CONTENT);
@@ -17,6 +17,16 @@ const tree = (data, path) => (
   </PageDataContext.Provider>
 );
 
+/** Markup with every <img>'s attributes in one order: server and client write them in different ones. */
+function normalized(root) {
+  for (const img of root.querySelectorAll("img")) {
+    const attributes = [...img.attributes].map(({ name, value }) => [name, value]).sort(([a], [b]) => (a < b ? -1 : 1));
+    for (const [name] of attributes) img.removeAttribute(name);
+    for (const [name, value] of attributes) img.setAttribute(name, value);
+  }
+  return root.innerHTML;
+}
+
 /** Markup as the browser holds it, so server and client output compare equal. */
 function asDom(html) {
   const holder = document.createElement("div");
@@ -26,7 +36,9 @@ function asDom(html) {
   for (const styled of holder.querySelectorAll("[style]")) {
     styled.setAttribute("style", styled.style.cssText);
   }
-  return holder.innerHTML;
+  // Server output starts with a preload hint for an image that loads eagerly.
+  for (const hint of holder.querySelectorAll('link[rel="preload"][as="image"]')) hint.remove();
+  return normalized(holder);
 }
 
 afterEach(() => {
@@ -47,7 +59,7 @@ describe("content page build data", () => {
       expect(read).toEqual(data);
 
       const { container } = render(tree(read, path));
-      expect(container.innerHTML).toBe(asDom(prerendered));
+      expect(normalized(container.cloneNode(true))).toBe(asDom(prerendered));
       expect(container.textContent.length).toBeGreaterThan(100);
     },
   );
@@ -85,16 +97,116 @@ describe("ContentPage", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Page not found");
   });
 
-  it("shows text and numbers only: no images, players or outside links", () => {
+  it("shows text and numbers, at most one stored image, and no players or outside links but a photo credit", () => {
     for (const page of content.pages) {
       const { container, unmount } = render(tree({ home: null, page: page.data }, page.path));
-      expect(container.querySelectorAll("img, iframe, audio, video, picture, svg").length, page.path).toBe(0);
+      expect(container.querySelectorAll("iframe, audio, video, picture, svg").length, page.path).toBe(0);
+      expect(container.querySelectorAll("img").length, page.path).toBe(page.data.image ? 1 : 0);
+      if (page.data.kind === "charts") expect(container.querySelector("img"), page.path).toBeNull();
       for (const link of container.querySelectorAll("a")) {
-        expect(link.getAttribute("href"), page.path).toMatch(/^\/[a-z0-9/-]*$/);
+        const credit = link.textContent.startsWith("Photo: ");
+        expect(link.getAttribute("href"), page.path).toMatch(credit ? /^https:\/\/commons\.wikimedia\.org\// : /^\/[a-z0-9/-]*$/);
         expect(link.getAttribute("target"), page.path).toBeNull();
       }
       unmount();
     }
+  });
+
+  describe("images", () => {
+    const pageOf = (overrides, path) => buildContentPages({ ...CONTENT, ...overrides }).pages.find((p) => p.path === path);
+    const show = (page) => render(tree({ home: null, page: page.data }, page.path)).container;
+    const artistWith = (image) => pageOf({ artists: [{ ...CONTENT.artists[0], image }] }, "/artist/travis-scott");
+
+    it("a song page shows its cover beside the title", () => {
+      const container = show(song);
+      const img = container.querySelector("img");
+      expect(Object.fromEntries([...img.attributes].map(({ name, value }) => [name, value]))).toEqual({
+        src: COVER.url,
+        width: "250",
+        height: "250",
+        alt: "Cover of FE!N by Travis Scott",
+        loading: "eager",
+        decoding: "async",
+        class: "h-24 w-24 sm:h-40 sm:w-40 shrink-0 rounded-xl object-cover bg-white/10",
+      });
+      const header = img.parentElement;
+      expect(header.className).toBe("mt-6 flex items-center gap-4 sm:gap-6");
+      expect(header.querySelector("h1").textContent).toBe("FE!N");
+      expect(header.querySelector("h1").className).toBe("text-3xl font-bold");
+      expect(header.querySelector('a[href="/artist/travis-scott"]')).not.toBeNull();
+      // A cover carries no credit line.
+      expect(container.querySelector("footer").textContent).not.toContain("Photo:");
+    });
+
+    it("without an image the header is the heading alone, whether the field is null or absent", () => {
+      for (const path of ["/song/travis-scott-sicko-mode", "/song/sheck-wes-mo-bamba"]) {
+        const page = content.pages.find((p) => p.path === path);
+        expect(page.data.image, path).toBeNull();
+        const container = show(page);
+        expect(container.querySelector("img"), path).toBeNull();
+        const h1 = container.querySelector("h1");
+        expect(h1.className, path).toBe("text-3xl font-bold mt-6");
+        expect(h1.previousElementSibling.getAttribute("aria-label"), path).toBe("Breadcrumb");
+        expect(h1.nextElementSibling.className, path).toBe("mt-2 text-gray-300");
+        cleanup();
+      }
+      const artist = artistWith(null);
+      const container = show(artist);
+      const h1 = container.querySelector("h1");
+      expect(h1.className).toBe("text-3xl font-bold mt-6");
+      expect(h1.previousElementSibling.getAttribute("aria-label")).toBe("Breadcrumb");
+      expect(h1.nextElementSibling.tagName).toBe("DL");
+      expect(container.querySelector("footer").children.length).toBe(2);
+    });
+
+    it("an artist photo is credited in one footer line that links to its Commons page", () => {
+      const artist = content.pages.find((p) => p.path === "/artist/travis-scott");
+      const container = show(artist);
+      const img = container.querySelector("img");
+      expect(img.getAttribute("src")).toBe(PHOTO.url);
+      expect(img.getAttribute("alt")).toBe("Photo of Travis Scott");
+      expect([img.getAttribute("width"), img.getAttribute("height")]).toEqual(["320", "213"]);
+      expect(img.parentElement.querySelector("h1").textContent).toBe("Travis Scott");
+
+      const footer = container.querySelector("footer");
+      const [numbers, credit, links] = footer.children;
+      expect(numbers.tagName).toBe("P");
+      expect(links.tagName).toBe("NAV");
+      expect(credit.textContent).toBe("Photo: Jane Doe, CC BY-SA 4.0, via Wikimedia Commons");
+      const link = credit.querySelector("a");
+      expect(link.textContent).toBe(credit.textContent);
+      expect(link.getAttribute("href")).toBe(PHOTO.credit.pageUrl);
+      expect(link.getAttribute("rel")).toBe("noopener");
+      expect(link.getAttribute("target")).toBeNull();
+      expect(credit.className).not.toMatch(/bg-|font-bold/);
+    });
+
+    it("an artist page that falls back to a cover names the song and has no credit line", () => {
+      const container = show(artistWith({ ...COVER, credit: null }));
+      expect(container.querySelector("img").getAttribute("alt")).toBe("Cover of FE!N by Travis Scott");
+      expect(container.querySelector("footer").textContent).not.toContain("Photo:");
+      expect(container.querySelector("footer").children.length).toBe(2);
+    });
+
+    it("an image that is not an https URL with a pixel size is left out and the page still builds", () => {
+      for (const image of [
+        { ...COVER, url: "http://example.com/a.jpg" },
+        { ...COVER, url: "javascript:alert(1)" },
+        { ...COVER, url: undefined },
+        { ...COVER, width: 0 },
+        { ...COVER, height: "250" },
+        "https://example.com/a.jpg",
+        {},
+      ]) {
+        const page = pageOf({ songs: [{ ...CONTENT.songs[0], image }, ...CONTENT.songs.slice(1)] }, song.path);
+        expect(page.data.image, JSON.stringify(image)).toBeNull();
+        expect(artistWith(image).data, JSON.stringify(image)).toMatchObject({ image: null, credit: null });
+      }
+      // A credit that is incomplete or does not link over https is dropped; the image stays.
+      for (const credit of [{ ...PHOTO.credit, author: " " }, { ...PHOTO.credit, pageUrl: "javascript:alert(1)" }, "Jane"]) {
+        expect(artistWith({ ...PHOTO, credit }).data, JSON.stringify(credit)).toMatchObject({ image: { url: PHOTO.url }, credit: null });
+      }
+    });
   });
 
   it("puts a start-a-game link on the song page only, styled like the page's other links", () => {
@@ -128,7 +240,7 @@ describe("ContentPage", () => {
   it("wraps long words and keeps its bottom padding: one content-sized column holds the whole page", () => {
     for (const page of content.pages) {
       const { container, unmount } = render(tree({ home: null, page: page.data }, page.path));
-      const column = container.querySelector("h1").parentElement;
+      const column = container.querySelector('nav[aria-label="Breadcrumb"]').parentElement;
       // overflow-wrap is inherited, so every title, name and row inside wraps.
       for (const cls of ["wrap-anywhere", "min-w-0", "self-start", "pb-16"]) {
         expect(column.classList.contains(cls), `${page.path} ${cls}`).toBe(true);

@@ -386,6 +386,17 @@ export default defineSchema({
     mbid: v.optional(v.string()), // MusicBrainz recording id
     titleSetByHand: v.optional(v.boolean()),
     artistSetByHand: v.optional(v.boolean()),
+    // Cover from the Cover Art Archive, kept in file storage. releaseGroupId
+    // is the MusicBrainz release group it is keyed by. coverCheckedAt is the
+    // last time a search for the cover ended without one. coverSetByHand is
+    // true once a hand control set or removed the cover; the weekly job then
+    // leaves it alone.
+    releaseGroupId: v.optional(v.string()),
+    coverStorageId: v.optional(v.id("_storage")),
+    coverWidth: v.optional(v.number()),
+    coverHeight: v.optional(v.number()),
+    coverCheckedAt: v.optional(v.number()),
+    coverSetByHand: v.optional(v.boolean()),
     status: publishStatusValidator,
     heldReason: v.optional(
       v.union(v.literal("no_match"), v.literal("filtered"), v.literal("manual"))
@@ -409,6 +420,19 @@ export default defineSchema({
     slug: v.string(),
     name: v.string(),
     nameConfirmed: v.optional(v.boolean()),
+    // Photo from Wikimedia Commons, kept in file storage, with the credit its
+    // license requires. mbid is the MusicBrainz artist id the photo is found
+    // through. photoCheckedAt and photoSetByHand work like the cover fields
+    // of publishedSongs.
+    mbid: v.optional(v.string()),
+    photoStorageId: v.optional(v.id("_storage")),
+    photoWidth: v.optional(v.number()),
+    photoHeight: v.optional(v.number()),
+    photoAuthor: v.optional(v.string()),
+    photoLicense: v.optional(v.string()),
+    photoPageUrl: v.optional(v.string()),
+    photoCheckedAt: v.optional(v.number()),
+    photoSetByHand: v.optional(v.boolean()),
     status: publishStatusValidator,
     heldReason: v.optional(
       v.union(v.literal("below_bar"), v.literal("filtered"), v.literal("manual"))

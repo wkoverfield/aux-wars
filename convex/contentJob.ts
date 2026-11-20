@@ -12,7 +12,9 @@
  *   3. lift artists that now have enough picks and a live song;
  *   4. store the stats shown on every published song and artist page;
  *   5. compute and store the week's chart, then the week's baseline;
- *   6. schedule the next pass, or on the last pass the site rebuild
+ *   6. fetch covers and artist photos for live rows that have none
+ *      (contentImages.ts). An error here is counted, never thrown;
+ *   7. schedule the next pass, or on the last pass the site rebuild
  *      (content:triggerDeploy).
  *
  * Running a week again replaces its chart, baseline and stats and keeps its
@@ -51,6 +53,7 @@ import {
   type ChartLists,
   type SongTotals,
 } from "./contentLib";
+import { emptyImageSummary, fillImages, type ImageSummary } from "./contentImages";
 import { lookupRecording, makePacer } from "./musicBrainz";
 
 // A run labels the ISO week that holds the moment this long before it starts.
@@ -75,6 +78,10 @@ const MAX_CONSECUTIVE_FAILURES = 5;
 // A run that published something and still has candidates left schedules
 // itself again for the same week, at most this many passes in a row.
 const MAX_PASSES = 5;
+// The image step starts no request after this long into a run. One request
+// that is already under way can take another minute of retries, which still
+// ends inside the ten minute action limit.
+const IMAGE_DEADLINE_MS = 7.5 * 60 * 1000;
 const NEXT_PASS_DELAY_MS = 2 * 60 * 1000;
 
 type StatsRow = SongTotals & { songKey: string; prompt: string | null };
@@ -150,6 +157,10 @@ const slugTaken = (ctx: MutationCtx, table: "publishedSongs" | "publishedArtists
  * publishedArtists row it points at. A song key that already has a row is left
  * exactly as it is. A new artist row starts held: "filtered" when its name
  * holds a blocked term, otherwise "below_bar".
+ *
+ * The MusicBrainz ids the images are found through are stored with the rows.
+ * A matched song that came without one has nothing to search by, so the row
+ * is marked as searched now (coverCheckedAt, photoCheckedAt).
  */
 export const publishSong = internalMutation({
   args: {
@@ -158,6 +169,8 @@ export const publishSong = internalMutation({
     artist: v.string(),
     year: v.optional(v.number()),
     mbid: v.optional(v.string()),
+    releaseGroupId: v.optional(v.string()),
+    artistMbid: v.optional(v.string()),
     status: publishStatusValidator,
     heldReason: v.optional(v.union(v.literal("no_match"), v.literal("filtered"))),
   },
@@ -206,6 +219,8 @@ export const publishSong = internalMutation({
         slug: artistSlug,
         name: args.artist,
         nameConfirmed: args.mbid ? true : undefined,
+        mbid: args.artistMbid,
+        photoCheckedAt: args.mbid && !args.artistMbid ? now : undefined,
         status: "held",
         heldReason: isBlocked(artistKey) || isBlocked(args.artist) ? "filtered" : "below_bar",
         publishedAt: now,
@@ -215,6 +230,12 @@ export const publishSong = internalMutation({
       // The row was created for an unmatched song and still shows the key
       // half; this is the first MusicBrainz name for the artist.
       await ctx.db.patch(artist._id, { name: args.artist, nameConfirmed: true });
+    }
+    if (args.mbid && !artist.mbid && !artist.photoStorageId) {
+      await ctx.db.patch(
+        artist._id,
+        args.artistMbid ? { mbid: args.artistMbid, photoCheckedAt: undefined } : { photoCheckedAt: now }
+      );
     }
 
     const slug = await firstFreeSlug(
@@ -229,6 +250,8 @@ export const publishSong = internalMutation({
       artistSlug: artist.slug,
       year: args.year,
       mbid: args.mbid,
+      releaseGroupId: args.releaseGroupId,
+      coverCheckedAt: args.mbid && !args.releaseGroupId ? now : undefined,
       status: args.status,
       heldReason: args.heldReason,
       publishedAt: now,
@@ -358,6 +381,8 @@ export type WeeklySummary = {
   unresolved: string[];
   artistsLifted: string[];
   lists: { [K in keyof ChartLists]: number | null };
+  // Covers and artist photos fetched by this pass (contentImages.ts).
+  images: ImageSummary;
   nextPassScheduled: boolean;
   // True on the last pass, which schedules content:triggerDeploy.
   deployScheduled: boolean;
@@ -605,15 +630,35 @@ export const runWeekly = internalAction({
     }
     await ctx.runMutation(internal.contentJob.trimBaseline, { week, chunks });
 
-    const nextPassScheduled = carriedOver > 0 && published.length > 0 && pass < MAX_PASSES;
+    // 6. Images. Everything above is stored by now; whatever happens here,
+    // the pass still schedules its follow-up or the rebuild.
+    const images = emptyImageSummary();
+    try {
+      await fillImages(
+        ctx,
+        { pace, deadline: startedAt + IMAGE_DEADLINE_MS },
+        {
+          song: (songKey) => songs.get(songKey)?.picks ?? 0,
+          artist: (artistKey) => artists.get(artistKey)?.picks ?? 0,
+        },
+        images
+      );
+    } catch (error) {
+      images.error = error instanceof Error ? error.message : String(error);
+      console.error(`Image step failed: ${images.error}`);
+    }
+    const imagesMoved = images.coversStored + images.photosStored + images.notFound > 0;
+
+    const nextPassScheduled =
+      pass < MAX_PASSES && ((carriedOver > 0 && published.length > 0) || (images.remaining > 0 && imagesMoved));
     if (nextPassScheduled) {
       await ctx.scheduler.runAfter(NEXT_PASS_DELAY_MS, internal.contentJob.runWeekly, {
         week,
         pass: pass + 1,
       });
     } else {
-      // Last pass: rebuild the static pages so the new week and any new page
-      // reach the site. Does nothing when no deploy hook is configured.
+      // Last pass: rebuild the static pages so the new week, any new page and
+      // any new image reach the site. Does nothing when no deploy hook is configured.
       await ctx.scheduler.runAfter(0, internal.content.triggerDeploy, {});
     }
 
@@ -632,6 +677,7 @@ export const runWeekly = internalAction({
         mostDivisive: lists.mostDivisive.length,
         movers: lists.movers === null ? null : lists.movers.length,
       },
+      images,
       nextPassScheduled,
       deployScheduled: !nextPassScheduled,
     };

@@ -14,8 +14,11 @@ const LINK = 'underline decoration-white/30 underline-offset-2 hover:decoration-
  *
  * Content pages are static documents. Every link on them is a plain <a href>,
  * so each one loads its own HTML file and that file's build data.
+ *
+ * `footerNote` is one more line in the footer, above the site links: the
+ * credit of an artist photo.
  */
-export default function ContentShell({ trail = [], children }) {
+export default function ContentShell({ trail = [], footerNote = null, children }) {
   return (
     <div className="h-full w-full overflow-y-auto text-white px-6 py-12 flex justify-center">
       <div className="max-w-2xl w-full min-w-0 self-start pb-16 wrap-anywhere">
@@ -31,6 +34,7 @@ export default function ContentShell({ trail = [], children }) {
         {children}
         <footer className="mt-12 pt-6 border-t border-white/10 text-xs text-gray-400">
           <p>These numbers come from real games played on Aux Wars. Picks and ratings are anonymous.</p>
+          {footerNote && <p className="mt-2">{footerNote}</p>}
           <nav aria-label="Site" className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
             <a href="/" className="hover:text-white underline underline-offset-2">Aux Wars</a>
             <a href="/charts" className="hover:text-white underline underline-offset-2">Charts</a>
@@ -40,6 +44,31 @@ export default function ContentShell({ trail = [], children }) {
           </nav>
         </footer>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The top of a song or artist page: its heading lines, with the page's one
+ * image beside them when it has one. The image is a square of 96px, 160px
+ * from the `sm` breakpoint up. Its width and height attributes are the
+ * file's own pixels, so the box is reserved before the file loads. Without
+ * an image this renders the heading lines and nothing else.
+ */
+export function PageHeader({ image, children }) {
+  if (!image) return children;
+  return (
+    <div className="mt-6 flex items-center gap-4 sm:gap-6">
+      <img
+        src={image.url}
+        width={image.width}
+        height={image.height}
+        alt={image.alt}
+        loading="eager"
+        decoding="async"
+        className="h-24 w-24 sm:h-40 sm:w-40 shrink-0 rounded-xl object-cover bg-white/10"
+      />
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }

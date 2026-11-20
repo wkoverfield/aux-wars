@@ -24,6 +24,17 @@ import {
   weekRange,
 } from "./contentLib";
 import { MAX_LOOKUPS_PER_RUN } from "./contentJob";
+import { IMAGE_RETRY_INTERVAL_MS, MAX_IMAGES_PER_RUN } from "./contentImages";
+import {
+  MAX_CREDIT,
+  MAX_IMAGE_BYTES,
+  acceptedLicense,
+  allowedUrl,
+  coverUrl,
+  imageSize,
+  isAllowedHost,
+  plainText,
+} from "./imageSources";
 import {
   MATCH_MIN_SCORE,
   MUSICBRAINZ_USER_AGENT,
@@ -64,8 +75,9 @@ type Recording = {
   id: string;
   score: number;
   title: string;
-  "artist-credit": { name: string; joinphrase?: string }[];
+  "artist-credit": { name: string; joinphrase?: string; artist?: { id: string } }[];
   "first-release-date"?: string;
+  releases?: { id: string; date?: string; "release-group"?: { id: string } }[];
 };
 
 function rec(title: string, artist: string, date?: string, score = 100): Recording {
@@ -130,12 +142,15 @@ type Answer = number | "network error";
 
 /**
  * Replaces fetch. `catalog` maps a song key to the recordings a search
- * returns. `status` is what musicbrainz.org answers: one value for every
- * request, or a function of the request's number (0-based) and song key.
+ * returns. `status` is what musicbrainz.org answers a search: one value for
+ * every request, or a function of the request's number (0-based) and song
+ * key. `other` answers every request that is not a recording search; without
+ * it they get an empty 200.
  */
 function stubFetch(
   catalog: Record<string, Recording[]> = {},
-  status: Answer | ((n: number, songKey: string) => Answer) = 200
+  status: Answer | ((n: number, songKey: string) => Answer) = 200,
+  other?: (url: URL) => Response | Promise<Response>
 ) {
   const calls: Call[] = [];
   let searches = 0;
@@ -149,7 +164,9 @@ function stubFetch(
         userAgent: new Headers(init?.headers).get("user-agent"),
         method: init?.method ?? "GET",
       });
-      if (url.host !== "musicbrainz.org") return new Response("", { status: 200 });
+      if (url.host !== "musicbrainz.org" || url.pathname !== "/ws/2/recording") {
+        return other ? other(url) : new Response("", { status: 200 });
+      }
       const m = /^recording:\((.*)\) AND artist:\((.*)\)$/.exec(url.searchParams.get("query") ?? "");
       const key = m ? `${m[2]}|${m[1]}` : "";
       const answer = typeof status === "function" ? status(searches++, key) : status;
@@ -1089,6 +1106,7 @@ describe("content:published", () => {
         { prompt: CURATED_PROMPTS[1], picks: 14 },
         { prompt: CURATED_PROMPTS[0], picks: 9 },
       ],
+      image: null,
     });
     // Rank counts public songs only: 40, 30, 20, then this one at 12. The
     // held song at 15 and the unpublished one at 14 take no place.
@@ -1132,6 +1150,7 @@ describe("content:published", () => {
         picks: 52,
         ratingCount: 110,
         average: 4.5,
+        image: null,
         songs: [
           { slug: "hey-ya-outkast", title: "Hey Ya!", picks: 40, ratingCount: 60, average: 4.5 },
           { slug: "ms-jackson-outkast", title: "Ms. Jackson", picks: 12, ratingCount: 50, average: 4.5 },
@@ -1417,14 +1436,18 @@ describe("content:published", () => {
     expect(text).not.toContain("|");
 
     const keys = keysOf(all);
-    for (const forbidden of ["songKey", "artistKey", "mbid", "albumCover", "sources", "status", "heldReason", "noteStatus", "ratingSum", "_id", "_creationTime", "publishedAt"]) {
+    for (const forbidden of [
+      "songKey", "artistKey", "mbid", "albumCover", "sources", "status", "heldReason", "noteStatus", "ratingSum", "_id",
+      "_creationTime", "publishedAt", "releaseGroupId", "coverStorageId", "photoStorageId", "coverCheckedAt",
+      "photoCheckedAt", "coverSetByHand", "photoSetByHand",
+    ]) {
       expect(keys.has(forbidden)).toBe(false);
     }
     expect([...keysOf(all.songs)].sort()).toEqual(
-      ["artist", "artistSlug", "average", "picks", "prompt", "rank", "ratingCount", "ratingHist", "slug", "title", "topPrompts", "wins", "year"].sort()
+      ["artist", "artistSlug", "average", "image", "picks", "prompt", "rank", "ratingCount", "ratingHist", "slug", "title", "topPrompts", "wins", "year"].sort()
     );
     expect([...keysOf(all.artists)].sort()).toEqual(
-      ["average", "name", "picks", "prompt", "ratingCount", "slug", "songs", "title", "topPrompts"].sort()
+      ["average", "image", "name", "picks", "prompt", "ratingCount", "slug", "songs", "title", "topPrompts"].sort()
     );
     expect([...keysOf(all.charts)].sort()).toEqual(
       [
@@ -1515,5 +1538,690 @@ describe("note approval and the deploy hook", () => {
     expect(await t.mutation(internal.content.setChartNote, { week: "2026-W46", note: "   " })).toEqual({ week: "2026-W46", noteStatus: "none" });
     await expect(t.mutation(internal.content.approveChartNote, { week: "2026-W46" })).rejects.toThrow();
     await expect(t.mutation(internal.content.setChartNote, { week: "2026-W46", note: "x".repeat(5001) })).rejects.toThrow();
+  });
+});
+
+// --- Images ---
+
+const RG = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const OUTKAST_ID = "73fdb566-a9b1-494c-9f32-51768ec9fd27";
+const HEY_YA_RG = RG(1);
+const MS_JACKSON_RG = RG(2);
+
+/** A recording as a search returns it, with its artist id and its releases. */
+function recWithIds(title: string, artist: string, date: string, artistId: string | null, releaseGroup: string | null): Recording {
+  return {
+    ...rec(title, artist, date),
+    "artist-credit": [artistId ? { name: artist, artist: { id: artistId } } : { name: artist }],
+    releases: releaseGroup
+      ? [
+          // A later compilation, then the release the cover is taken from.
+          { id: "rel-b", date: "2016-11-18", "release-group": { id: RG(99) } },
+          { id: "rel-a", date, "release-group": { id: releaseGroup } },
+        ]
+      : [],
+  };
+}
+
+// The catalog of seedBank, with ids for the two OutKast songs only.
+const CATALOG_WITH_IDS: Record<string, Recording[]> = {
+  ...CATALOG,
+  "outkast|hey ya": [recWithIds("Hey Ya!", "OutKast", "2003-09-23", OUTKAST_ID, HEY_YA_RG)],
+  "outkast|ms jackson": [recWithIds("Ms. Jackson", "OutKast", "2000-10-03", OUTKAST_ID, MS_JACKSON_RG)],
+};
+
+/** The first bytes of a JPEG of the given size: enough to read its dimensions. */
+function jpeg(width: number, height: number, padTo = 0): Uint8Array<ArrayBuffer> {
+  const head = [
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x0b, 0x08,
+    height >> 8, height & 255, width >> 8, width & 255, 0x01, 0x01, 0x11, 0x00, 0xff, 0xd9,
+  ];
+  const bytes = new Uint8Array(Math.max(head.length, padTo));
+  bytes.set(head);
+  return bytes;
+}
+function png(width: number, height: number): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(33);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(bytes.buffer).setUint32(16, width);
+  new DataView(bytes.buffer).setUint32(20, height);
+  return bytes;
+}
+
+const image = (bytes: Uint8Array<ArrayBuffer>, type = "image/jpeg") =>
+  new Response(bytes, { status: 200, headers: { "content-type": type } });
+const json = (body: unknown) =>
+  new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+const redirect = (location: string, status = 307) => new Response(null, { status, headers: { location } });
+const notFound = () => new Response("Not Found", { status: 404 });
+
+type Route = (url: URL) => Response | Promise<Response> | undefined;
+
+/** Answers by host and path; anything no route answers is a 404. */
+const web =
+  (...routes: Route[]) =>
+  async (url: URL) => {
+    for (const route of routes) {
+      const res = await route(url);
+      if (res) return res;
+    }
+    return notFound();
+  };
+
+/** The Cover Art Archive as it answers: two redirects into archive.org, then the file. */
+const coverArchive =
+  (covers: Record<string, () => Response>): Route =>
+  (url) => {
+    if (url.host === "coverartarchive.org") {
+      const m = /^\/release-group\/([0-9a-f-]+)\/front-250$/.exec(url.pathname);
+      return m && covers[m[1]] ? redirect(`https://archive.org/download/mbid-${m[1]}/thumb250.jpg`) : notFound();
+    }
+    if (url.host === "archive.org") {
+      return redirect(`https://ia800100.us.archive.org/9${url.pathname.replace("/download", "")}`, 302);
+    }
+    if (url.host === "ia800100.us.archive.org") {
+      const m = /mbid-([0-9a-f-]+)\//.exec(url.pathname);
+      return m && covers[m[1]] ? covers[m[1]]() : notFound();
+    }
+    return undefined;
+  };
+
+const COMMONS_PAGE = "https://commons.wikimedia.org/wiki/File:OutKast_2014.jpg";
+const THUMB = "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/OutKast_2014.jpg/320px-OutKast_2014.jpg";
+
+/** MusicBrainz artist -> Wikidata -> Commons -> the file, for OutKast. */
+const outkastPhoto =
+  (license: string, file: () => Response = () => image(png(320, 213), "image/png")): Route =>
+  (url) => {
+    if (url.host === "musicbrainz.org" && url.pathname === `/ws/2/artist/${OUTKAST_ID}`) {
+      expect(url.searchParams.get("inc")).toBe("url-rels");
+      return json({
+        id: OUTKAST_ID,
+        relations: [
+          { type: "discogs", url: { resource: "https://www.discogs.com/artist/1" } },
+          { type: "wikidata", url: { resource: "https://www.wikidata.org/wiki/Q472595" } },
+        ],
+      });
+    }
+    if (url.host === "www.wikidata.org" && url.pathname === "/wiki/Special:EntityData/Q472595.json") {
+      return json({
+        entities: {
+          Q472595: {
+            claims: {
+              P18: [
+                { rank: "deprecated", mainsnak: { datavalue: { value: "Old.jpg" } } },
+                { rank: "normal", mainsnak: { datavalue: { value: "OutKast 2014.jpg" } } },
+              ],
+            },
+          },
+        },
+      });
+    }
+    if (url.host === "commons.wikimedia.org" && url.pathname === "/w/api.php") {
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        action: "query",
+        titles: "File:OutKast 2014.jpg",
+        prop: "imageinfo",
+        iiprop: "url|extmetadata",
+        iiurlwidth: "320",
+        format: "json",
+      });
+      return json({
+        query: {
+          pages: {
+            "123": {
+              title: "File:OutKast 2014.jpg",
+              imageinfo: [
+                {
+                  thumburl: THUMB,
+                  thumbwidth: 320,
+                  thumbheight: 213,
+                  url: "https://upload.wikimedia.org/wikipedia/commons/a/ab/OutKast_2014.jpg",
+                  descriptionurl: COMMONS_PAGE,
+                  extmetadata: {
+                    Artist: { value: '<a href="//commons.wikimedia.org/wiki/User:Sry85">Sven  Mandel</a> &amp; friends' },
+                    LicenseShortName: { value: license },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      });
+    }
+    if (url.href === THUMB) return file();
+    return undefined;
+  };
+
+const imageCalls = (calls: Call[]) => calls.filter((c) => c.url.pathname !== "/ws/2/recording");
+const fileExists = (t: T, id: any) => t.run(async (ctx) => (await ctx.db.system.get(id)) !== null);
+const songRow = async (t: T, slug: string) => (await table(t, "publishedSongs")).find((r) => r.slug === slug)!;
+const artistRow = async (t: T, slug: string) => (await table(t, "publishedArtists")).find((r) => r.slug === slug)!;
+
+describe("image sources", () => {
+  test("only the fixed hosts are allowed, over https", () => {
+    for (const host of ["musicbrainz.org", "coverartarchive.org", "www.wikidata.org", "commons.wikimedia.org", "upload.wikimedia.org", "archive.org", "ia800100.us.archive.org"]) {
+      expect(isAllowedHost(host), host).toBe(true);
+      expect(allowedUrl(`https://${host}/x.jpg`)?.hostname, host).toBe(host);
+    }
+    for (const host of ["evilarchive.org", "archive.org.evil.example", "wikidata.org", "en.wikipedia.org", "i.ytimg.com", "i1.sndcdn.com"]) {
+      expect(isAllowedHost(host), host).toBe(false);
+    }
+    for (const url of ["http://archive.org/x.jpg", "https://user:pw@archive.org/x.jpg", "https://archive.org:8443/x.jpg", "not a url", ""]) {
+      expect(allowedUrl(url), url).toBeNull();
+    }
+  });
+
+  test("accepts CC0, public domain, CC BY and CC BY-SA in any version, and nothing else", () => {
+    for (const name of ["CC0", "CC0 1.0", "Public domain", "CC BY 2.0", "CC BY 4.0", "CC BY-SA 3.0", "CC BY-SA 4.0", "CC BY-SA 2.0 de", "cc by-sa 2.5", "CC BY"]) {
+      expect(acceptedLicense(name), name).toBe(true);
+    }
+    for (const name of ["CC BY-NC 2.0", "CC BY-NC-SA 4.0", "CC BY-ND 2.0", "CC BY-NC-ND 4.0", "Fair use", "GFDL", "Copyrighted", "", "CC BY-SA 4.0 or later, all rights reserved"]) {
+      expect(acceptedLicense(name), name).toBe(false);
+    }
+  });
+
+  test("an author is reduced to capped plain text", () => {
+    expect(plainText('<a href="/wiki/User:A" title="x">Ann  B.</a>\n&amp; <i>C&#39;D</i>&nbsp;&#x263A;')).toBe("Ann B. & C'D ☺");
+    expect(plainText("x".repeat(500))).toHaveLength(MAX_CREDIT);
+    expect(plainText(undefined)).toBe("");
+  });
+
+  test("reads the size of a JPEG, PNG, GIF and WebP and refuses anything else", () => {
+    expect(imageSize(jpeg(250, 248))).toEqual({ contentType: "image/jpeg", width: 250, height: 248 });
+    expect(imageSize(png(320, 213))).toEqual({ contentType: "image/png", width: 320, height: 213 });
+    const gif = new Uint8Array(13);
+    gif.set([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x40, 0x01, 0xf0, 0x00]);
+    expect(imageSize(gif)).toEqual({ contentType: "image/gif", width: 320, height: 240 });
+    const webp = new Uint8Array(30);
+    webp.set(new TextEncoder().encode("RIFF"), 0);
+    webp.set(new TextEncoder().encode("WEBPVP8X"), 8);
+    webp.set([0x3f, 0x01, 0x00, 0xd4, 0x00, 0x00], 24);
+    expect(imageSize(webp)).toEqual({ contentType: "image/webp", width: 320, height: 213 });
+    expect(imageSize(new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>"))).toBeNull();
+    expect(imageSize(new TextEncoder().encode("<!doctype html><html></html>"))).toBeNull();
+    expect(imageSize(jpeg(0, 10))).toBeNull();
+    expect(imageSize(new Uint8Array(0))).toBeNull();
+  });
+
+  test("a match carries the release group of its earliest release and the artist's id", () => {
+    const key = "outkast|hey ya";
+    expect(pickRecording(key, { recordings: CATALOG_WITH_IDS[key] })).toEqual({
+      title: "Hey Ya!",
+      artist: "OutKast",
+      year: 2003,
+      mbid: "mbid-Hey Ya!-2003-09-23",
+      releaseGroupId: HEY_YA_RG,
+      artistMbid: OUTKAST_ID,
+    });
+    // Ids that are not MusicBrainz ids are dropped; an undated release sorts last.
+    const odd = recWithIds("Hey Ya!", "OutKast", "2003-09-23", "../../etc", null);
+    odd.releases = [
+      { id: "r1", "release-group": { id: RG(7) } },
+      { id: "r2", date: "2004", "release-group": { id: "not-a-uuid" } },
+      { id: "r3", date: "2005-01-01", "release-group": { id: RG(8) } },
+    ];
+    expect(pickRecording(key, { recordings: [odd] })).toEqual({
+      title: "Hey Ya!",
+      artist: "OutKast",
+      year: 2003,
+      mbid: "mbid-Hey Ya!-2003-09-23",
+      releaseGroupId: RG(8),
+    });
+  });
+
+  test("a featured credit gives the lead artist's id; a joint credit published whole gives none", () => {
+    const lead = credited("a", 100, "FE!N", TRAVIS, "2023-07-28");
+    lead["artist-credit"][0].artist = { id: RG(11) };
+    lead["artist-credit"][1].artist = { id: RG(12) };
+    expect(pickRecording("travis scott|fe n", { recordings: [lead] })).toMatchObject({ artist: "Travis Scott", artistMbid: RG(11) });
+
+    const joint = credited("b", 100, "Senorita", ["Shawn Mendes", " & ", "Camila Cabello"], "2019-06-21");
+    joint["artist-credit"][0].artist = { id: RG(13) };
+    const match = pickRecording(songKey("Senorita", "Shawn Mendes & Camila Cabello")!, { recordings: [joint] });
+    expect(match).toMatchObject({ artist: "Shawn Mendes & Camila Cabello" });
+    expect(match).not.toHaveProperty("artistMbid");
+  });
+});
+
+describe("song covers", () => {
+  test("a matched song's cover is stored and returned, through archive.org redirects", async () => {
+    const t = setup();
+    const calls = stubFetch(CATALOG_WITH_IDS, 200, web(coverArchive({ [HEY_YA_RG]: () => image(jpeg(250, 248)) })));
+    await seedBank(t);
+    const summary = await runWeekly(t, { week: "2026-W46" });
+    expect(summary.images).toEqual({ coversStored: 1, photosStored: 0, notFound: 2, failed: 0, remaining: 0, error: null });
+
+    const row = await songRow(t, "hey-ya-outkast");
+    expect(row).toMatchObject({ releaseGroupId: HEY_YA_RG, coverWidth: 250, coverHeight: 248 });
+    expect(await fileExists(t, row.coverStorageId)).toBe(true);
+    expect(await t.run((ctx) => ctx.db.system.get(row.coverStorageId!))).toMatchObject({ size: jpeg(250, 248).byteLength });
+
+    const songs = await readAll(t, "songs");
+    expect(songs.find((s) => s.slug === "hey-ya-outkast").image).toEqual({
+      url: expect.stringMatching(/^https:\/\/.+\/api\/storage\/.+/),
+      width: 250,
+      height: 248,
+    });
+    expect(songs.filter((s) => s.slug !== "hey-ya-outkast").map((s) => s.image)).toEqual([null, null, null]);
+
+    // Every request went to an allowed host with the MusicBrainz User-Agent,
+    // at least the pacing interval after the one before it.
+    expect(imageCalls(calls).map((c) => c.url.host)).toEqual([
+      "coverartarchive.org", "archive.org", "ia800100.us.archive.org", // Hey Ya!
+      "musicbrainz.org", // OutKast, the artist: no Wikidata link in this stub
+      "coverartarchive.org", // Ms. Jackson: 404
+    ]);
+    expect(imageCalls(calls)[0].url.href).toBe(coverUrl(HEY_YA_RG));
+    expect(calls.every((c) => isAllowedHost(c.url.host) && c.userAgent === MUSICBRAINZ_USER_AGENT)).toBe(true);
+    for (let i = 1; i < calls.length; i++) {
+      expect(calls[i].at - calls[i - 1].at).toBeGreaterThanOrEqual(REQUEST_INTERVAL_MS);
+    }
+  });
+
+  test("a 404 is remembered and asked again only after four weeks", async () => {
+    const t = setup();
+    const calls = stubFetch(CATALOG_WITH_IDS, 200, web(coverArchive({})));
+    await seedBank(t);
+    const caa = () => calls.filter((c) => c.url.host === "coverartarchive.org").length;
+
+    await runWeekly(t, { week: "2026-W46" });
+    expect(caa()).toBe(2);
+    const checkedAt = (await songRow(t, "hey-ya-outkast")).coverCheckedAt!;
+    expect(checkedAt).toBeGreaterThan(0);
+    expect((await songRow(t, "hey-ya-outkast")).coverStorageId).toBeUndefined();
+
+    await runWeekly(t, { week: "2026-W46" });
+    await runWeekly(t, { week: "2026-W47" });
+    await runWeekly(t, { week: "2026-W49" });
+    expect(caa()).toBe(2);
+    expect(Date.now() - checkedAt).toBeLessThan(IMAGE_RETRY_INTERVAL_MS);
+
+    const later = await runWeekly(t, { week: "2026-W51" });
+    expect(Date.now() - checkedAt).toBeGreaterThan(IMAGE_RETRY_INTERVAL_MS);
+    expect(caa()).toBe(4);
+    // Due again: the two covers, the two songs without a release group and OutKast's photo.
+    expect(later.images).toMatchObject({ coversStored: 0, notFound: 5 });
+    expect((await songRow(t, "hey-ya-outkast")).coverCheckedAt).toBeGreaterThan(checkedAt);
+  });
+
+  test("a redirect to a host that is not archive.org is not followed", async () => {
+    for (const target of ["https://evil.example/cover.jpg", "https://evilarchive.org/cover.jpg", "http://archive.org/cover.jpg", "https://upload.wikimedia.org/cover.jpg"]) {
+      const t = setup();
+      const calls = stubFetch(
+        CATALOG_WITH_IDS,
+        200,
+        web((url) => (url.host === "coverartarchive.org" ? redirect(target) : url.host === "musicbrainz.org" ? undefined : image(jpeg(250, 250))))
+      );
+      await seedBank(t);
+      const summary = await runWeekly(t, { week: "2026-W46" });
+      expect(summary.images, target).toMatchObject({ coversStored: 0, notFound: 3, failed: 0 });
+      expect(imageCalls(calls).map((c) => c.url.host), target).toEqual(["coverartarchive.org", "musicbrainz.org", "coverartarchive.org"]);
+      const row = await songRow(t, "hey-ya-outkast");
+      expect(row.coverStorageId, target).toBeUndefined();
+      expect(row.coverCheckedAt, target).toBeGreaterThan(0);
+    }
+  });
+
+  test("an answer that is not an image, or is over 2 MB, is refused", async () => {
+    const big = jpeg(250, 250, MAX_IMAGE_BYTES + 1);
+    const refused: Record<string, () => Response> = {
+      "an HTML page": () => new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } }),
+      "image bytes sent as text": () => image(jpeg(250, 250), "text/plain"),
+      "an image type on bytes that are not an image": () => image(new TextEncoder().encode("<svg/>"), "image/svg+xml"),
+      "a declared length over the limit": () =>
+        new Response(jpeg(250, 250), { status: 200, headers: { "content-type": "image/jpeg", "content-length": String(MAX_IMAGE_BYTES + 1) } }),
+      "a body over the limit": () => image(big),
+    };
+    for (const [what, answer] of Object.entries(refused)) {
+      const t = setup();
+      stubFetch(CATALOG_WITH_IDS, 200, web(coverArchive({ [HEY_YA_RG]: answer, [MS_JACKSON_RG]: answer })));
+      await seedBank(t);
+      const summary = await runWeekly(t, { week: "2026-W46" });
+      expect(summary.images, what).toMatchObject({ coversStored: 0, notFound: 3, failed: 0 });
+      expect((await songRow(t, "hey-ya-outkast")).coverStorageId, what).toBeUndefined();
+      expect(await t.run((ctx) => ctx.db.system.query("_storage").collect()), what).toEqual([]);
+    }
+
+    // Exactly at the limit is kept.
+    const t = setup();
+    stubFetch(CATALOG_WITH_IDS, 200, web(coverArchive({ [HEY_YA_RG]: () => image(jpeg(250, 250, MAX_IMAGE_BYTES)) })));
+    await seedBank(t);
+    expect((await runWeekly(t, { week: "2026-W46" })).images).toMatchObject({ coversStored: 1 });
+  });
+});
+
+describe("artist photos", () => {
+  const covers = coverArchive({ [HEY_YA_RG]: () => image(jpeg(250, 250)), [MS_JACKSON_RG]: () => image(jpeg(250, 240)) });
+
+  test("a freely licensed Commons photo is stored with its credit", async () => {
+    const t = setup();
+    const calls = stubFetch(CATALOG_WITH_IDS, 200, web(outkastPhoto("CC BY-SA 4.0"), covers));
+    await seedBank(t);
+    const summary = await runWeekly(t, { week: "2026-W46" });
+    expect(summary.images).toEqual({ coversStored: 2, photosStored: 1, notFound: 0, failed: 0, remaining: 0, error: null });
+
+    const row = await artistRow(t, "outkast");
+    expect(row).toMatchObject({
+      mbid: OUTKAST_ID,
+      photoWidth: 320,
+      photoHeight: 213,
+      photoAuthor: "Sven Mandel & friends",
+      photoLicense: "CC BY-SA 4.0",
+      photoPageUrl: COMMONS_PAGE,
+    });
+    expect(await fileExists(t, row.photoStorageId)).toBe(true);
+    expect(imageCalls(calls).filter((c) => !c.url.host.endsWith("archive.org")).map((c) => c.url.host)).toEqual([
+      "musicbrainz.org", "www.wikidata.org", "commons.wikimedia.org", "upload.wikimedia.org",
+    ]);
+    expect(calls.every((c) => isAllowedHost(c.url.host) && c.userAgent === MUSICBRAINZ_USER_AGENT)).toBe(true);
+
+    expect((await readAll(t, "artists"))[0].image).toEqual({
+      url: expect.stringMatching(/^https:\/\/.+\/api\/storage\/.+/),
+      width: 320,
+      height: 213,
+      credit: { author: "Sven Mandel & friends", license: "CC BY-SA 4.0", pageUrl: COMMONS_PAGE },
+    });
+  });
+
+  test("a photo under any other license is refused and the page falls back to the top song's cover", async () => {
+    const t = setup();
+    const calls = stubFetch(CATALOG_WITH_IDS, 200, web(outkastPhoto("CC BY-NC 2.0"), covers));
+    await seedBank(t);
+    const summary = await runWeekly(t, { week: "2026-W46" });
+    expect(summary.images).toMatchObject({ coversStored: 2, photosStored: 0, notFound: 1, failed: 0 });
+    expect(calls.some((c) => c.url.host === "upload.wikimedia.org")).toBe(false);
+
+    const row = await artistRow(t, "outkast");
+    expect(row.photoStorageId).toBeUndefined();
+    expect(row.photoCheckedAt).toBeGreaterThan(0);
+
+    // Hey Ya! is OutKast's most picked live song: its cover, without a credit.
+    const heyYa = (await readAll(t, "songs")).find((s) => s.slug === "hey-ya-outkast").image;
+    expect(heyYa).toMatchObject({ width: 250, height: 250 });
+    expect((await readAll(t, "artists"))[0].image).toEqual({ ...heyYa, credit: null });
+
+    // Without that cover the artist has no image, whatever the other songs have.
+    await t.mutation(internal.content.removeSongCover, { slug: "hey-ya-outkast" });
+    expect((await readAll(t, "artists"))[0].image).toBeNull();
+
+    // Not asked again inside the interval.
+    const before = calls.length;
+    await runWeekly(t, { week: "2026-W47" });
+    expect(imageCalls(calls.slice(before))).toEqual([]);
+  });
+
+  test("an artist without a Wikidata link, an image claim or a Commons file has no photo", async () => {
+    const missing: Record<string, Route> = {
+      "no wikidata relation": (url) => (url.pathname.startsWith("/ws/2/artist/") ? json({ relations: [] }) : undefined),
+      "no P18 claim": (url) => (url.host === "www.wikidata.org" ? json({ entities: { Q472595: { claims: {} } } }) : undefined),
+      "file unknown to Commons": (url) =>
+        url.host === "commons.wikimedia.org" ? json({ query: { pages: { "-1": { title: "File:OutKast 2014.jpg", missing: "" } } } }) : undefined,
+      "thumb on another host": (url) =>
+        url.host === "commons.wikimedia.org"
+          ? json({
+              query: {
+                pages: {
+                  "1": {
+                    imageinfo: [
+                      {
+                        thumburl: "https://archive.org/x.jpg",
+                        descriptionurl: COMMONS_PAGE,
+                        extmetadata: { LicenseShortName: { value: "CC0" } },
+                      },
+                    ],
+                  },
+                },
+              },
+            })
+          : undefined,
+    };
+    for (const [what, route] of Object.entries(missing)) {
+      const t = setup();
+      const calls = stubFetch(CATALOG_WITH_IDS, 200, web(route, outkastPhoto("CC0"), covers));
+      await seedBank(t);
+      const summary = await runWeekly(t, { week: "2026-W46" });
+      expect(summary.images, what).toMatchObject({ photosStored: 0, notFound: 1, failed: 0 });
+      expect((await artistRow(t, "outkast")).photoCheckedAt, what).toBeGreaterThan(0);
+      expect(calls.some((c) => c.url.host === "upload.wikimedia.org"), what).toBe(false);
+    }
+  });
+});
+
+describe("images in the weekly job", () => {
+  test("image hosts that fail do not stop publishing, the chart or the rebuild", async () => {
+    const t = setup();
+    vi.stubEnv("VERCEL_DEPLOY_HOOK_URL", "https://hooks.example/deploy/abc");
+    const calls = stubFetch(CATALOG_WITH_IDS, 200, (url) => {
+      if (url.host === "hooks.example") return new Response("", { status: 200 });
+      if (url.host === "coverartarchive.org") throw new TypeError("fetch failed");
+      return new Response("busy", { status: 503 });
+    });
+    await seedBank(t);
+    const summary = await runWeekly(t, { week: "2026-W46" });
+    expect(summary).toMatchObject({ candidates: 5, carriedOver: 0, artistsLifted: ["outkast"], nextPassScheduled: false, deployScheduled: true });
+    expect(summary.published.filter((p) => p.status === "live")).toHaveLength(4);
+    // Hey Ya!, OutKast and Ms. Jackson each got no answer; three in a row end the step.
+    expect(summary.images).toEqual({ coversStored: 0, photosStored: 0, notFound: 0, failed: 3, remaining: 0, error: null });
+    // Each was retried on the rule of the recording lookups.
+    expect(imageCalls(calls).filter((c) => c.url.host !== "hooks.example")).toHaveLength(3 * (RETRY_WAITS_MS.length + 1));
+    expect((await table(t, "chartWeeks"))[0].lists.mostPickedSongs).toHaveLength(4);
+    expect(await readAll(t, "songs")).toHaveLength(4);
+
+    // Nothing was remembered, so the next run asks again.
+    expect((await songRow(t, "hey-ya-outkast")).coverCheckedAt).toBeUndefined();
+    expect((await artistRow(t, "outkast")).photoCheckedAt).toBeUndefined();
+
+    await settle(t.finishAllScheduledFunctions(vi.runAllTimers));
+    expect(calls.filter((c) => c.url.host === "hooks.example")).toHaveLength(1);
+  });
+
+  test("an image that cannot be stored is counted as failed and the run goes on", async () => {
+    const t = setup();
+    stubFetch(CATALOG_WITH_IDS, 200, web(coverArchive({ [HEY_YA_RG]: () => image(jpeg(250, 250)) })));
+    await seedBank(t);
+    // A blob the runtime refuses to construct breaks every store.
+    const RealBlob = globalThis.Blob;
+    vi.stubGlobal(
+      "Blob",
+      class {
+        constructor() {
+          throw new Error("storage is down");
+        }
+      }
+    );
+    const summary = await runWeekly(t, { week: "2026-W46" });
+    vi.stubGlobal("Blob", RealBlob);
+    expect(summary).toMatchObject({ carriedOver: 0, deployScheduled: true });
+    expect(summary.images).toMatchObject({ coversStored: 0, failed: 1 });
+    expect(await readAll(t, "songs")).toHaveLength(4);
+  });
+
+  test("rows published before images existed get their ids from one lookup each, then their images", async () => {
+    const t = setup();
+    stubFetch(CATALOG);
+    await seedBank(t);
+    await runWeekly(t, { week: "2026-W46" });
+    // As rows written before the image fields existed: no ids, never searched.
+    await t.run(async (ctx) => {
+      for (const row of await ctx.db.query("publishedSongs").collect()) await ctx.db.patch(row._id, { coverCheckedAt: undefined });
+      for (const row of await ctx.db.query("publishedArtists").collect()) await ctx.db.patch(row._id, { photoCheckedAt: undefined });
+    });
+
+    const covers = coverArchive({ [HEY_YA_RG]: () => image(jpeg(250, 250)), [MS_JACKSON_RG]: () => image(jpeg(250, 240)) });
+    const calls = stubFetch(CATALOG_WITH_IDS, 200, web(outkastPhoto("Public domain"), covers));
+    const summary = await runWeekly(t, { week: "2026-W46" });
+    expect(summary).toMatchObject({ candidates: 0, published: [] });
+    // September and Friday have no release group in the catalog: searched, nothing found.
+    expect(summary.images).toEqual({ coversStored: 2, photosStored: 1, notFound: 2, failed: 0, remaining: 0, error: null });
+    // One recording lookup per live song, none for the artist: Hey Ya!'s lookup gave OutKast's id.
+    expect(calls.filter((c) => c.url.pathname === "/ws/2/recording")).toHaveLength(4);
+    expect(await songRow(t, "ms-jackson-outkast")).toMatchObject({ releaseGroupId: MS_JACKSON_RG, coverHeight: 240 });
+    expect(await artistRow(t, "outkast")).toMatchObject({ mbid: OUTKAST_ID, photoLicense: "Public domain" });
+    // Names, years and slugs are not rewritten by the second lookup.
+    expect(await songRow(t, "hey-ya-outkast")).toMatchObject({ title: "Hey Ya!", year: 2003, mbid: "mbid-Hey Ya!-2003-09-23" });
+
+    // Everything is settled: a third run requests nothing.
+    const before = calls.length;
+    await runWeekly(t, { week: "2026-W46" });
+    expect(calls.slice(before)).toEqual([]);
+  });
+
+  test("a run fetches a bounded number of images and a follow-up pass takes the rest", async () => {
+    const t = setup();
+    vi.stubEnv("VERCEL_DEPLOY_HOOK_URL", "https://hooks.example/deploy/abc");
+    const total = MAX_IMAGES_PER_RUN + 7;
+    await t.run(async (ctx) => {
+      await ctx.db.insert("publishedArtists", { artistKey: "band", slug: "band", name: "Band", status: "held", heldReason: "below_bar", publishedAt: 1 });
+      for (let i = 0; i < total; i++) {
+        await ctx.db.insert("publishedSongs", {
+          songKey: `band|song ${i}`,
+          slug: `song-${i}-band`,
+          title: `Song ${i}`,
+          artist: "Band",
+          artistSlug: "band",
+          mbid: `mbid-${i}`,
+          releaseGroupId: RG(1000 + i),
+          status: "live",
+          publishedAt: 1,
+        });
+      }
+    });
+    const calls = stubFetch({}, 200, (url) => (url.host === "coverartarchive.org" ? image(jpeg(250, 250)) : new Response("", { status: 200 })));
+
+    const first = await runWeekly(t, { week: "2026-W46" });
+    expect(first.images).toEqual({ coversStored: MAX_IMAGES_PER_RUN, photosStored: 0, notFound: 0, failed: 0, remaining: 7, error: null });
+    expect(first).toMatchObject({ nextPassScheduled: true, deployScheduled: false });
+    expect(calls.filter((c) => c.url.host === "hooks.example")).toHaveLength(0);
+
+    await settle(t.finishAllScheduledFunctions(vi.runAllTimers));
+    expect((await table(t, "publishedSongs")).filter((r) => r.coverStorageId)).toHaveLength(total);
+    expect(calls.filter((c) => c.url.host === "coverartarchive.org")).toHaveLength(total);
+    expect(calls.filter((c) => c.url.host === "hooks.example")).toHaveLength(1);
+  });
+
+  test("songs that are not public get no cover: held songs and songs of a held artist", async () => {
+    const t = setup();
+    const calls = stubFetch(CATALOG_WITH_IDS, 200, web(coverArchive({ [HEY_YA_RG]: () => image(jpeg(250, 250)), [MS_JACKSON_RG]: () => image(jpeg(250, 250)) })));
+    await seedBank(t);
+    await t.run(async (ctx) => {
+      // Publish OutKast by hand first, held, before the job sees the songs.
+      await ctx.db.insert("publishedArtists", { artistKey: "outkast", slug: "outkast", name: "OutKast", nameConfirmed: true, status: "held", heldReason: "manual", publishedAt: 1 });
+    });
+    const summary = await runWeekly(t, { week: "2026-W46" });
+    expect(summary.images).toMatchObject({ coversStored: 0, photosStored: 0 });
+    expect(calls.some((c) => c.url.host === "coverartarchive.org")).toBe(false);
+  });
+});
+
+describe("image hand controls", () => {
+  const covers = coverArchive({ [HEY_YA_RG]: () => image(jpeg(250, 250)), [MS_JACKSON_RG]: () => image(jpeg(250, 240)) });
+
+  async function withImages() {
+    const t = setup();
+    stubFetch(CATALOG_WITH_IDS, 200, web(outkastPhoto("CC BY 2.0"), covers));
+    await seedBank(t);
+    await runWeekly(t, { week: "2026-W46" });
+    return t;
+  }
+
+  test("a removed cover is deleted and the job does not fetch it again", async () => {
+    const t = await withImages();
+    const before = await songRow(t, "hey-ya-outkast");
+    expect(await t.mutation(internal.content.removeSongCover, { slug: "hey-ya-outkast" })).toEqual({ slug: "hey-ya-outkast", removed: true });
+    expect(await fileExists(t, before.coverStorageId)).toBe(false);
+    expect(await songRow(t, "hey-ya-outkast")).toMatchObject({ coverSetByHand: true, releaseGroupId: HEY_YA_RG });
+    expect((await songRow(t, "hey-ya-outkast")).coverStorageId).toBeUndefined();
+    expect((await readAll(t, "songs")).find((s) => s.slug === "hey-ya-outkast").image).toBeNull();
+
+    // More than four weeks on, everything without an image is due again.
+    const calls = stubFetch(CATALOG_WITH_IDS, 200, web(covers));
+    await runWeekly(t, { week: "2026-W51" });
+    expect(calls.length).toBeGreaterThan(0);
+    expect(imageCalls(calls)).toEqual([]);
+    expect((await songRow(t, "hey-ya-outkast")).coverStorageId).toBeUndefined();
+
+    expect(await t.mutation(internal.content.removeSongCover, { slug: "hey-ya-outkast" })).toEqual({ slug: "hey-ya-outkast", removed: false });
+    await expect(t.mutation(internal.content.removeSongCover, { slug: "nope" })).rejects.toThrow(/No published song/);
+  });
+
+  test("a removed photo is deleted with its credit, is not fetched again, and the top cover takes its place", async () => {
+    const t = await withImages();
+    const before = await artistRow(t, "outkast");
+    expect(before.photoStorageId).toBeDefined();
+    expect(await t.mutation(internal.content.removeArtistPhoto, { slug: "outkast" })).toEqual({ slug: "outkast", removed: true });
+    expect(await fileExists(t, before.photoStorageId)).toBe(false);
+    const after = await artistRow(t, "outkast");
+    expect(after).toMatchObject({ photoSetByHand: true, mbid: OUTKAST_ID });
+    for (const field of ["photoStorageId", "photoAuthor", "photoLicense", "photoPageUrl", "photoWidth"] as const) {
+      expect(after[field], field).toBeUndefined();
+    }
+    expect((await readAll(t, "artists"))[0].image).toMatchObject({ width: 250, height: 250, credit: null });
+
+    const calls = stubFetch(CATALOG_WITH_IDS, 200, web(outkastPhoto("CC0"), covers));
+    await runWeekly(t, { week: "2026-W51" });
+    expect(calls.length).toBeGreaterThan(0);
+    expect(imageCalls(calls)).toEqual([]);
+    await expect(t.mutation(internal.content.removeArtistPhoto, { slug: "nope" })).rejects.toThrow(/No published artist/);
+  });
+
+  test("a cover set from a URL replaces the stored one and is kept by later runs", async () => {
+    const t = await withImages();
+    const before = await songRow(t, "hey-ya-outkast");
+    const calls = stubFetch({}, 200, (url) => (url.href === "https://archive.org/download/x/cover.png" ? image(png(500, 500), "image/png") : notFound()));
+
+    expect(await settle(t.action(internal.content.setSongCoverFromUrl, { slug: "hey-ya-outkast", url: "https://archive.org/download/x/cover.png" }))).toEqual({
+      slug: "hey-ya-outkast",
+      width: 500,
+      height: 500,
+    });
+    const after = await songRow(t, "hey-ya-outkast");
+    expect(after).toMatchObject({ coverWidth: 500, coverHeight: 500, coverSetByHand: true });
+    expect(after.coverStorageId).not.toBe(before.coverStorageId);
+    expect(await fileExists(t, before.coverStorageId)).toBe(false);
+    expect(await fileExists(t, after.coverStorageId)).toBe(true);
+    expect(calls.map((c) => [c.url.host, c.userAgent])).toEqual([["archive.org", MUSICBRAINZ_USER_AGENT]]);
+
+    // A URL off the allowlist is refused before any request; so is a non-image.
+    const none = stubFetch({}, 200, () => new Response("<html/>", { status: 200, headers: { "content-type": "text/html" } }));
+    for (const url of ["https://i.ytimg.com/vi/abc/hq720.jpg", "https://i1.sndcdn.com/artworks-x.jpg", "http://archive.org/x.jpg", "https://example.com/x.jpg"]) {
+      await expect(settle(t.action(internal.content.setSongCoverFromUrl, { slug: "hey-ya-outkast", url }))).rejects.toThrow(/allowed image host/);
+    }
+    expect(none).toEqual([]);
+    await expect(settle(t.action(internal.content.setSongCoverFromUrl, { slug: "hey-ya-outkast", url: "https://archive.org/x.jpg" }))).rejects.toThrow(/Image refused: not an image/);
+    expect((await songRow(t, "hey-ya-outkast")).coverStorageId).toBe(after.coverStorageId);
+
+    // An unknown slug stores nothing.
+    stubFetch({}, 200, () => image(png(10, 10), "image/png"));
+    await expect(settle(t.action(internal.content.setSongCoverFromUrl, { slug: "nope", url: "https://archive.org/x.png" }))).rejects.toThrow(/No published song/);
+    expect(await t.run((ctx) => ctx.db.system.query("_storage").collect())).toHaveLength(3); // two covers, one photo
+  });
+
+  test("a photo set from a URL carries the credit given with it", async () => {
+    const t = await withImages();
+    const before = await artistRow(t, "outkast");
+    stubFetch({}, 200, () => image(jpeg(320, 400)));
+    const args = {
+      slug: "outkast",
+      url: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/bc/Big_Boi.jpg/320px-Big_Boi.jpg",
+      author: "  Jane   Doe ",
+      license: "CC BY 4.0",
+      pageUrl: "https://commons.wikimedia.org/wiki/File:Big_Boi.jpg",
+    };
+    expect(await settle(t.action(internal.content.setArtistPhotoFromUrl, args))).toEqual({ slug: "outkast", width: 320, height: 400 });
+    expect(await fileExists(t, before.photoStorageId)).toBe(false);
+    expect(await artistRow(t, "outkast")).toMatchObject({ photoSetByHand: true, photoAuthor: "Jane Doe" });
+    expect((await readAll(t, "artists"))[0].image).toMatchObject({
+      width: 320,
+      height: 400,
+      credit: { author: "Jane Doe", license: "CC BY 4.0", pageUrl: "https://commons.wikimedia.org/wiki/File:Big_Boi.jpg" },
+    });
+
+    const calls = stubFetch({}, 200, () => image(jpeg(320, 400)));
+    await expect(settle(t.action(internal.content.setArtistPhotoFromUrl, { ...args, pageUrl: "https://example.com/photo" }))).rejects.toThrow(/commons\.wikimedia\.org/);
+    await expect(settle(t.action(internal.content.setArtistPhotoFromUrl, { ...args, author: " " }))).rejects.toThrow(/author is empty/);
+    await expect(settle(t.action(internal.content.setArtistPhotoFromUrl, { ...args, license: "x".repeat(MAX_CREDIT + 1) }))).rejects.toThrow(/license is longer/);
+    await expect(settle(t.action(internal.content.setArtistPhotoFromUrl, { ...args, url: "https://example.com/a.jpg" }))).rejects.toThrow(/allowed image host/);
+    expect(calls).toEqual([]);
   });
 });

@@ -22,9 +22,12 @@
  *   have no slot. The same screens can show SoundCloud content (the
  *   SoundCloud player, artwork and titles), which carries the same rule.
  *
- * The content pages qualify under both: they show only Aux Wars' own
- * statistics, with song and artist names from MusicBrainz. They must never
- * render a name, title or image that came from YouTube or SoundCloud.
+ * The content pages qualify under both: they show Aux Wars' own statistics
+ * with song and artist names from MusicBrainz. A song page can show the
+ * song's cover from the Cover Art Archive, and an artist page a credited
+ * photo from Wikimedia Commons or that cover; both are served from Convex
+ * file storage. Chart pages have no image. A content page must never render
+ * a name, title or image that came from YouTube or SoundCloud.
  *
  * /screen (the shared TV display) never gets a slot either: an ad there is
  * rebroadcast to a room, which AdSense counts as invalid traffic. Keep

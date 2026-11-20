@@ -148,6 +148,11 @@ export type RecordingMatch = {
   artist: string;
   year?: number;
   mbid: string;
+  // MusicBrainz release group of the recording's earliest release: the key
+  // of its cover in the Cover Art Archive.
+  releaseGroupId?: string;
+  // MusicBrainz id of the artist the song is published under.
+  artistMbid?: string;
 };
 
 export type SongDecision = {
@@ -155,6 +160,8 @@ export type SongDecision = {
   artist: string;
   year?: number;
   mbid?: string;
+  releaseGroupId?: string;
+  artistMbid?: string;
   status: "live" | "held";
   heldReason?: "no_match" | "filtered";
 };
@@ -178,7 +185,14 @@ export function decideSong(songKey: string, match: RecordingMatch | null): SongD
       heldReason: blocked ? "filtered" : "no_match",
     };
   }
-  const named = { title: match.title, artist: match.artist, year: match.year, mbid: match.mbid };
+  const named = {
+    title: match.title,
+    artist: match.artist,
+    year: match.year,
+    mbid: match.mbid,
+    releaseGroupId: match.releaseGroupId,
+    artistMbid: match.artistMbid,
+  };
   return blocked ? { ...named, status: "held", heldReason: "filtered" } : { ...named, status: "live" };
 }
 

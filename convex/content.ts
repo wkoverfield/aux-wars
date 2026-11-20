@@ -9,18 +9,27 @@
  *   npx convex run content:setArtistName '{"slug":"outkast","name":"OutKast"}'
  *   npx convex run content:setChartNote '{"week":"2026-W47","note":"..."}'
  *   npx convex run content:approveChartNote '{"week":"2026-W47"}'
+ *   npx convex run content:removeSongCover '{"slug":"hey-ya-outkast"}'
+ *   npx convex run content:removeArtistPhoto '{"slug":"outkast"}'
+ *   npx convex run content:setSongCoverFromUrl '{"slug":"hey-ya-outkast","url":"https://..."}'
+ *   npx convex run content:setArtistPhotoFromUrl '{"slug":"outkast","url":"https://...","author":"...","license":"CC BY-SA 4.0","pageUrl":"https://commons.wikimedia.org/wiki/File:..."}'
  * (add --prod for production).
  *
  * `published` reads only the published tables and the stats the weekly job
  * copied for them (contentJob.ts). It never reads songStats, so it returns no
- * stored name, artist, albumCover or source of a song, and no song key.
+ * stored name, artist, albumCover or source of a song, and no song key. The
+ * images it returns are files in Convex storage that came from the Cover Art
+ * Archive or Wikimedia Commons (contentImages.ts).
  */
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, query, type QueryCtx } from "./_generated/server";
 import { publishStatusValidator, topPromptsValidator } from "./schema";
 import { averageOf, hidesSongs, isWeekId, weekRange } from "./contentLib";
+import { storeImage } from "./contentImages";
+import { MAX_CREDIT, allowedUrl, commonsPageUrl, fetchImage, type ImageFile } from "./imageSources";
+import { makePacer } from "./musicBrainz";
 
 const SONGS_PAGE = 100;
 const ARTISTS_PAGE = 25;
@@ -30,6 +39,8 @@ const CHARTS_PAGE = 8;
 const MAX_ARTIST_SONGS = 100;
 const MAX_NOTE = 5000;
 const MAX_NAME = 300;
+
+const imageFields = { url: v.string(), width: v.number(), height: v.number() };
 
 const songItem = v.object({
   slug: v.string(),
@@ -44,11 +55,20 @@ const songItem = v.object({
   ratingHist: v.array(v.number()),
   rank: v.number(),
   topPrompts: topPromptsValidator,
+  image: v.union(v.object(imageFields), v.null()),
 });
 
 const artistItem = v.object({
   slug: v.string(),
   name: v.string(),
+  image: v.union(
+    v.object({
+      ...imageFields,
+      // The credit of a Commons photo. Null when the image is a song cover.
+      credit: v.union(v.object({ author: v.string(), license: v.string(), pageUrl: v.string() }), v.null()),
+    }),
+    v.null()
+  ),
   picks: v.number(),
   ratingCount: v.number(),
   average: v.union(v.number(), v.null()),
@@ -108,6 +128,18 @@ const bySlug = <T extends "publishedSongs" | "publishedArtists" | "publishedSong
     .query(table)
     .withIndex("by_slug", (q) => q.eq("slug", slug as never))
     .unique() as Promise<Doc<T> | null>;
+
+/** A stored image as the pages use it, or null when there is none. */
+async function storedImage(
+  ctx: QueryCtx,
+  storageId: Id<"_storage"> | undefined,
+  width: number | undefined,
+  height: number | undefined
+) {
+  if (!storageId || !width || !height) return null;
+  const url = await ctx.storage.getUrl(storageId);
+  return url ? { url, width, height } : null;
+}
 
 /**
  * Reports whether an artist slug takes its songs off the public pages
@@ -235,6 +267,7 @@ export const published = query({
           ratingHist: stats.ratingHist,
           rank: stats.rank,
           topPrompts: stats.topPrompts,
+          image: await storedImage(ctx, song.coverStorageId, song.coverWidth, song.coverHeight),
         });
       }
       return { items, cursor: page.isDone ? null : page.continueCursor };
@@ -254,9 +287,11 @@ export const published = query({
           .withIndex("by_artistSlug_and_status", (q) => q.eq("artistSlug", artist.slug).eq("status", "live"))
           .take(MAX_ARTIST_SONGS);
         const songs: (typeof artistItem.type)["songs"] = [];
+        const songDocs = new Map<string, Doc<"publishedSongs">>();
         for (const song of liveSongs) {
           const songStats = await bySlug(ctx, "publishedSongStats", song.slug);
           if (!songStats) continue;
+          songDocs.set(song.slug, song);
           songs.push({
             slug: song.slug,
             title: song.title,
@@ -267,9 +302,20 @@ export const published = query({
         }
         if (songs.length === 0) continue; // an artist is public only with a live song
         songs.sort((a, b) => b.picks - a.picks || (a.slug < b.slug ? -1 : 1));
+        // The artist's own photo with its credit, else the cover of their
+        // most picked live song.
+        const photo = await storedImage(ctx, artist.photoStorageId, artist.photoWidth, artist.photoHeight);
+        const top = songDocs.get(songs[0].slug);
+        const cover = photo ? null : await storedImage(ctx, top?.coverStorageId, top?.coverWidth, top?.coverHeight);
+        const credit =
+          artist.photoAuthor && artist.photoLicense && artist.photoPageUrl
+            ? { author: artist.photoAuthor, license: artist.photoLicense, pageUrl: artist.photoPageUrl }
+            : null;
         items.push({
           slug: artist.slug,
           name: artist.name,
+          // A photo without its credit is not shown.
+          image: photo ? (credit ? { ...photo, credit } : null) : cover ? { ...cover, credit: null } : null,
           picks: stats.picks,
           ratingCount: stats.ratingCount,
           average: averageOf(stats.ratingSum, stats.ratingCount),
@@ -426,6 +472,127 @@ export const setArtistName = internalMutation({
     }
     await ctx.db.patch(row._id, { name: text, nameConfirmed: true });
     return { slug, name: text, changed: true };
+  },
+});
+
+/**
+ * Internal: remove a song's cover and delete its file. The weekly job does
+ * not fetch a cover for the song again.
+ */
+export const removeSongCover = internalMutation({
+  args: { slug: v.string() },
+  handler: async (ctx, { slug }) => {
+    const row = await ctx.db
+      .query("publishedSongs")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .unique();
+    if (!row) throw new Error(`No published song with slug "${slug}"`);
+    if (row.coverStorageId) await ctx.storage.delete(row.coverStorageId);
+    await ctx.db.patch(row._id, {
+      coverStorageId: undefined,
+      coverWidth: undefined,
+      coverHeight: undefined,
+      coverSetByHand: true,
+    });
+    return { slug, removed: row.coverStorageId !== undefined };
+  },
+});
+
+/**
+ * Internal: remove an artist's photo and its credit and delete the file. The
+ * weekly job does not fetch a photo for the artist again. The artist page
+ * then shows the cover of their most picked live song, when it has one.
+ */
+export const removeArtistPhoto = internalMutation({
+  args: { slug: v.string() },
+  handler: async (ctx, { slug }) => {
+    const row = await ctx.db
+      .query("publishedArtists")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .unique();
+    if (!row) throw new Error(`No published artist with slug "${slug}"`);
+    if (row.photoStorageId) await ctx.storage.delete(row.photoStorageId);
+    await ctx.db.patch(row._id, {
+      photoStorageId: undefined,
+      photoWidth: undefined,
+      photoHeight: undefined,
+      photoAuthor: undefined,
+      photoLicense: undefined,
+      photoPageUrl: undefined,
+      photoSetByHand: true,
+    });
+    return { slug, removed: row.photoStorageId !== undefined };
+  },
+});
+
+// An image for a hand control: from an allowed host, checked like the job's.
+async function imageFromUrl(url: string): Promise<ImageFile> {
+  if (!allowedUrl(url)) throw new Error(`Not an https URL on an allowed image host: ${url}`);
+  const result = await fetchImage(url, { pace: makePacer() });
+  if (result.kind === "image") return result.image;
+  throw new Error(
+    result.kind === "rejected"
+      ? `Image refused: ${result.reason}`
+      : result.kind === "none"
+        ? "No image at that URL"
+        : "The image host did not answer"
+  );
+}
+
+/**
+ * Internal: set a song's cover from a URL on an allowed host (see
+ * imageSources.ts). The image is copied into file storage, the old file is
+ * deleted, and the weekly job leaves the cover alone from then on.
+ */
+export const setSongCoverFromUrl = internalAction({
+  args: { slug: v.string(), url: v.string() },
+  handler: async (ctx, { slug, url }): Promise<{ slug: string; width: number; height: number }> => {
+    const image = await imageFromUrl(url);
+    const storageId = await storeImage(ctx, image);
+    const saved: boolean = await ctx.runMutation(internal.contentImages.saveSongCover, {
+      slug,
+      storageId,
+      width: image.width,
+      height: image.height,
+      byHand: true,
+    });
+    if (!saved) throw new Error(`No published song with slug "${slug}"`);
+    return { slug, width: image.width, height: image.height };
+  },
+});
+
+/**
+ * Internal: set an artist's photo from a URL on an allowed host, with the
+ * credit shown under it. `pageUrl` is the photo's Wikimedia Commons file
+ * page. The license is not checked here: whoever runs this vouches for it.
+ */
+export const setArtistPhotoFromUrl = internalAction({
+  args: { slug: v.string(), url: v.string(), author: v.string(), license: v.string(), pageUrl: v.string() },
+  handler: async (ctx, args): Promise<{ slug: string; width: number; height: number }> => {
+    const credit = (field: string, value: string) => {
+      const text = value.replace(/\s+/g, " ").trim();
+      if (!text) throw new Error(`${field} is empty`);
+      if (text.length > MAX_CREDIT) throw new Error(`${field} is longer than ${MAX_CREDIT} characters`);
+      return text;
+    };
+    const author = credit("author", args.author);
+    const license = credit("license", args.license);
+    const pageUrl = commonsPageUrl(args.pageUrl);
+    if (!pageUrl) throw new Error(`pageUrl is not an https page on commons.wikimedia.org: ${args.pageUrl}`);
+    const image = await imageFromUrl(args.url);
+    const storageId = await storeImage(ctx, image);
+    const saved: boolean = await ctx.runMutation(internal.contentImages.saveArtistPhoto, {
+      slug: args.slug,
+      storageId,
+      width: image.width,
+      height: image.height,
+      author,
+      license,
+      pageUrl,
+      byHand: true,
+    });
+    if (!saved) throw new Error(`No published artist with slug "${args.slug}"`);
+    return { slug: args.slug, width: image.width, height: image.height };
   },
 });
 

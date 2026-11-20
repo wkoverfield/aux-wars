@@ -15,7 +15,9 @@ the switches below). This doc is the paint-by-numbers finish line.
   shows YouTube API data (song pick, rating, round results, game over) and never on /screen; the
   rules are in `client/src/services/ads.js`. The same screens can show SoundCloud content, which
   carries the same rule: no ad slot on any screen that can show SoundCloud content. The content
-  pages show only Aux Wars statistics, with song and artist names from MusicBrainz.
+  pages show Aux Wars statistics with song and artist names from MusicBrainz. A song page can
+  show a cover from the Cover Art Archive and an artist page a credited Wikimedia Commons photo
+  or that cover; chart pages have no image. No content page shows a YouTube or SoundCloud image.
   `client/src/services/adPlacements.test.js` fails if any other file renders an `<AdSlot>`.
   Consent comes from Google's CMP (AdSense Privacy & messaging); the app has no banner of
   its own. Renders nothing until `VITE_ADSENSE_CLIENT` and placement slot IDs are set.

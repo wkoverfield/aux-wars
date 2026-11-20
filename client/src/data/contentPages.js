@@ -14,6 +14,11 @@ import { formatAverage, formatCount, formatDate, formatDateRange } from "./conte
  *
  * Slugs and week ids become file names and URL segments verbatim, so anything
  * outside [a-z0-9-] or the ISO week form throws and fails the build.
+ *
+ * A song or artist can carry an `image` (a cover from the Cover Art Archive
+ * or a photo from Wikimedia Commons, served from Convex file storage). It is
+ * optional: an item without one, or with one that is not an https URL with a
+ * pixel size, builds the same page without the image.
  */
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const WEEK = /^\d{4}-W\d{2}$/;
@@ -52,6 +57,21 @@ const fileFor = (path) => `${path.slice(1)}.html`;
 
 const byPicks = (a, b) => b.picks - a.picks || a.title.localeCompare(b.title, "en");
 
+const text = (value) => (typeof value === "string" ? value.trim() : "");
+const pixels = (value) => Number.isFinite(value) && value > 0;
+
+/** `{ url, width, height, alt }` for a page's image, or null when the item has no usable one. */
+function imageOf(image, alt) {
+  if (!image || !/^https:\/\//.test(text(image.url)) || !pixels(image.width) || !pixels(image.height)) return null;
+  return { url: image.url.trim(), width: image.width, height: image.height, alt };
+}
+
+/** The credit of a Commons photo, or null: a cover has none. */
+function creditOf(credit) {
+  const [author, license, pageUrl] = [text(credit?.author), text(credit?.license), text(credit?.pageUrl)];
+  return author && license && /^https:\/\//.test(pageUrl) ? { author, license, pageUrl } : null;
+}
+
 function songPage(song, songs, artistSlugs) {
   const path = songPath(song.slug);
   const average = formatAverage(song.average);
@@ -76,6 +96,7 @@ function songPage(song, songs, artistSlugs) {
       kind: "song",
       path,
       title: song.title,
+      image: imageOf(song.image, `Cover of ${song.title} by ${song.artist}`),
       artist: {
         name: song.artist,
         href: artistSlugs.has(song.artistSlug) ? artistPath(song.artistSlug) : null,
@@ -103,6 +124,13 @@ function artistPage(artist, songSlugs) {
     picks: song.picks,
     average: song.average ?? null,
   }));
+  // With a credit the image is a photo of the artist. Without one it is the
+  // cover of their most picked song.
+  const credit = creditOf(artist.image?.credit);
+  const image = imageOf(
+    artist.image,
+    credit || !songs.length ? `Photo of ${artist.name}` : `Cover of ${songs[0].title} by ${artist.name}`,
+  );
   return {
     path,
     file: fileFor(path),
@@ -116,6 +144,8 @@ function artistPage(artist, songSlugs) {
       kind: "artist",
       path,
       name: artist.name,
+      image,
+      credit: image ? credit : null,
       picks: artist.picks,
       ratingCount: artist.ratingCount,
       average: artist.average ?? null,

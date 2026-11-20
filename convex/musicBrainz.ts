@@ -21,7 +21,7 @@ const RECORDING_ENDPOINT = `https://${MUSICBRAINZ_HOST}/ws/2/recording`;
 export const MUSICBRAINZ_USER_AGENT = "AuxWars/1.0 ( https://www.aux-wars.com )";
 // MusicBrainz allows one request per second per client.
 export const REQUEST_INTERVAL_MS = 1100;
-const REQUEST_TIMEOUT_MS = 10_000;
+export const REQUEST_TIMEOUT_MS = 10_000;
 // A song is matched only when one of its recordings scores at least this.
 export const MATCH_MIN_SCORE = 90;
 // The recording whose title, artist and year are published scores at least this.
@@ -30,7 +30,7 @@ export const PUBLISH_MIN_SCORE = 70;
 // again after each of these waits in turn. After the last one the lookup is
 // reported as unavailable.
 export const RETRY_WAITS_MS = [2000, 4000, 8000];
-const RETRY_STATUSES = new Set([429, 503]);
+export const RETRY_STATUSES = new Set([429, 503]);
 const RESULT_LIMIT = 25;
 const MAX_NAME = 300;
 
@@ -50,7 +50,11 @@ export function recordingSearchUrl(songKey: string): string {
   return url.toString();
 }
 
-type ArtistCredit = { name?: unknown; joinphrase?: unknown };
+type ArtistCredit = { name?: unknown; joinphrase?: unknown; artist?: { id?: unknown } | null };
+
+const MBID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** True for a MusicBrainz id: a lower case UUID, safe to put in a URL path. */
+export const isMbid = (value: unknown): value is string => typeof value === "string" && MBID.test(value);
 
 // "Shawn Mendes & Camila Cabello": each credited name followed by its join phrase.
 function creditName(credit: unknown): string {
@@ -74,6 +78,43 @@ function artistFor(credit: unknown, artistKey: string): string {
   const first = Array.isArray(credit) ? (credit[0] as ArtistCredit | null)?.name : undefined;
   const lead = typeof first === "string" ? first.trim() : "";
   return lead && clean(lead) === artistKey ? lead : "";
+}
+
+/**
+ * MusicBrainz id of the artist a recording is published under, or undefined.
+ * It is the first credited artist's id, and only when that artist alone is
+ * the key's artist: a credit of one artist, or one whose first name equals
+ * the key half. A joint credit published as a whole ("Shawn Mendes & Camila
+ * Cabello") has no single artist entry.
+ */
+function artistIdFor(credit: unknown, artistKey: string): string | undefined {
+  if (!Array.isArray(credit) || credit.length === 0) return undefined;
+  const first = credit[0] as ArtistCredit | null;
+  const id = first?.artist?.id;
+  if (!isMbid(id)) return undefined;
+  const lead = typeof first?.name === "string" ? clean(first.name) : "";
+  return credit.length === 1 || lead === artistKey ? id : undefined;
+}
+
+/**
+ * Release group of a recording's earliest release, or undefined. Releases
+ * are ordered like recordings: by date, an undated one last, equal dates to
+ * the lowest release id.
+ */
+function earliestReleaseGroup(releases: unknown): string | undefined {
+  if (!Array.isArray(releases)) return undefined;
+  let best: { released: string; id: string; group: string } | null = null;
+  for (const r of releases as (Record<string, unknown> | null)[]) {
+    if (r === null || typeof r !== "object") continue;
+    const group = (r["release-group"] as { id?: unknown } | null | undefined)?.id;
+    if (!isMbid(group)) continue;
+    const id = typeof r.id === "string" ? r.id : "";
+    const { released } = firstRelease(r.date);
+    if (best === null || released < best.released || (released === best.released && id < best.id)) {
+      best = { released, id, group };
+    }
+  }
+  return best?.group;
 }
 
 const RELEASE_DATE = /^\d{4}(-\d{2}(-\d{2})?)?$/;
@@ -102,7 +143,8 @@ function firstRelease(date: unknown): { year: number | undefined; released: stri
  * first release among those that score PUBLISH_MIN_SCORE or more: the best
  * scored one is often a later live or undated copy, and its date is not the
  * song's. Equal dates go to the lowest mbid, so the pick does not depend on
- * the order of the response.
+ * the order of the response. releaseGroupId and artistMbid are that
+ * recording's, when the response carries them.
  */
 export function pickRecording(songKey: string, body: unknown): RecordingMatch | null {
   const recordings = (body as { recordings?: unknown } | null)?.recordings;
@@ -124,10 +166,17 @@ export function pickRecording(songKey: string, body: unknown): RecordingMatch | 
     const { year, released } = firstRelease(r["first-release-date"]);
     const earlier =
       best === null || released < best.released || (released === best.released && mbid < best.mbid);
-    if (earlier) best = { title, artist, year, mbid, released };
+    if (earlier) {
+      best = { title, artist, year, mbid, released };
+      const releaseGroupId = earliestReleaseGroup(r.releases);
+      const artistMbid = artistIdFor(r["artist-credit"], artistKey);
+      if (releaseGroupId) best.releaseGroupId = releaseGroupId;
+      if (artistMbid) best.artistMbid = artistMbid;
+    }
   }
   if (!best || !matched) return null;
-  return { title: best.title, artist: best.artist, year: best.year, mbid: best.mbid };
+  const { released: _released, ...match } = best;
+  return match;
 }
 
 export type LookupResult =

@@ -2,8 +2,26 @@
  * Test data in the wire shape of the `content:published` query, one array
  * per section (see loadContent.js). Covers the cases the pages branch on:
  * a song whose artist has no page, an artist song with no page, a year that
- * is unknown, a latest week without an approved note, a week without movers.
+ * is unknown, a latest week without an approved note, a week without movers,
+ * and a song with a cover, with `image: null` and with no `image` field (as
+ * a deployment that predates images returns it).
  */
+export const COVER = {
+  url: "https://example-123.convex.cloud/api/storage/11111111-2222-4333-8444-555555555555",
+  width: 250,
+  height: 250,
+};
+export const PHOTO = {
+  url: "https://example-123.convex.cloud/api/storage/66666666-7777-4888-8999-000000000000",
+  width: 320,
+  height: 213,
+  credit: {
+    author: "Jane Doe",
+    license: "CC BY-SA 4.0",
+    pageUrl: "https://commons.wikimedia.org/wiki/File:Travis_Scott_2019.jpg",
+  },
+};
+
 const songRow = (rank, slug, title, artist, artistSlug, value) => ({ rank, slug, title, artist, artistSlug, value });
 const artistRow = (rank, slug, name, value) => ({ rank, slug, name, value });
 
@@ -24,6 +42,7 @@ export const SONGS = [
       { prompt: "A song that starts the mosh pit", picks: 53 },
       { prompt: "A song for the gym", picks: 1 },
     ],
+    image: COVER,
   },
   {
     slug: "travis-scott-sicko-mode",
@@ -38,6 +57,7 @@ export const SONGS = [
     ratingHist: [10, 14, 36, 40, 40],
     rank: 2,
     topPrompts: [{ prompt: "A song everyone knows the words to", picks: 9 }],
+    image: null,
   },
   {
     // The artist is below the artist bar: no /artist/sheck-wes page.
@@ -70,6 +90,7 @@ export const ARTISTS = [
       { slug: "travis-scott-goosebumps", title: "goosebumps", picks: 31, ratingCount: 44, average: null },
     ],
     topPrompts: [{ prompt: "A song that starts the mosh pit", picks: 61 }],
+    image: PHOTO,
   },
 ];
 

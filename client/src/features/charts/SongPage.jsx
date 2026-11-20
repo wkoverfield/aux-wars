@@ -1,6 +1,6 @@
 import AdSlot from '../../components/AdSlot';
 import { formatAverage, formatCount, plural } from '../../data/contentFormat';
-import ContentShell, { PageLink, PromptList, SongRow, Stat } from './ContentShell';
+import ContentShell, { PageHeader, PageLink, PromptList, SongRow, Stat } from './ContentShell';
 
 const RATINGS = [5, 4, 3, 2, 1];
 
@@ -45,17 +45,20 @@ function RatingSpread({ hist, ratingCount }) {
 /**
  * One published song: its pick and rating numbers from Aux Wars games.
  * Renders only from `data`, the model built by data/contentPages.js, so the
- * static HTML and the mounted app match. Text and numbers only.
+ * static HTML and the mounted app match. Text and numbers, plus the song's
+ * cover from the Cover Art Archive when it has one.
  */
 export default function SongPage({ data }) {
   const average = formatAverage(data.average);
   return (
     <ContentShell trail={[{ label: 'Charts', href: '/charts' }]}>
-      <h1 className="text-3xl font-bold mt-6">{data.title}</h1>
-      <p className="mt-2 text-gray-300">
-        <PageLink href={data.artist.href}>{data.artist.name}</PageLink>
-        {data.year != null && <span className="text-gray-400">{`, ${data.year}`}</span>}
-      </p>
+      <PageHeader image={data.image}>
+        <h1 className={data.image ? 'text-3xl font-bold' : 'text-3xl font-bold mt-6'}>{data.title}</h1>
+        <p className="mt-2 text-gray-300">
+          <PageLink href={data.artist.href}>{data.artist.name}</PageLink>
+          {data.year != null && <span className="text-gray-400">{`, ${data.year}`}</span>}
+        </p>
+      </PageHeader>
 
       <dl className="mt-8 grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-4">
         <Stat label="Times picked" value={formatCount(data.picks)} />

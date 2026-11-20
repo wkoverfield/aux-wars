@@ -61,12 +61,19 @@ describe("ad placements", () => {
     }
   });
 
-  it("the content pages link to no player and embed no media", () => {
+  it("the content pages link to no player and embed no media but the one stored image", () => {
     const contentPages = Object.keys(sources).filter((path) => /features\/charts\//.test(path));
     expect(contentPages.length).toBeGreaterThan(0);
     for (const path of contentPages) {
-      expect(sources[path], fileName(path)).not.toMatch(/<img\b|<iframe\b|<audio\b|<video\b|youtube|youtu\.be|soundcloud|albumCover/i);
+      expect(sources[path], fileName(path)).not.toMatch(/<iframe\b|<audio\b|<video\b|youtube|youtu\.be|soundcloud|albumCover/i);
     }
+    // The only <img> is PageHeader's: a cover from the Cover Art Archive or a
+    // Wikimedia Commons photo, served from Convex file storage. Song and
+    // artist pages render it; chart pages do not.
+    const withImg = contentPages.filter((path) => /<img\b/.test(sources[path])).map(fileName);
+    expect(withImg).toEqual(["features/charts/ContentShell.jsx"]);
+    expect(sources[contentPages.find((path) => path.endsWith("ContentShell.jsx"))].match(/<img\b/g)).toHaveLength(1);
+    expect(sources[contentPages.find((path) => path.endsWith("ChartsPage.jsx"))]).not.toMatch(/PageHeader/);
   });
 
   it("only the ad-safe screens import AdSlot, so no wrapper can carry it elsewhere", () => {
