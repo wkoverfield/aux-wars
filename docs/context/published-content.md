@@ -57,7 +57,8 @@ One search per song key returns up to 25 recordings (`pickRecording` in
 | Artist photo | MusicBrainz artist (`inc=url-rels`), its `wikidata` relation, the item's P18 claim, then the Commons `imageinfo` thumb | 320 px wide |
 
 - Hosts requested, all over https: `musicbrainz.org`, `coverartarchive.org`,
-  `www.wikidata.org`, `commons.wikimedia.org`, `upload.wikimedia.org`, and
+  `www.wikidata.org`, `commons.wikimedia.org`, `upload.wikimedia.org`,
+  `thumb.wikimedia.org`, and
   `archive.org` with its subdomains. A redirect is followed only to the host
   that was asked, or from the Cover Art Archive to an `archive.org` host.
 - Every request sends the MusicBrainz `User-Agent`, waits on the run's one

@@ -5,7 +5,8 @@
  *                 It answers with a redirect to an archive.org host.
  *   Artist photo  musicbrainz.org (artist, url relations) -> www.wikidata.org
  *                 (claim P18, a file name) -> commons.wikimedia.org (thumb
- *                 URL, author, license) -> upload.wikimedia.org (the file).
+ *                 URL, author, license) -> upload.wikimedia.org or
+ *                 thumb.wikimedia.org (the file).
  *
  * Only the hosts in isAllowedHost are ever requested, over https, with the
  * MusicBrainz User-Agent. Every request, redirect hops and retries included,
@@ -26,7 +27,10 @@ export const COVER_ART_HOST = "coverartarchive.org";
 export const WIKIDATA_HOST = "www.wikidata.org";
 export const COMMONS_HOST = "commons.wikimedia.org";
 export const UPLOAD_HOST = "upload.wikimedia.org";
-const FIXED_HOSTS = new Set([MUSICBRAINZ_HOST, COVER_ART_HOST, WIKIDATA_HOST, COMMONS_HOST, UPLOAD_HOST]);
+// The Commons API hands out thumbnail URLs on this host.
+export const THUMB_HOST = "thumb.wikimedia.org";
+const WIKIMEDIA_FILE_HOSTS = new Set([UPLOAD_HOST, THUMB_HOST]);
+const FIXED_HOSTS = new Set([MUSICBRAINZ_HOST, COVER_ART_HOST, WIKIDATA_HOST, COMMONS_HOST, UPLOAD_HOST, THUMB_HOST]);
 
 export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 // A Wikidata entity document of a well known artist runs to a few megabytes.
@@ -378,7 +382,7 @@ export async function fetchArtistPhoto(artistMbid: string, rc: RequestContext): 
   if (!acceptedLicense(license)) return { kind: "rejected", reason: `license "${license}" is not accepted` };
   const pageUrl = commonsPageUrl(info.descriptionurl);
   const thumb = typeof info.thumburl === "string" ? allowedUrl(info.thumburl) : null;
-  if (!pageUrl || !thumb || thumb.hostname !== UPLOAD_HOST) {
+  if (!pageUrl || !thumb || !WIKIMEDIA_FILE_HOSTS.has(thumb.hostname)) {
     return { kind: "rejected", reason: "file is not on Wikimedia Commons" };
   }
 
