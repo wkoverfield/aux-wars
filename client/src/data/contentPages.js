@@ -242,9 +242,9 @@ export function buildContentPages({ songs, artists, charts }) {
       path: "/charts",
       file: "charts.html",
       index: true,
-      title: "Aux Wars Charts: The Most Picked Songs in Aux Battles This Week",
+      title: "Aux Wars Charts: The Most Picked Songs in Aux Battles",
       description:
-        `The songs and artists picked and rated most in Aux Wars games, ${formatDateRange(latest.weekStart, latest.weekEnd)}.` +
+        `The songs and artists picked and rated most in Aux Wars games, updated ${formatDateRange(latest.weekStart, latest.weekEnd)}.` +
         topSongLine(latest),
       data: chartModel(
         latest,
